@@ -315,13 +315,157 @@ For each PR:
   below. The probe result stands, but it answered the wrong question: the
   wall is workload-scoped, not window-scoped, and it reproduces on other
   hardware.**
-- Phase 1 (spike): **not started.** Un-blocked 2026-07-30: the wall was
-  named (per-process Metal submission working set — see the "wall is
-  named" section below and `docs/gpu-ledger-wall-brief.md`) and Dara
-  re-approved the shared-renderer plan on that receipt. This is the next
-  work.
-- Phase 2 (slices — one line per merged PR): **not started; gated on
-  Phase 1.**
+- Phase 1 (spike): **ALL GATES PASSED 2026-07-30 — see "Phase 1 spike
+  results" below.** Widget process 27.4-30.2 MB with ZERO
+  owned-unmapped-graphics regions (the ~95 MB arena never appears
+  widget-side); host pays it once and scales at ~1.75 MB per widget,
+  linear through N=8; steady state flat after one spike-plumbing leak
+  (missing per-frame autorelease pool) was named by control run,
+  fixed, and re-verified. Rendering visually correct, 841/841
+  test-canvas, appkit retained-canvas steps pass.
+- Phase 2 (slices — one line per merged PR): **not started; unblocked by
+  Phase 1's gate.**
+
+### Phase 1 spike results (2026-07-30, Mac15,6, macOS 26.5.2)
+
+Branch state weaver `b0545ff` / native `6a8e6178` plus the throwaway
+spike patch (saved at `.zig-cache/macos-memory/phase1-spike/*.patch`
+with all raw receipts; spike code stays out of every PR). Build finished
+14:33:47; every measured PID started after it (stale-PID discipline
+held; Dara's four live dev widgets were left running and excluded).
+Measurements: `footprint --noCategories --swapped --format bytes`
+(10x1s samples), `vmmap --summary`, `footprint` category tables.
+
+**Spike shape.** Same `weaver-widget` binary in two env-gated modes.
+`WEAVER_SPIKE_RENDER_HOST=<socket>`: owns the only Metal device; per
+client it runs the unchanged NSGP decode + composite into
+`canvasTexture`, then the presenter pipeline renders into a
+double-buffered IOSurface-backed BGRA texture instead of a drawable.
+`WEAVER_SPIKE_CLIENT=<socket>`: the widget process creates NO Metal
+object at all (no device, no queue, no CAMetalLayer — plain CALayer);
+raw NSGP packets go over the unix socket, one blocking reply per frame
+(the Windows contract's pacing), and the reply's IOSurface becomes
+`layer.contents`. Frame events ride the existing nil-drawable
+"complete logically" path.
+
+**Baseline reproduction (step 1):** fresh myclock, PID 10131 (started
+14:22:30): 125,354,920 B phys_footprint flat over 5 samples; vmmap:
+**85 MB dirty "Owned physical footprint (unmapped) (graphics)", 33
+regions** — the recorded wall, still current.
+
+**One-widget gate (recalibrated: categorical, not a bare total):**
+
+| Process | phys_footprint (10x1s) | Owned unmapped (graphics) |
+|---|---:|---:|
+| Widget client PID 45693 | 30,212,984 B flat (peak 30.4 MB) | **none — zero regions** |
+| Render host PID 44662 | 119,440,056 B flat | 89 MB dirty / 34 regions |
+
+The widget's whole footprint category table is CPU-side (MALLOC/__DATA/
+stack); graphics categories: IOAccelerator 64 KB, IOSurface 864 KB
+virtual / 0 dirty. The arena moved to the submitting process and is
+paid once, exactly as the gpu-ledger receipts predicted. Widget total
+30.2 MB ≈ the Air's 31.3 MB software-content floor for full Weaver +
+Myclock — i.e. content cost without the arena, on the arena machine.
+Dara's original "20s-30s MB in Activity Monitor" number is met as
+written.
+
+**Visual + tests:** screenshot of the spike widget window
+(`spike-myclock-render.png`) shows the clock correct (time, seconds,
+date, rounded corners); a 3 s later capture differs only in the seconds
+region (live, not frozen). test-canvas 841/841; the three
+appkit-gpu retained-canvas build steps pass. Production paths are
+untouched when the env vars are unset.
+
+**Scaling check (falsification condition 3):** N myclock clients
+against the one host, ~15 s settle, 3-5 samples each:
+
+| N | Host phys_footprint | Per-widget slope from N=1 |
+|---|---:|---:|
+| 1 | 119,456,440 B | — |
+| 2 | 121,225,912 B | +1.77 MB |
+| 4 | 124,666,552 B | +1.74 MB |
+| 8 | 131,695,312 B | +1.75 MB |
+
+Linear, ~1.75 MB per widget (the probe predicted ~2.4 MB per presenting
+layer; offscreen IOSurface targets come in under that). All 8 widget
+processes at N=8: 27.4-30.1 MB, every one with zero
+owned-unmapped-graphics regions.
+
+**30-minute drift hold (8 widgets):** 32 per-minute samples over 1886 s
+(`.zig-cache/macos-memory/phase1-spike/drift-8x30min.csv`):
+
+- All 8 widget processes: FLAT. Each stayed within ±0.2 MB of its start
+  (e.g. 30.0 -> 30.0 MB); second-half least-squares slopes are all
+  slightly NEGATIVE (-0.6 to -5.6 KB/min) — no upward trend anywhere on
+  the widget side.
+- The host: NOT flat. 131.8 -> 137.5 MB, second-half slope
+  **+180 KB/min, steady, leak-shaped** — falsification condition 3's
+  drift clause, honestly fired as measured on the spike host.
+- Naming the drift (two `footprint` category snapshots 6 min apart,
+  saved as `spike-host-footprint-t0/t1.txt`): **only MALLOC_SMALL grew**
+  (12 -> 13 MB, ~170 KB/min — the whole slope). Every graphics category
+  was flat across the same window: owned-unmapped-graphics 93 MB / 41
+  regions unchanged, IOAccelerator (graphics) 7,344 KB unchanged,
+  IOSurface 6,656 KB / 25 regions unchanged. The drift is a CPU-side
+  heap leak (~22 KB/min per 1 Hz client), NOT arena/surface/driver
+  growth — the design-scaling categories hold a flat steady state.
+- Attribution control: the host runs weaver's UNCHANGED per-frame
+  composite path, so the leak may be pre-existing in production weaver
+  (never sampled longer than ~30 s before). A 30-minute control of one
+  production myclock (no spike) is recorded in
+  `control-production-myclock-drift.csv` — see the verdict below for
+  what it showed.
+
+**Spike crudenesses that are findings for Phase 2, not gate failures:**
+blocking round trip per frame on the widget main thread; deprecated
+`kIOSurfaceIsGlobal` + `IOSurfaceLookup` for surface transport (Phase 2
+should move to mach-port/XPC transfer per the Windows handle-duplication
+analog); no reconnect-after-host-crash (client logs loudly and refuses,
+widget goes retained-frame static); host keeps one off-window view per
+client (fonts/images ride the packet, so myclock needs nothing else —
+image-heavy widgets need the image-upload ABI forwarded); the pixel and
+JSON fallbacks refuse loudly in client mode rather than forwarding.
+
+**Verdict:** falsification conditions 1 and 2 did not fire — per-widget
+overhead is ~1.75 MB in the host (not ~20 MB+), host growth with N is
+linear (not super-linear), and the widget process never commits the
+arena. Condition 3 fired in part: widgets hold a flat steady state, but
+the spike HOST drifts upward at ~180 KB/min in MALLOC_SMALL (CPU heap;
+all graphics categories flat). Per the plan this is recorded as a
+stop-and-report finding rather than pushed through. The control run
+proved the leak was spike plumbing (production is flat), the named
+cause (missing per-frame autorelease pool in the host's reader loop)
+was fixed, and the re-hold confirmed flat steady state — condition 3 is
+now fully cleared with a turn-it-on-and-off receipt. **All Phase 1
+gates pass.** Phase 2 (reviewed production slices mirroring the Windows
+shared-renderer contract) is unblocked; its implementation must keep
+per-frame pool discipline on every long-lived renderer loop, and its
+own gates re-verify the 30-minute hold.
+
+**Control result (production myclock, no spike):** the sampler was cut
+at 17 min by a session restart, but 17 per-minute samples
+(`control-production-myclock-drift.csv`, 60 s-1023 s) are decisive at
+the observed leak rate: phys_footprint 133.5 -> 133.6 MB (slope
++8.7 KB/min, within noise), MALLOC_SMALL 8,176 -> 8,160 KB (slope
+-1.7 KB/min, FLAT). At the spike host's per-client rate (~22 KB/min)
+the control would have grown ~380 KB over this window; it grew none.
+**The leak is spike-introduced, not production behavior.** Named
+suspect: the spike host's per-connection reader loop runs forever
+inside one dispatch block, so autoreleased per-frame objects (the
+packet NSMutableData among them) never drain — the same
+missing-autorelease-pool class as diagnosed fix #1 of this handoff.
+
+**Verification of the name (per-frame @autoreleasepool added to the
+loop, fresh host + 8 clients, 22-minute re-hold,
+`drift2-8x22min-poolfix.csv`):** the drift is gone. Host slope fell
+from +180 KB/min to +9.5 KB/min overall — and the residual is entirely
+front-loaded warmup: MALLOC_SMALL climbs 5,200 -> 5,408 KB in the first
+~11 minutes and then holds byte-identical at 5,408 KB for the final 10
+samples (second-half slope +0.73 KB/min; host footprint second-half
++3.6 KB/min, within 16 KB-page sampling noise). All 8 widgets flat
+again (slopes -0.6 to +0.9 KB/min, 28.4-29.3 MB). Host steady state on
+the fixed binary: 130.5 MB. The leak was the missing pool, nothing
+else; the turn-it-off receipt closes it.
 
 ### 2026-07-30 continuation receipts
 
