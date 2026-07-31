@@ -323,8 +323,20 @@ For each PR:
   (missing per-frame autorelease pool) was named by control run,
   fixed, and re-verified. Rendering visually correct, 841/841
   test-canvas, appkit retained-canvas steps pass.
-- Phase 2 (slices — one line per merged PR): **not started; unblocked by
-  Phase 1's gate.**
+- Phase 2 (slices — one line per merged PR): **in progress (2026-07-30).**
+  - PR 0 (base): native#19 "Cut per-widget graphics memory on macOS" —
+    the prep branch's verified memory work rebased onto weaver-main.
+    Greptile 5/5, zero findings, checks green; awaiting merge.
+  - Slice 1: native#20 "Add IOSurface presentation path for macOS GPU
+    surfaces" (`NATIVE_SDK_GPU_IOSURFACE_PRESENT`, stacked on #19).
+    Ring-of-3 IOSurface presenter, refuse-don't-block, completion-ordered
+    contents flip, exact renderFrame parity. No memory win claimed
+    (133.06 vs 133.01 MB myclock; renderer still in-process — the win
+    lands with slices 2-3). Greptile 5/5, zero findings; awaiting merge.
+  - Slice 2 (render host + socket protocol): next; mach-port/XPC surface
+    transfer, versioned handshake per the Windows renderer_protocol.h,
+    host owned by weaverd, per-frame pool discipline (the Phase 1 leak
+    lesson).
 
 ### Phase 1 spike results (2026-07-30, Mac15,6, macOS 26.5.2)
 
