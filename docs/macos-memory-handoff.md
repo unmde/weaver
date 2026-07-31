@@ -381,11 +381,39 @@ For each PR:
     legs, session smoke). Review findings (unbounded teardown, usage
     string) fixed. Awaiting merge.
 
+  - Roster verification (post-slice-4, 2026-07-31): widening the
+    acceptance net past clock widgets found TWO cutover blockers, both
+    the same class — registered resources ride pre-packet side channels
+    that never crossed the process boundary. native#26 "Forward
+    registered images across the renderer channel" fixes both:
+    - **Images**: device-less Noro rendered everything except its album
+      art (region blank; captures archived). Packets carry only id +
+      fingerprint references; pixels ride `uploadGpuSurfaceImage`. Now a
+      generalized resource-upload message (ool payload, 1 MiB image
+      tripwire per canvas_limits) feeds per-client headless stores; one
+      storage implementation shared with the in-process path.
+    - **Fonts** (caught live by Dara, side-by-side): text rasterized in
+      the host with the system face instead of the registered font
+      (Cozette) — wider glyphs, truncation. Faces now ride the same
+      channel into a PER-CLIENT font table swapped in around each
+      present (process-table font ids would collide across widgets);
+      registration is record-and-best-effort since fonts register before
+      the host may be reachable.
+    - Both replay after a host crash (fonts first, then images); the
+      crash drill shows the art region and title band byte-identical
+      across a host kill -9 + weaverd respawn. Review hardening across
+      five Greptile rounds: shape checks + destroy-whole disposal for
+      resource messages, half-replayed sessions torn down, host-refused
+      resources dropped from the replay set (poison prevention), unknown
+      resource kinds rejected. Final 5/5. **weaver#47 must not merge
+      before native#26 lands and its pin bump goes green.** Noro
+      device-less: 43.1 MB flat, zero arena regions (in-process
+      baseline ~155-166 MB).
+
     Named follow-ups (recorded, not smuggled): automation-seam
-    conversion to the shared renderer; image-upload ABI forwarding for
-    store-backed images (packet-borne images already work); event-
-    driven presenting (drop the 60 Hz pump — approved separately,
-    battery/CPU work, not memory). **Transport receipt
+    conversion to the shared renderer; event-driven presenting (drop
+    the 60 Hz pump — approved separately, battery/CPU work, not
+    memory). **Transport receipt
     (2026-07-30, Mac15,6, macOS 26.5.2):** a non-launchd process CAN
     claim a dynamic per-user bootstrap name via `bootstrap_check_in`
     (probe: `bootstrap_check_in(com.weaver.spike.render-host) =>
