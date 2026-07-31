@@ -344,8 +344,25 @@ For each PR:
     shape checks + destroy-whole disposal, client retain-cycle teardown,
     honest refusal for surfaceless static frames, one-outstanding-frame
     enforcement, orphaned reply-right disposal, oversized-message
-    drain); final score 5/5 "safe to merge". Awaiting merge; the
-    device-less widget client is slice 3. **Transport receipt
+    drain); final score 5/5 "safe to merge". Merged.
+  - Slice 3: native#23 "Add the device-less shared-renderer widget
+    client for macOS" (`NATIVE_SDK_GPU_SHARED_RENDERER=1`). Lazy
+    connect + reconnect-after-crash per the Windows contract; 5 s
+    send AND reply tripwires (a wedged host can never freeze a widget
+    main thread); surface cache with per-frame right disposal; loud
+    device-less refusals feeding the existing 1/5/30 s retry
+    machinery. Live receipts: production myclock at **29.5 MB flat,
+    ZERO owned-unmapped-graphics regions** (baseline 125.3 MB / 85 MB
+    arena) against the slice-2 host; rendering live and correct by
+    capture; full crash drill — host killed (retained frame stayed on
+    glass, loud logs), host restarted (reconnected, clock resumed).
+    Review: one real finding (unbounded mach send) fixed; final 5/5
+    "safe to merge". Awaiting merge.
+  - Slice 4 (cutover + per-client frame budgets): next. weaverd owns
+    the host lifecycle, shared renderer becomes the macOS default,
+    budgets name budget/limit/ask on trip, and the Phase 1 gates
+    (N-scaling + 30-minute drift) re-run as acceptance on production
+    code. **Transport receipt
     (2026-07-30, Mac15,6, macOS 26.5.2):** a non-launchd process CAN
     claim a dynamic per-user bootstrap name via `bootstrap_check_in`
     (probe: `bootstrap_check_in(com.weaver.spike.render-host) =>
