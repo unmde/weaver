@@ -333,7 +333,19 @@ For each PR:
     contents flip, exact renderFrame parity. No memory win claimed
     (133.06 vs 133.01 MB myclock; renderer still in-process — the win
     lands with slices 2-3). Greptile 5/5, zero findings; awaiting merge.
-  - Slice 2 (render host + protocol): in progress. **Transport receipt
+  - Slice 2: native#22 "Add the macOS render host and its mach renderer
+    protocol" — headless renderer mode reusing the one composite path,
+    renderer_protocol_mach.h (versioned hello, ool packets, port-
+    descriptor surfaces, no-senders teardown). Live receipts: driver
+    round trip verified byte-exact clear color; idle host 16.8-17.2 MB
+    (arena reclaims on idle — a host with no animating widgets is
+    cheap); 5 connect/render/disconnect cycles release all per-client
+    state. Review: three Greptile rounds fixed real findings (message
+    shape checks + destroy-whole disposal, client retain-cycle teardown,
+    honest refusal for surfaceless static frames, one-outstanding-frame
+    enforcement, orphaned reply-right disposal, oversized-message
+    drain); final score 5/5 "safe to merge". Awaiting merge; the
+    device-less widget client is slice 3. **Transport receipt
     (2026-07-30, Mac15,6, macOS 26.5.2):** a non-launchd process CAN
     claim a dynamic per-user bootstrap name via `bootstrap_check_in`
     (probe: `bootstrap_check_in(com.weaver.spike.render-host) =>
