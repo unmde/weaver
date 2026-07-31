@@ -333,10 +333,21 @@ For each PR:
     contents flip, exact renderFrame parity. No memory win claimed
     (133.06 vs 133.01 MB myclock; renderer still in-process — the win
     lands with slices 2-3). Greptile 5/5, zero findings; awaiting merge.
-  - Slice 2 (render host + socket protocol): next; mach-port/XPC surface
-    transfer, versioned handshake per the Windows renderer_protocol.h,
-    host owned by weaverd, per-frame pool discipline (the Phase 1 leak
-    lesson).
+  - Slice 2 (render host + protocol): in progress. **Transport receipt
+    (2026-07-30, Mac15,6, macOS 26.5.2):** a non-launchd process CAN
+    claim a dynamic per-user bootstrap name via `bootstrap_check_in`
+    (probe: `bootstrap_check_in(com.weaver.spike.render-host) =>
+    Success`), a sibling process finds it via `bootstrap_look_up`, and
+    an IOSurface send right rides a mach port descriptor —
+    `IOSurfaceLookupFromMachPort` resolved the surface with the pixel
+    pattern intact (id match, 64x64 verified). Probe source:
+    `.zig-cache/macos-memory/phase2-transport-spike/` (throwaway).
+    Consequence: the renderer channel is mach end-to-end — no unix
+    socket, no deprecated `kIOSurfaceIsGlobal`, ool descriptors for
+    packet payloads, port descriptors for surface delivery, dead-name
+    notifications for crash detection. Versioned hello per the Windows
+    renderer_protocol.h contract; per-frame pool discipline (the Phase 1
+    leak lesson).
 
 ### Phase 1 spike results (2026-07-30, Mac15,6, macOS 26.5.2)
 
