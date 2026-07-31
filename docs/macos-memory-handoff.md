@@ -405,10 +405,14 @@ For each PR:
       five Greptile rounds: shape checks + destroy-whole disposal for
       resource messages, half-replayed sessions torn down, host-refused
       resources dropped from the replay set (poison prevention), unknown
-      resource kinds rejected. Final 5/5. **weaver#47 must not merge
-      before native#26 lands and its pin bump goes green.** Noro
+      resource kinds rejected. Final 5/5; merged. Noro
       device-less: 43.1 MB flat, zero arena regions (in-process
       baseline ~155-166 MB).
+      NOTE: weaver#47 merged minutes before its pin bump landed, so
+      master briefly carried the cutover without resource forwarding;
+      weaver#48 (pin -> native 7368f7f5 + audit ratchet, full CI green,
+      Greptile 5/5) completes it. The cutover is honest only with #48
+      merged.
 
     Named follow-ups (recorded, not smuggled): automation-seam
     conversion to the shared renderer; event-driven presenting (drop
