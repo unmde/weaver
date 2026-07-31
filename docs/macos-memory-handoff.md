@@ -358,11 +358,34 @@ For each PR:
     glass, loud logs), host restarted (reconnected, clock resumed).
     Review: one real finding (unbounded mach send) fixed; final 5/5
     "safe to merge". Awaiting merge.
-  - Slice 4 (cutover + per-client frame budgets): next. weaverd owns
-    the host lifecycle, shared renderer becomes the macOS default,
-    budgets name budget/limit/ask on trip, and the Phase 1 gates
-    (N-scaling + 30-minute drift) re-run as acceptance on production
-    code. **Transport receipt
+  - Slice 4 (two PRs, one per repo). Native half: native#24 "Add a
+    per-client frame budget tripwire to the render host" — every frame
+    timed monotonically (CLOCK_UPTIME_RAW) from arrival; over-budget
+    frames log budget/measured/pid/trips. The 250 ms tripwire has a
+    measured receipt: myclock median 1.4 ms/frame, worst 21.9 ms
+    (warmup first present), n=20 — >11x the worst observed. Greptile
+    5/5. Also native#25 (one-line contains-check fix caught by weaver
+    CI; merged). Weaver half: weaver#47 "Cut macOS widgets over to the
+    shared renderer" — `weaver-widget --render-host`, weaverd spawns
+    and supervises the host (crash -> respawn in 1 s, TERM/KILL reap
+    before marker removal), cutover env on all weaverd-spawned widgets
+    (automation seam keeps in-process rendering), native pin + release
+    audit ratchet bumped. **Acceptance receipts (isolated-HOME weaverd,
+    8 registered clock widgets):** every widget 32.2-35.8 MB with ZERO
+    owned-unmapped-graphics regions; 31-minute hold flat within
+    ±0.3 MB per widget, host non-increasing (168.5 -> 158.9 MB, slope
+    -165 KB/min; CSV
+    `.zig-cache/macos-memory/phase1-spike/slice4-acceptance-drift-8x30min.csv`);
+    host kill -9 -> weaverd respawn in 1 s -> widgets reconnected and
+    resumed live rendering. Full weaver CI green (gate, both headless
+    legs, session smoke). Review findings (unbounded teardown, usage
+    string) fixed. Awaiting merge.
+
+    Named follow-ups (recorded, not smuggled): automation-seam
+    conversion to the shared renderer; image-upload ABI forwarding for
+    store-backed images (packet-borne images already work); event-
+    driven presenting (drop the 60 Hz pump — approved separately,
+    battery/CPU work, not memory). **Transport receipt
     (2026-07-30, Mac15,6, macOS 26.5.2):** a non-launchd process CAN
     claim a dynamic per-user bootstrap name via `bootstrap_check_in`
     (probe: `bootstrap_check_in(com.weaver.spike.render-host) =>
