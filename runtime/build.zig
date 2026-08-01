@@ -9,6 +9,12 @@ pub fn build(b: *std.Build) void {
         .name = "weaver-widget",
         .widget_profile = true,
     });
+    // QuickJS measured 70 trivial recursive calls with its 4 MiB guard,
+    // clearing the 32-level widget-tree contract by >2x. Reserve a 16 MiB
+    // process stack so native dispatch retains 3x the JS guard; OS stack pages
+    // commit only as used. Pinned to js_engine.max_stack_bytes.
+    artifacts.exe.stack_size = 16 * 1024 * 1024;
+    artifacts.tests.stack_size = 16 * 1024 * 1024;
     const weaver_options = b.addOptions();
     weaver_options.addOption(bool, "automation_seam", automation_seam);
     artifacts.exe.root_module.addOptions("weaver_build_options", weaver_options);

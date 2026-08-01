@@ -1,6 +1,12 @@
 const std = @import("std");
 
-pub const quota_bytes: usize = 64 * 1024;
+// Storage receipt (2026-07-29): no shipped example persists user data yet, so
+// the previous 64 KiB had no real ruler. Serializing a realistic good notes
+// fixture (100 records with 900-byte bodies and metadata) measured 103,291
+// bytes; 256 KiB leaves 2.5x headroom.
+// Reads/serialization allocate exact document length, so unused allowance
+// costs no memory. Pinned by sdk/src/reconciler.ts STORAGE_QUOTA_BYTES.
+pub const quota_bytes: usize = 256 * 1024;
 
 pub const Error = error{
     StorageQuotaExceeded,
@@ -52,7 +58,7 @@ pub fn validatePayload(bytes: []const u8) Error!void {
     if (bytes.len > quota_bytes) return error.StorageQuotaExceeded;
 }
 
-test "storage quota is an exact 64 KiB boundary" {
+test "storage quota is an exact 256 KiB boundary" {
     try validatePayload(&([_]u8{0} ** quota_bytes));
     try std.testing.expectError(error.StorageQuotaExceeded, validatePayload(&([_]u8{0} ** (quota_bytes + 1))));
     try std.testing.expectEqual(nameHash("Pomodoro"), nameHash("Pomodoro"));

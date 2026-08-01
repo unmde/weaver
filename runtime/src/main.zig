@@ -71,8 +71,21 @@ const ArmedTimer = struct { id: u64 = 0, interval_ms: u64 = 0 };
 fn bridgeTimerCapacity() usize {
     return @import("bridge.zig").max_timers;
 }
+// Image receipt (2026-07-30): executing every shipped example measured six
+// retained images at worst (noro-shell). Sixteen leaves 2.7x slot headroom and
+// pins the Native SDK's runtime-wide registry. Pixel buffers are undefined
+// fixed address space and pages touch only as images register.
 const max_images: usize = 16;
+// Alias the Native SDK's receipted 512x512 RGBA registry bound so decoding,
+// upload, and CLI validation cannot acquire independent pixel budgets.
 const max_image_rgba_bytes: usize = native_sdk.max_registered_canvas_image_pixel_bytes;
+// The historical generated grille measured 1,025,239 encoded bytes after it
+// was squeezed under the old 1 MiB cap. 2 MiB leaves 1,071,913 bytes headroom;
+// reads allocate actual file length, so unused allowance costs no memory.
+// Pinned by cli/src/index.ts maxImageStreamBytes.
+const max_image_stream_bytes: usize = 2 * 1024 * 1024;
+// One initial decode plus two retries absorbs an atomic-save race without an
+// unbounded retry loop. Attempts retain no additional payload memory.
 const max_image_load_attempts: u8 = 3;
 const fetch_poll_key: u64 = 0x7766_6574_6368;
 const provider_poll_key: u64 = 0x7770_726f_7669;
@@ -361,13 +374,14 @@ fn reloadIfChanged(model: *Model, effects: *Effects) !void {
     const mtime = stat.mtime.nanoseconds;
     if (mtime == model.dev_seen_mtime) return;
 
-    const source = try std.Io.Dir.cwd().readFileAlloc(io, model.bundle_path, std.heap.page_allocator, .limited(1024 * 1024));
+    const source = try std.Io.Dir.cwd().readFileAlloc(io, model.bundle_path, std.heap.page_allocator, .limited(manifest_mod.max_bundle_bytes));
     defer std.heap.page_allocator.free(source);
     const old_engine = model.engine orelse return error.MissingEngine;
     const snapshot = old_engine.captureHotSwap(std.heap.page_allocator);
     defer if (snapshot) |bytes| std.heap.page_allocator.free(bytes);
 
-    // The authored-canvas tier makes Tree roughly 1.5 MiB. Keeping the
+    // @sizeOf(Tree) measured 4,334,144 bytes after the receipted node-cap
+    // raise. Keeping the
     // candidate on the heap prevents ReleaseFast from folding it into the
     // update callback's stack frame, where it would consume most of
     // QuickJS's recorded C-stack allowance.
@@ -542,7 +556,7 @@ fn syncNativeState(model: *Model, layout: native_sdk.canvas.WidgetLayoutTree) vo
     var canvas_resizes: [tree_mod.max_canvases]CanvasResize = undefined;
     var canvas_resize_count: usize = 0;
     for (&model.tree.nodes, 0..) |*node, index| {
-        if (!node.alive or (node.kind != .slider and node.kind != .canvas)) continue;
+        if (!model.tree.isNodeSlotOccupied(index) or (node.kind != .slider and node.kind != .canvas)) continue;
         const id: tree_mod.NodeId = @intCast(index + 1);
         const widget_id = native_sdk.canvas.globalWidgetId(if (node.kind == .slider) .slider else .stack, .{ .int = id });
         for (layout.nodes) |layout_node| {
@@ -977,7 +991,7 @@ fn nativeCornerRadius(retained: f32) f32 {
 
 fn loadLocalImages(io: std.Io, allocator: std.mem.Allocator, directory: []const u8, model: *Model) !void {
     for (&model.tree.nodes, 0..) |*node, index| {
-        if (!node.alive or node.kind != .image) continue;
+        if (!model.tree.isNodeSlotOccupied(index) or node.kind != .image) continue;
         const source = node.sourceSlice();
         if (!image_paths.isLocalAssetPath(source)) {
             std.log.err("RemoteImageUnsupported: <image> remote sources arrive in M3; use a local widget path", .{});
@@ -986,7 +1000,7 @@ fn loadLocalImages(io: std.Io, allocator: std.mem.Allocator, directory: []const 
         if (model.image_count == max_images) return error.TooManyImages;
         const relative = if (std.mem.startsWith(u8, source, "./") or std.mem.startsWith(u8, source, ".\\")) source[2..] else source;
         const path = try std.fs.path.join(allocator, &.{ directory, relative });
-        const bytes = try std.Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(1024 * 1024));
+        const bytes = try std.Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(max_image_stream_bytes));
         model.images[model.image_count] = .{ .id = @intCast(index + 1), .bytes = bytes };
         model.image_count += 1;
     }
@@ -1100,7 +1114,7 @@ fn synchronizeImageNode(model: *Model, effects: *Effects, id: tree_mod.NodeId, n
         model.io orelse return error.MissingIo,
         resolved.path,
         std.heap.page_allocator,
-        .limited(1024 * 1024),
+        .limited(max_image_stream_bytes),
     ) catch |err| {
         recordImageLoadFailure(state, resolved.path);
         state.failure = err;
@@ -1166,7 +1180,7 @@ fn synchronizeImages(model: *Model, effects: *Effects) !void {
     }
 
     for (&model.tree.nodes, 0..) |*node, index| {
-        if (!node.alive or node.kind != .image) continue;
+        if (!model.tree.isNodeSlotOccupied(index) or node.kind != .image) continue;
         try synchronizeImageNode(model, effects, @intCast(index + 1), node);
     }
     model.image_tree_generation = synchronized_generation;
@@ -1175,9 +1189,26 @@ fn synchronizeImages(model: *Model, effects: *Effects) !void {
 pub fn main(init: std.process.Init) !void {
     const allocator = init.arena.allocator();
     const args = try init.minimal.args.toSlice(allocator);
+    // Shared render host mode: this process becomes the one Metal-owning
+    // renderer every macOS widget talks to (weaverd spawns and supervises
+    // it; docs/macos-memory-handoff.md carries the receipts). It never
+    // loads a widget bundle.
+    if (builtin.os.tag == .macos and args.len == 3 and std.mem.eql(u8, args[1], "--render-host")) {
+        const seam = struct {
+            extern fn native_sdk_appkit_render_host_run(name: [*:0]const u8) c_int;
+        };
+        const name_z = try allocator.dupeZ(u8, args[2]);
+        if (seam.native_sdk_appkit_render_host_run(name_z.ptr) != 0) return error.RenderHostStartFailed;
+        return;
+    }
     const dev = args.len == 3 and std.mem.eql(u8, args[1], "--dev");
     if ((!dev and args.len != 2) or (dev and args.len != 3)) {
-        std.debug.print("usage: weaver-widget [--dev] <widget-directory>\n", .{});
+        // The render-host form is parsed only on macOS; advertise it only
+        // where it is accepted.
+        std.debug.print(if (builtin.os.tag == .macos)
+            "usage: weaver-widget [--dev] <widget-directory> | weaver-widget --render-host <bootstrap-name>\n"
+        else
+            "usage: weaver-widget [--dev] <widget-directory>\n", .{});
         return error.InvalidArguments;
     }
     const directory = args[if (dev) 2 else 1];

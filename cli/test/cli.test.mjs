@@ -337,6 +337,13 @@ export default widget({ name: "Font Test", size: [160, 80] }, () => <text class=
     }]);
     assert.deepEqual(readFileSync(join(widget, "dist", "Geist-Regular.ttf")), readFileSync(join(widget, "Geist-Regular.ttf")));
 
+    const longStem = "A".repeat(64);
+    writeFileSync(join(widget, `${longStem}.ttf`), readFileSync(join(widget, "Geist-Regular.ttf")));
+    const longFamily = spawnSync(process.execPath, ["cli/dist/index.js", "check", widget], { encoding: "utf8" });
+    assert.equal(longFamily.status, 1);
+    assert.match(longFamily.stderr, /max_font_family_bytes=63, asked for 64/);
+    rmSync(join(widget, `${longStem}.ttf`));
+
     writeFileSync(join(widget, "widget.tsx"), `import { widget } from "@weaver/sdk";
 export default widget({ name: "Font Test", size: [160, 80] }, () => <text class="font-[Missing]">Missing</text>);
 `);

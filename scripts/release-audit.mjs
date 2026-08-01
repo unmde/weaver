@@ -7,7 +7,7 @@ import { dirname, extname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const expectedNativeCommit = "19e12bc6f95bf68c2f3adb6fa2f89afbeecbc024";
+const expectedNativeCommit = "7368f7f59e09c372311e884190d88006a73ce97f";
 
 function filesBelow(root) {
   const output = [];
@@ -35,6 +35,12 @@ function assertAbsent(paths, expression, description) {
   assert.deepEqual(matches, [], `${description}:\n${matches.join("\n")}`);
 }
 
+function numericConstant(source, name) {
+  const match = source.match(new RegExp(`\\b(?:pub\\s+)?const\\s+${name}(?::[^=]+)?\\s*=\\s*([\\d_]+)\\s*;`, "u"));
+  assert.ok(match, `numeric constant ${name} was not found`);
+  return Number(match[1].replaceAll("_", ""));
+}
+
 const sdkFiles = [...textFiles(join(repoRoot, "sdk", "src")), join(repoRoot, "sdk", "index.d.ts"), join(repoRoot, "sdk", "CONTRACT.md")];
 assertAbsent(
   sdkFiles,
@@ -56,6 +62,26 @@ assert.deepEqual(trackedBuildProducts, [], `tracked build products found:\n${tra
 
 const nativeCommit = execFileSync("git", ["rev-parse", "HEAD"], { cwd: join(repoRoot, "runtime", "native-sdk") }).toString("utf8").trim();
 assert.equal(nativeCommit, expectedNativeCommit, "Native SDK submodule is not pinned to the reviewed fork-stack head");
+
+const treeSource = readFileSync(join(repoRoot, "runtime", "src", "tree.zig"), "utf8");
+const runtimeMainSource = readFileSync(join(repoRoot, "runtime", "src", "main.zig"), "utf8");
+const nativeWidgetLimitsSource = readFileSync(join(repoRoot, "runtime", "native-sdk", "src", "primitives", "canvas", "widget_limits.zig"), "utf8");
+const cliSource = readFileSync(join(repoRoot, "cli", "src", "index.ts"), "utf8");
+for (const [runtimeSource, runtimeName, cliName] of [
+  [treeSource, "max_nodes", "nativeWidgetNodeLimit"],
+  [nativeWidgetLimitsSource, "max_widget_depth", "nativeWidgetDepthLimit"],
+  [treeSource, "max_children", "nativeWidgetChildLimit"],
+  [treeSource, "max_text_bytes", "nativeWidgetTextByteLimit"],
+  [treeSource, "max_source_bytes", "nativeWidgetSourceByteLimit"],
+  [treeSource, "max_canvases", "nativeWidgetCanvasLimit"],
+  [runtimeMainSource, "max_images", "nativeWidgetImageLimit"],
+]) {
+  assert.equal(
+    numericConstant(cliSource, cliName),
+    numericConstant(runtimeSource, runtimeName),
+    `CLI ${cliName} drifted from runtime ${runtimeName}`,
+  );
+}
 
 const plist = readFileSync(join(repoRoot, "host", "macos", "Info.plist"), "utf8");
 assert.match(plist, /<key>CFBundleIdentifier<\/key>\s*<string>com\.sunkenintime\.weaver\.host<\/string>/u);

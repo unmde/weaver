@@ -82,8 +82,17 @@ interface RuntimeManifest {
   fonts: RuntimeFont[];
 }
 
+// Font receipt (2026-07-29): shipped widgets use one bundled face; the
+// largest is 94,800 bytes (the Native SDK fixtures are 71/116 KiB). Two
+// slots leave 2x face-count headroom and 512 KiB leaves 5.5x byte headroom.
+// The runtime reserves 1 MiB for two slots with pages touched on registration.
+// Pinned to native-sdk runtime/canvas_limits.zig's widget profile.
 const MAX_WIDGET_FONTS = 2;
 const MAX_WIDGET_FONT_BYTES = 512 * 1024;
+// Shipped family names measure 17 bytes. The 63-byte ASCII stem grammar is
+// the runtime wire bound, leaving 3.7x headroom; its inline storage is touched
+// only for occupied nodes. Pinned to runtime/src/tree.zig.
+const MAX_WIDGET_FONT_FAMILY_BYTES = 63;
 const FIRST_REGISTERED_FONT_ID = 64;
 
 interface BundleResult { project: SourceProject; manifest: RuntimeManifest }
@@ -565,7 +574,10 @@ function showLogs(name: string, follow: boolean): Promise<void> | void {
     process.stdout.write(`No log for "${name}" yet at ${path}; waiting for the widget to start.\n`);
   }
   const text = [oldPath, path].filter(existsSync).map((file) => readFileSync(file, "utf8")).join("");
-  const lines = text.split(/\r?\n/).filter((line) => line.length > 0).slice(-200);
+  // Runtime rotation already bounds current + old logs to 2 MiB. A second
+  // arbitrary line-count cap only hid older diagnostics and saved no read
+  // memory (the files are already loaded), so show the complete bounded log.
+  const lines = text.split(/\r?\n/).filter((line) => line.length > 0);
   const follower = follow ? followLogFile(name, true) : undefined;
   if (lines.length > 0) process.stdout.write(`${lines.join("\n")}\n`);
   if (!follower) return;
@@ -696,7 +708,12 @@ function printArtifactAudit(manifest: WeaveManifest, sourceFiles: number, source
 }
 
 function installDirectoryName(manifest: WeaveManifest): string {
-  const slug = manifest.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 48) || "widget";
+  // Shipped names measure 19 ASCII bytes at worst. A 48-byte slug leaves
+  // >2.5x headroom and produces a directory component no longer than 111
+  // bytes after hashes + UUID, well below the portable 255-byte OS bound.
+  // Slicing retains no additional memory.
+  const installSlugBytes = 48;
+  const slug = manifest.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, installSlugBytes) || "widget";
   const nameHash = createHash("sha256").update(manifest.name, "utf8").digest("hex").slice(0, 12);
   const artifactHash = manifest.artifactId.slice("sha256:".length, "sha256:".length + 12);
   return `${slug}-${nameHash}-${artifactHash}-${randomUUID()}`;
@@ -1051,11 +1068,19 @@ function validateConfigShape(value: unknown, sourceFile: ts.SourceFile, node: ts
   return value as unknown as WidgetConfigData;
 }
 
-const nativeWidgetNodeLimit = 128;
+// Runtime budget mirrors. The receipt and canonical values live beside the
+// storage they bound in runtime/src/tree.zig and native-sdk's
+// primitives/canvas/widget_limits.zig. release-audit.mjs enforces lockstep:
+// check must reject exactly what runtime would reject.
+const nativeWidgetNodeLimit = 1024;
 const nativeWidgetDepthLimit = 32;
-const nativeWidgetChildLimit = 24;
-const nativeWidgetTextByteLimit = 192;
+const nativeWidgetChildLimit = 64;
+const nativeWidgetTextByteLimit = 1024;
+const nativeWidgetSourceByteLimit = 1024;
 const nativeWidgetCanvasLimit = 8;
+// All shipped examples measured at most six retained images (noro-shell).
+// 16 leaves 2.7x headroom and pins the Native SDK registry slot count; decoded
+// pixels are committed only for registered images.
 const nativeWidgetImageLimit = 16;
 
 interface LoweredTreeMetrics {
@@ -1655,14 +1680,27 @@ function validateSource(project: SourceProject): string[] {
   return errors;
 }
 
-const nativeImagePixelByteLimit = 256 * 1024;
-const maxImageStreamBytes = 1024 * 1024;
+// Image receipt (2026-07-29): noro-shell and retro-player-shell both decode
+// to exactly 256x256 RGBA (262,144 bytes), so the old 256 KiB cap had zero
+// headroom. 1 MiB admits 512x512 album art (4x the measured bytes). Runtime
+// registry storage is fixed address space and pages touch only on register.
+// Pinned to both native-sdk canvas_limits.zig and platform/types.zig.
+const nativeImagePixelByteLimit = 1024 * 1024;
+// The historical generated grille measured 1,025,239 encoded bytes after it
+// was squeezed under the old 1 MiB cap. 2 MiB leaves 1,071,913 bytes headroom;
+// reads allocate actual file length, so unused allowance costs no memory.
+// Pinned to runtime/src/main.zig max_image_stream_bytes.
+const maxImageStreamBytes = 2 * 1024 * 1024;
 
 function imageStreamBudgetError(source: string, asked: number): string {
   return `ImageStreamTooLarge: ${JSON.stringify(source)} is ${asked} encoded bytes; max_image_stream_bytes=${maxImageStreamBytes}, asked for ${asked}, headroom=${maxImageStreamBytes - asked}`;
 }
 
 function validateLocalImageAsset(directory: string, source: string): string | null {
+  const sourceBytes = Buffer.byteLength(source, "utf8");
+  if (sourceBytes > nativeWidgetSourceByteLimit) {
+    return `ImageSourceTooLong: ${JSON.stringify(source)} is ${sourceBytes} UTF-8 bytes; image source capacity exhausted: max_source_bytes=${nativeWidgetSourceByteLimit}, asked for ${sourceBytes}, headroom=${nativeWidgetSourceByteLimit - sourceBytes}. Use a shorter widget-relative path.`;
+  }
   if (!source || isAbsolute(source) || source.split(/[\\/]/).includes("..")) {
     return `InvalidImageSource: ${JSON.stringify(source)} is not a portable widget-relative asset path`;
   }
@@ -1692,7 +1730,7 @@ function validateLocalImageAsset(directory: string, source: string): string | nu
   }
   const decodedBytes = dimensions.width * dimensions.height * 4;
   if (!Number.isSafeInteger(decodedBytes) || decodedBytes > nativeImagePixelByteLimit) {
-    return `ImageTooLarge: ${JSON.stringify(source)} is ${dimensions.width}x${dimensions.height}; decoded RGBA is ${dimensions.width} * ${dimensions.height} * 4 = ${decodedBytes} bytes, exceeding max_image_rgba_bytes=${nativeImagePixelByteLimit} by ${decodedBytes - nativeImagePixelByteLimit} bytes. Resize it to at most 256x256 (or any dimensions whose pixel product is <= 65,536).`;
+    return `ImageTooLarge: ${JSON.stringify(source)} is ${dimensions.width}x${dimensions.height}; decoded RGBA is ${dimensions.width} * ${dimensions.height} * 4 = ${decodedBytes} bytes, exceeding max_image_rgba_bytes=${nativeImagePixelByteLimit} by ${decodedBytes - nativeImagePixelByteLimit} bytes. Resize it to at most 512x512 (or any dimensions whose pixel product is <= 262,144).`;
   }
   return null;
 }
@@ -1743,7 +1781,12 @@ function discoverWidgetFonts(directory: string): RuntimeFont[] {
   for (const entry of candidates) {
     const path = join(directory, entry.name);
     const stem = basename(entry.name, extname(entry.name));
-    if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,62}$/.test(stem)) {
+    const stemBytes = Buffer.byteLength(stem, "utf8");
+    if (stemBytes > MAX_WIDGET_FONT_FAMILY_BYTES) {
+      errors.push(`${entry.name}: font family capacity exhausted: max_font_family_bytes=${MAX_WIDGET_FONT_FAMILY_BYTES}, asked for ${stemBytes}`);
+      continue;
+    }
+    if (!/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(stem)) {
       errors.push(`${entry.name}: font file stems must be 1-63 letters, digits, underscores, or hyphens so font-[${stem || "name"}] is a valid class`);
       continue;
     }

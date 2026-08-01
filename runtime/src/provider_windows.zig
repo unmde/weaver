@@ -5,6 +5,11 @@ const win = @cImport({
 });
 const protocol = @import("provider_protocol.zig");
 
+// Reader-stack receipt (2026-07-29): Framer is 25,016 bytes and the read chunk
+// is 4,096, so the worker's dominant live locals total 29,112 bytes. 256 KiB
+// leaves 9x headroom for its shallow overlapped-I/O call graph. Windows
+// reserves the stack and commits pages only as used; there is one reader per
+// widget.
 const reader_stack_bytes: usize = 256 * 1024;
 
 const SpinMutex = struct {
@@ -69,10 +74,8 @@ pub const Client = struct {
             self.shutdown_event = null;
         }
         self.connected.store(1, .release);
-        // Zig's Windows default reserves 16 MiB per thread. This worker has a
-        // 16 KiB accumulator and a shallow call graph, so an explicit bound
-        // prevents one optional provider pipe from doubling widget private
-        // usage while retaining ample headroom over measured stack use.
+        // Avoid the platform's much larger default reservation; see the
+        // measured fixed-local receipt at reader_stack_bytes.
         self.thread = try std.Thread.spawn(.{ .stack_size = reader_stack_bytes }, readerMain, .{self});
     }
 

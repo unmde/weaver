@@ -26,11 +26,36 @@ pub const State = struct {
     emit_error_logs: bool = true,
 };
 
+// Timer receipt (2026-07-29): executing every shipped widget measured one
+// simultaneously active interval. Sixteen leaves 16x headroom for clocks,
+// animation, and debounced work. TimerSlot is 40 bytes, so all slots cost
+// 640 bytes of fixed metadata; callbacks already live in QuickJS.
 pub const max_timers: usize = 16;
+// No shipped widget fetches yet. A modeled good polling widget uses two
+// simultaneous API calls; four leaves 2x concurrency headroom. FetchSlot is
+// 160 bytes (640 bytes total metadata); request/response payloads allocate
+// their actual lengths under network.zig's independent byte bounds.
 pub const max_fetches: usize = 4;
+// One callback slot per receipted canvas slot; deriving it makes a separate
+// canvas-frame budget impossible. Each slot is fixed callback metadata only.
 pub const max_canvas_frames: usize = tree_mod.max_canvases;
+// One callback per protocol command awaiting acknowledgement; the provider
+// tracker's receipt and storage live in media_pending.zig.
 pub const max_media_pending: usize = media_pending.capacity;
 pub const media_ack_timeout_ms: u64 = media_pending.timeout_ms;
+// Error-log detail is derived from widget_log's 8 KiB line buffer: 6,000
+// bytes leaves >2 KiB for timestamp, scope, error framing, and truncation
+// suffix. This is a presentation slice with no additional allocation.
+const max_logged_error_detail_bytes: usize = 6000;
+// Shipped callback scope labels are under 24 bytes, so 48 leaves >2x label
+// headroom. Known one-line bridge diagnostics fit under 128 bytes. Both slices
+// feed tree.zig's independent 1 KiB visible-text buffer and allocate nothing.
+const max_visible_error_scope_bytes: usize = 48;
+const max_visible_error_line_bytes: usize = 128;
+// Console output ultimately enters widget_log's 8 KiB line buffer. 6,000
+// bytes leaves >2 KiB for logger framing and costs one callback-lifetime stack
+// buffer; longer console formatting is presentation, not retained widget data.
+const max_console_bytes: usize = 6000;
 
 pub const TimerSlot = struct {
     id: u64 = 0,
@@ -305,13 +330,13 @@ fn reportError(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c.J
     const bridge_state = state(js);
     bridge_state.render_failed = true;
 
-    const log_details = details.bytes[0..@min(details.bytes.len, 6000)];
-    if (bridge_state.emit_error_logs) std.log.err("widget {s} failed:\n{s}", .{ scope.bytes, log_details });
+    const visible_scope = scope.bytes[0..@min(scope.bytes.len, max_visible_error_scope_bytes)];
+    const log_details = details.bytes[0..@min(details.bytes.len, max_logged_error_detail_bytes)];
+    if (bridge_state.emit_error_logs) std.log.err("widget {s} failed:\n{s}", .{ visible_scope, log_details });
 
     var visible_buffer: [tree_mod.max_text_bytes]u8 = undefined;
-    const visible_scope = scope.bytes[0..@min(scope.bytes.len, 48)];
     const first_line_length = std.mem.indexOfScalar(u8, details.bytes, '\n') orelse details.bytes.len;
-    const first_line = details.bytes[0..@min(first_line_length, 128)];
+    const first_line = details.bytes[0..@min(first_line_length, max_visible_error_line_bytes)];
     const visible = std.fmt.bufPrint(
         &visible_buffer,
         "{s} failed\n{s}",
@@ -401,7 +426,7 @@ fn mediaCommand(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c.
         bridge_state.media_tracker.remove(index);
         return fail(js, "MediaCommandPendingLimit");
     }
-    var command_buffer: [256]u8 = undefined;
+    var command_buffer: [provider_mod.max_command_line_bytes]u8 = undefined;
     const command = if (wire.seekMs) |seek_ms|
         std.fmt.bufPrint(
             &command_buffer,
@@ -1023,7 +1048,7 @@ const ConsoleLevel = enum { info, warn, err };
 
 fn consoleWrite(ctx: ?*c.JSContext, argc: c_int, argv: [*c]c.JSValueConst, level: ConsoleLevel) c.JSValue {
     const js = ctx orelse return qjs.exceptionValue();
-    var buffer: [4096]u8 = undefined;
+    var buffer: [max_console_bytes]u8 = undefined;
     var writer = std.Io.Writer.fixed(&buffer);
     var index: usize = 0;
     while (index < @as(usize, @intCast(argc))) : (index += 1) {

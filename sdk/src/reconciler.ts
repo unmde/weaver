@@ -1,5 +1,22 @@
 import { compileClass, type ClassProps } from "./class-compiler.js";
 
+// Storage receipt (2026-07-29): serializing a realistic good notes fixture
+// (100 records with 900-byte bodies and metadata) measured 103,291 bytes.
+// 256 KiB leaves 2.5x headroom, and JSON strings allocate their actual length.
+// Pinned to runtime/src/storage.zig quota_bytes.
+const STORAGE_QUOTA_BYTES = 256 * 1024;
+// The authored-canvas command budget is 2,048 and the measured 336-rect meter
+// established that as a good shape. Wire encoding needs at most ~16 values per
+// command, so 32,768 is derived rather than independently budgeted. Each
+// mounted canvas allocates one 256 KiB Float64Array; unused canvas slots cost
+// nothing. Pinned to runtime/src/tree.zig max_canvas_wire_values.
+const MAX_CANVAS_WIRE_VALUES = 32_768;
+// Shipped widgets author at most 60 fps (m4b-synthetic), matching the native
+// surface clock. Faster requests cannot present extra frames, so 60 is a
+// scheduler/protocol bound rather than a silently starved animation budget;
+// the clamp itself retains no memory.
+const MAX_CANVAS_FPS = 60;
+
 export type WidgetChild = VNode | string | number | Signal<string | number> | null | undefined | false;
 export type Component = () => VNode;
 export type NodeType = "column" | "row" | "stack" | "panel" | "text" | "icon" | "button" | "slider" | "image" | "canvas";
@@ -615,7 +632,7 @@ function applyElementProps(instance: HostInstance, props: Record<string, unknown
       throw new Error("<canvas> fps must be zero or a positive number when provided");
     }
     next.onFrame = props.onFrame as (ctx: CanvasCtx, frame: CanvasFrame) => void;
-    next.fps = props.fps === undefined ? undefined : Math.min(60, props.fps as number);
+    next.fps = props.fps === undefined ? undefined : Math.min(MAX_CANVAS_FPS, props.fps as number);
   }
   if (Boolean(previous.onPress) !== Boolean(next.onPress)) native.setHandler(instance.id, "press", Boolean(next.onPress));
   if (Boolean(previous.onDoublePress) !== Boolean(next.onDoublePress)) native.setHandler(instance.id, "doublepress", Boolean(next.onDoublePress));
@@ -691,8 +708,7 @@ function updateCanvasBinding(id: number, onFrame: (ctx: CanvasCtx, frame: Canvas
   if (!binding) {
     binding = {
       onFrame, fps, timerId: 0, surfaceClock: false, width, height,
-      // Mirrors the runtime's wire budget (tree.zig max_canvas_wire_values).
-      batch: new Float64Array(32768), batchLength: 0, active: false,
+      batch: new Float64Array(MAX_CANVAS_WIRE_VALUES), batchLength: 0, active: false,
       ctx: undefined as unknown as CanvasCtx,
     };
     binding.ctx = createCanvasContext(binding);
@@ -727,7 +743,7 @@ function updateCanvasBinding(id: number, onFrame: (ctx: CanvasCtx, frame: Canvas
     drawCanvasFrame(id, Date.now() / 1000);
     return;
   }
-  if (fps >= 60) {
+  if (fps >= MAX_CANVAS_FPS) {
     if (!binding.surfaceClock) {
       native.onCanvasFrame(id, (timestampSeconds) => drawCanvasFrame(id, timestampSeconds));
       binding.surfaceClock = true;
@@ -1048,7 +1064,10 @@ function readStorage(): Record<string, unknown> {
 
 function serializeStorage(values: Record<string, unknown>): string {
   const encoded = JSON.stringify(values);
-  if (utf8ByteLength(encoded) > 64 * 1024) throw new Error("StorageQuotaExceeded: widget storage exceeds 64 KB");
+  const encodedBytes = utf8ByteLength(encoded);
+  if (encodedBytes > STORAGE_QUOTA_BYTES) {
+    throw new Error(`StorageQuotaExceeded: max_storage_bytes=${STORAGE_QUOTA_BYTES}, asked for ${encodedBytes}`);
+  }
   return encoded;
 }
 

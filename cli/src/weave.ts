@@ -4,14 +4,21 @@ import { join, resolve, sep } from "node:path";
 import { inflateRawSync } from "node:zlib";
 
 const FORMAT_VERSION = 1;
+// Bundle receipt (2026-07-29): the largest shipped source tree is
+// retro-player-shell at 170,214 bytes across six files; its packed archive is
+// 171,011 bytes and its largest file is 94,800 bytes. The 64 MiB source,
+// archive, and unpacked tripwires leave >390x byte headroom; 16 MiB/file
+// leaves >175x, and 1024 entries leaves >170x. Buffers/maps grow with actual
+// input, so the unused allowance reserves no resident memory.
 export const MAX_WEAVE_ARCHIVE_BYTES = 64 * 1024 * 1024;
 const MAX_SOURCE_BYTES = 64 * 1024 * 1024;
 const MAX_UNPACKED_BYTES = 64 * 1024 * 1024;
 const MAX_FILE_BYTES = 16 * 1024 * 1024;
+// The measured retro-player-shell weave.json is 414 bytes. 64 KiB leaves
+// >150x format headroom and makes separate name/author byte caps redundant;
+// the archive stores only the actual manifest bytes.
 export const MAX_WEAVE_MANIFEST_BYTES = 64 * 1024;
 const MAX_ENTRIES = 1024;
-const MAX_DISPLAY_NAME_BYTES = 256;
-const MAX_AUTHOR_BYTES = 256;
 const UTF8_FLAG = 0x0800;
 const ZIP_LOCAL_HEADER = 0x04034b50;
 const ZIP_CENTRAL_HEADER = 0x02014b50;
@@ -49,7 +56,7 @@ interface SourceEntry { path: string; data: Buffer }
 interface ZipEntry extends SourceEntry { crc: number; compressed: Buffer; method: 0 | 8; offset: number }
 
 export function packWeave(sourceDirectory: string, name: string, declared: DeclaredSurface): PackedWeave {
-  validateDisplayString(name, "widget name", MAX_DISPLAY_NAME_BYTES);
+  validateDisplayString(name, "widget name");
   const sourceEntries = collectSourceEntries(sourceDirectory);
   if (!sourceEntries.some((entry) => entry.path === "widget.tsx")) throw new Error("A .weave source must contain widget.tsx");
   const sourceId = `sha256:${sourceFingerprint(sourceEntries)}`;
@@ -387,12 +394,12 @@ function parseManifest(data: Buffer): WeaveManifest {
   if (!isArtifactId(value.artifactId)) throw new Error("weave.json artifactId must be a sha256 identity");
   if (!isArtifactId(value.sourceId)) throw new Error("weave.json sourceId must be a sha256 identity");
   if (typeof value.name !== "string") throw new Error("weave.json name must be a string");
-  validateDisplayString(value.name, "weave.json name", MAX_DISPLAY_NAME_BYTES);
+  validateDisplayString(value.name, "weave.json name");
   if (!isRecord(value.provenance)) throw new Error("weave.json provenance must be an object");
   requireKeys(value.provenance, ["author"], "weave.json provenance");
   if (value.provenance.author !== null) {
     if (typeof value.provenance.author !== "string") throw new Error("weave.json provenance.author must be a string or null");
-    validateDisplayString(value.provenance.author, "weave.json provenance.author", MAX_AUTHOR_BYTES);
+    validateDisplayString(value.provenance.author, "weave.json provenance.author");
   }
   if (!isRecord(value.lineage)) throw new Error("weave.json lineage must be an object");
   requireKeys(value.lineage, ["root", "parent"], "weave.json lineage");
@@ -452,9 +459,9 @@ function rejectCaseCollisions(paths: string[]): void {
   }
 }
 
-function validateDisplayString(value: string, label: string, maximumBytes: number): void {
-  if (value.trim() === "" || Buffer.byteLength(value, "utf8") > maximumBytes || /[\p{C}\p{Zl}\p{Zp}]/u.test(value)) {
-    throw new Error(`${label} must be a non-empty string of at most ${maximumBytes} UTF-8 bytes without control characters`);
+function validateDisplayString(value: string, label: string): void {
+  if (value.trim() === "" || /[\p{C}\p{Zl}\p{Zp}]/u.test(value)) {
+    throw new Error(`${label} must be a non-empty string without control, line-separator, or paragraph-separator characters`);
   }
 }
 

@@ -1,23 +1,27 @@
 const std = @import("std");
 const platform = @import("platform/root.zig");
 
+// Log receipt (2026-07-29): one runtime diagnostic is capped at 6,000 detail
+// bytes and formats inside the 8 KiB line buffer below. 1 MiB retains at least
+// 128 maximum-size diagnostics; current + rotated files cost at most 2 MiB on
+// disk, while resident memory holds only the line being written.
 const rotate_bytes: u64 = 1024 * 1024;
 var io: ?std.Io = null;
-var path_buffer: [32768]u8 = undefined;
-var path_len: usize = 0;
-var old_path_buffer: [32768]u8 = undefined;
-var old_path_len: usize = 0;
+var log_path: []u8 = &.{};
+var old_log_path: []u8 = &.{};
 var mutex: std.atomic.Mutex = .unlocked;
 var write_failed = std.atomic.Value(bool).init(false);
 var fallback_reported = std.atomic.Value(bool).init(false);
 
 pub fn init(runtime_io: std.Io, path: []const u8) !void {
-    if (path.len + ".old".len > path_buffer.len) return error.LogPathTooLong;
-    @memcpy(path_buffer[0..path.len], path);
-    path_len = path.len;
-    @memcpy(old_path_buffer[0..path.len], path);
-    @memcpy(old_path_buffer[path.len .. path.len + ".old".len], ".old");
-    old_path_len = path.len + ".old".len;
+    const allocator = std.heap.page_allocator;
+    const next_path = try allocator.dupe(u8, path);
+    errdefer allocator.free(next_path);
+    const next_old_path = try std.fmt.allocPrint(allocator, "{s}.old", .{path});
+    if (log_path.len > 0) allocator.free(log_path);
+    if (old_log_path.len > 0) allocator.free(old_log_path);
+    log_path = next_path;
+    old_log_path = next_old_path;
     io = runtime_io;
     write_failed.store(false, .release);
     fallback_reported.store(false, .release);
@@ -34,6 +38,9 @@ pub fn logFn(
     comptime format: []const u8,
     args: anytype,
 ) void {
+    // reportError forwards at most 6,000 detail bytes; 8 KiB leaves >2 KiB
+    // for timestamp/level/scope and formatting. The stack cost exists only
+    // during one log call.
     var buffer: [8192]u8 = undefined;
     const line = formatLogLine(level, scope, format, args, &buffer) catch |err| return noteFailure(err);
     writeLine(line);
@@ -98,19 +105,19 @@ fn writeLine(line: []const u8) void {
     writeLineFallible(line) catch |err| return noteFailure(err);
     if (write_failed.swap(false, .acq_rel)) {
         fallback_reported.store(false, .release);
-        std.debug.print("weaver widget log recovered; path={s}\n", .{path_buffer[0..path_len]});
+        std.debug.print("weaver widget log recovered; path={s}\n", .{log_path});
     }
 }
 
 fn writeLineFallible(line: []const u8) !void {
     const runtime_io = io orelse return;
-    if (path_len == 0) return;
+    if (log_path.len == 0) return;
     while (!mutex.tryLock()) std.atomic.spinLoopHint();
     defer mutex.unlock();
 
     var cwd = std.Io.Dir.cwd();
-    const path = path_buffer[0..path_len];
-    const old_path = old_path_buffer[0..old_path_len];
+    const path = log_path;
+    const old_path = old_log_path;
     const size = if (cwd.statFile(runtime_io, path, .{})) |stat| stat.size else |_| 0;
     if (shouldRotate(size, line.len)) {
         cwd.deleteFile(runtime_io, old_path) catch |err| switch (err) {
@@ -130,7 +137,7 @@ fn noteFailure(err: anyerror) void {
     if (!fallback_reported.swap(true, .acq_rel)) {
         std.debug.print(
             "weaver widget log unavailable: {s}; path={s}; the widget window will show an error surface\n",
-            .{ @errorName(err), path_buffer[0..path_len] },
+            .{ @errorName(err), log_path },
         );
     }
 }

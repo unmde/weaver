@@ -6,7 +6,14 @@ const c = @cImport({
 const posix = std.posix;
 const protocol = @import("provider_protocol.zig");
 
+// Reader-stack receipt (2026-07-29): Framer is 25,016 bytes and the read chunk
+// is 4,096, so the worker's dominant live locals total 29,112 bytes. 256 KiB
+// leaves 9x headroom for its shallow syscall call graph. The OS reserves the
+// stack and commits pages only as used; there is one reader per widget.
 const reader_stack_bytes: usize = 256 * 1024;
+// A legal command is at most 86 bytes and a healthy local socket write is
+// immediate; one second is a supervision tripwire, not retained work, and
+// costs no memory.
 const command_write_deadline_ns: i128 = std.time.ns_per_s;
 
 const SendAttempt = union(enum) {
@@ -75,6 +82,7 @@ pub const Client = struct {
             self.stream = null;
         }
         self.connected.store(1, .release);
+        // See reader_stack_bytes: measured live fixed locals are 29,112 bytes.
         self.thread = try std.Thread.spawn(.{ .stack_size = reader_stack_bytes }, readerMain, .{self});
     }
 

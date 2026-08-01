@@ -355,15 +355,17 @@ test(".weave reader enforces manifest and aggregate unpacked limits", () => {
   }
 });
 
-test(".weave metadata rejects oversized or control-character display values", () => {
+test(".weave metadata rejects control-character display values", () => {
   const root = fixture();
   try {
     const declared = { providers: [], origins: [], capabilities: [] };
-    assert.throws(() => weave.packWeave(root, "line one\nline two", declared), /without control characters/);
-    assert.throws(() => weave.packWeave(root, "safe\u202eevil", declared), /without control characters/);
-    assert.throws(() => weave.packWeave(root, "x".repeat(257), declared), /at most 256 UTF-8 bytes/);
+    const invalidDisplayValue = /without control, line-separator, or paragraph-separator characters/;
+    assert.throws(() => weave.packWeave(root, "line one\nline two", declared), invalidDisplayValue);
+    assert.throws(() => weave.packWeave(root, "safe\u202eevil", declared), invalidDisplayValue);
+    assert.throws(() => weave.packWeave(root, "line\u2028separator", declared), invalidDisplayValue);
+    assert.throws(() => weave.packWeave(root, "paragraph\u2029separator", declared), invalidDisplayValue);
     const bytes = weave.packWeave(root, "Archive Test", declared).bytes;
-    assert.throws(() => weave.openWeave(withControlCharacterAuthor(bytes)), /provenance\.author.*without control characters/);
+    assert.throws(() => weave.openWeave(withControlCharacterAuthor(bytes)), /provenance\.author.*without control, line-separator, or paragraph-separator characters/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

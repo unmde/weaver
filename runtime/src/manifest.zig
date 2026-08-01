@@ -4,6 +4,15 @@ const native_sdk = @import("native_sdk");
 
 const windows_monitor = if (builtin.os.tag == .windows) @import("platform/windows_monitor.zig") else struct {};
 
+// Manifest receipt (2026-07-29): the largest shipped widget.json is 570
+// bytes (noro-shell). 64 KiB leaves >100x format-growth headroom. Reads
+// allocate actual file length; unused allowance costs no resident memory.
+pub const max_manifest_bytes: usize = 64 * 1024;
+// Bundle receipt: the largest shipped bundle.js is 45,818 bytes (noro-shell).
+// 1 MiB leaves >22x headroom. Initial and hot-reload reads allocate actual
+// length; unused allowance costs no memory. Pinned by main.zig hot reload.
+pub const max_bundle_bytes: usize = 1024 * 1024;
+
 pub const MonitorGeometry = struct {
     work_area_px: native_sdk.geometry.RectI,
     effective_dpi: u32,
@@ -63,8 +72,8 @@ fn resolvedAnchor(value: Manifest) Anchor {
 pub fn load(io: std.Io, allocator: std.mem.Allocator, directory: []const u8) !Loaded {
     const manifest_path = try std.fs.path.join(allocator, &.{ directory, "widget.json" });
     const bundle_path = try std.fs.path.join(allocator, &.{ directory, "bundle.js" });
-    const manifest_bytes = try std.Io.Dir.cwd().readFileAlloc(io, manifest_path, allocator, .limited(64 * 1024));
-    const bundle = try std.Io.Dir.cwd().readFileAlloc(io, bundle_path, allocator, .limited(1024 * 1024));
+    const manifest_bytes = try std.Io.Dir.cwd().readFileAlloc(io, manifest_path, allocator, .limited(max_manifest_bytes));
+    const bundle = try std.Io.Dir.cwd().readFileAlloc(io, bundle_path, allocator, .limited(max_bundle_bytes));
     const parsed = try std.json.parseFromSliceLeaky(Manifest, allocator, manifest_bytes, .{ .ignore_unknown_fields = false });
     if (!std.math.isFinite(parsed.size[0]) or !std.math.isFinite(parsed.size[1]) or
         parsed.size[0] <= 0 or parsed.size[1] <= 0) return error.InvalidWidgetSize;

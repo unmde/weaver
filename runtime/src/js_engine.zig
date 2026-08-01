@@ -7,8 +7,30 @@ const tree_mod = @import("tree.zig");
 const storage_mod = @import("storage.zig");
 const c = qjs.c;
 
+// QuickJS receipt (2026-07-29): a synthetic worst-good retained view with
+// 1,024 JS node records measured 629,335 allocator bytes (553,712 live).
+// 32 MiB leaves >50x headroom. QuickJS allocates on demand, so the allowance
+// reserves no resident memory.
 pub const memory_limit_bytes: usize = 32 * 1024 * 1024;
+// The same 1,024-record evaluation measured 8-11 ms in Debug on the Windows
+// test runner. 100 ms leaves >9x measured headroom while still interrupting a
+// runaway callback. This watchdog retains no memory.
 pub const turn_budget_ms: u64 = 100;
+// QuickJS's upstream 1 MiB default measured only 16 calls of a trivial
+// recursive JS function. 4 MiB measured 70 calls, clearing the receipted
+// 32-level widget-tree contract by >2x. runtime/build.zig reserves a 16 MiB
+// process stack (4x this guard); stack pages commit only as recursion uses them.
+pub const max_stack_bytes: usize = 4 * 1024 * 1024;
+// Four simultaneous fetch slots can reject together; eight pending promise
+// records leave 2x burst headroom. Each record is 32 bytes, so the fixed
+// metadata costs 256 bytes; referenced JS values already live in QuickJS.
+const max_pending_rejections: usize = 8;
+// Exception detail ultimately enters widget_log's 8 KiB line buffer. 6,000
+// bytes leaves >2 KiB for logger framing; this is one turn-lifetime stack
+// buffer, not retained isolate memory. The visible first line is 150 bytes,
+// enough for the longest current named budget diagnostic (<128 bytes).
+const max_exception_detail_bytes: usize = 6000;
+const max_visible_rejection_bytes: usize = 150;
 
 pub const Error = error{
     OutOfMemory,
@@ -30,7 +52,7 @@ pub const Engine = struct {
     provider: *provider_mod.Client,
     deadline_ms: u64 = 0,
     executing: bool = false,
-    pending_rejections: [8]PendingRejection = [_]PendingRejection{.{}} ** 8,
+    pending_rejections: [max_pending_rejections]PendingRejection = [_]PendingRejection{.{}} ** max_pending_rejections,
 
     pub fn create(
         allocator: std.mem.Allocator,
@@ -60,6 +82,7 @@ pub const Engine = struct {
             .media_transport_enabled = media_transport_enabled,
         };
         c.JS_SetMemoryLimit(runtime, memory_limit_bytes);
+        c.JS_SetMaxStackSize(runtime, max_stack_bytes);
         c.JS_SetInterruptHandler(runtime, interruptHandler, self);
         c.JS_SetHostPromiseRejectionTracker(runtime, promiseRejectionTracker, self);
         bridge.install(context, &self.bridge_state) catch return error.QuickJs;
@@ -253,7 +276,7 @@ pub const Engine = struct {
         // platform callbacks can enter from a materially deeper native
         // dispatch path (notably canvas resize during a near-cap rebuild).
         // A turn starts with no live JS frames, so refresh the reference
-        // point before applying QuickJS's ordinary 1 MiB recursion guard.
+        // point before applying the receipted recursion guard above.
         if (!self.executing) c.JS_UpdateStackTop(self.runtime);
         self.deadline_ms = platform.monotonicMilliseconds() + turn_budget_ms;
         self.executing = true;
@@ -291,13 +314,13 @@ pub const Engine = struct {
     fn flushUnhandledRejections(self: *Engine) void {
         for (&self.pending_rejections) |*pending| {
             if (c.JS_IsUndefined(pending.promise)) continue;
-            var detail_buffer: [6000]u8 = undefined;
+            var detail_buffer: [max_exception_detail_bytes]u8 = undefined;
             const details = valueDetails(self.context, pending.reason, &detail_buffer);
             if (self.bridge_state.emit_error_logs) std.log.err("widget unhandled promise rejection:\n{s}", .{details});
             self.bridge_state.render_failed = true;
             var visible_buffer: [tree_mod.max_text_bytes]u8 = undefined;
             const first_line_length = std.mem.indexOfScalar(u8, details, '\n') orelse details.len;
-            const first_line = validUtf8Prefix(details[0..first_line_length], 150);
+            const first_line = validUtf8Prefix(details[0..first_line_length], max_visible_rejection_bytes);
             const visible = std.fmt.bufPrint(
                 &visible_buffer,
                 "unhandled promise rejection\n{s}",
@@ -314,7 +337,7 @@ pub const Engine = struct {
 fn logExceptionFrom(context: *c.JSContext) void {
     const exception = c.JS_GetException(context);
     defer c.JS_FreeValue(context, exception);
-    var buffer: [6000]u8 = undefined;
+    var buffer: [max_exception_detail_bytes]u8 = undefined;
     std.log.err("widget JavaScript exception:\n{s}", .{valueDetails(context, exception, &buffer)});
 }
 
@@ -407,7 +430,7 @@ fn promiseRejectionTracker(
         };
         return;
     }
-    var buffer: [1024]u8 = undefined;
+    var buffer: [tree_mod.max_text_bytes]u8 = undefined;
     std.log.err("widget unhandled promise rejection queue exhausted; newest rejection:\n{s}", .{valueDetails(js, reason, &buffer)});
 }
 
@@ -447,25 +470,34 @@ test "a forced max_nodes failure is rolled back, named, and replaced by an error
     defer engine.destroy(std.testing.allocator);
     engine.bridge_state.emit_error_logs = false;
 
-    try engine.evaluate(
+    var requested_buffer: [32]u8 = undefined;
+    const requested = try std.fmt.bufPrint(&requested_buffer, "{d}", .{tree_mod.max_nodes + 1});
+    const script = try std.mem.concat(std.testing.allocator, u8, &.{
         \\native.beginBatch();
         \\try {
-        \\  for (let index = 0; index < 129; index += 1) native.createNode("panel");
+        \\  for (let index = 0; index <
+        ,
+        requested,
+        \\; index += 1) native.createNode("panel");
         \\  native.endBatch();
         \\} catch (error) {
         \\  native.abortBatch();
         \\  native.reportError("render", String(error) + "\n" + (error.stack || ""));
         \\}
-    , "budget-test.js");
+    });
+    defer std.testing.allocator.free(script);
+    try engine.evaluate(script, "budget-test.js");
 
     try std.testing.expect(engine.renderFailed());
     try std.testing.expectEqual(@as(usize, 2), tree.nodeCount());
     try std.testing.expectEqual(tree_mod.Kind.column, (try tree.nodeConst(tree.root.?)).kind);
-    try std.testing.expect(std.mem.indexOf(
-        u8,
-        (try tree.nodeConst(2)).textSlice(),
-        "node capacity exhausted: max_nodes=128, asked for 129",
-    ) != null);
+    const expected = try std.fmt.allocPrint(
+        std.testing.allocator,
+        "node capacity exhausted: max_nodes={d}, asked for {d}",
+        .{ tree_mod.max_nodes, tree_mod.max_nodes + 1 },
+    );
+    defer std.testing.allocator.free(expected);
+    try std.testing.expect(std.mem.indexOf(u8, (try tree.nodeConst(2)).textSlice(), expected) != null);
 }
 
 test "unhandled promise rejection is visible while a handled rejection stays healthy" {

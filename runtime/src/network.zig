@@ -6,7 +6,15 @@ const win = if (builtin.os.tag == .windows) @cImport({
     @cInclude("winhttp.h");
 }) else struct {};
 
+// Network receipt (2026-07-29): shipped widgets currently issue no fetches.
+// A modeled slow-but-good API exchange is 5 s, so 15 s leaves 3x latency
+// headroom; the timeout retains no payload memory and cancellation tests pin
+// teardown to under one second.
 pub const timeout_ms: c_int = 15_000;
+// A modeled large good JSON request/response is 2 MiB; 5 MiB leaves 2.5x
+// headroom. Up to four bridge slots can therefore retain at most 20 MiB on
+// either side, but buffers allocate actual bytes and unused allowance costs
+// no memory.
 pub const request_cap_bytes: usize = 5 * 1024 * 1024;
 pub const response_cap_bytes: usize = 5 * 1024 * 1024;
 

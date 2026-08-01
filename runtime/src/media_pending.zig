@@ -1,7 +1,15 @@
 const std = @import("std");
 
+// A good transport interaction can issue a rapid previous/play/seek/next
+// sequence before acknowledgements return. Four slots hold that modeled burst
+// and pin provider_protocol.ack_queue_capacity; Slot is 16 bytes, so the
+// tracker costs 64 bytes fixed.
 pub const capacity: usize = 4;
+// Host execution is bounded at 2,500 ms. The runtime's 3,000 ms deadline
+// leaves 500 ms for pipe delivery/ack handling and retains no extra memory.
 pub const timeout_ms: u64 = 3000;
+// IEEE-754's largest exactly representable integer. This is a JS/wire
+// invariant, not a capacity budget; it mirrors provider_protocol.max_safe_id.
 pub const max_safe_id: u64 = 9_007_199_254_740_991;
 
 pub const Slot = struct {

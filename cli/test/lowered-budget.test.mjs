@@ -29,14 +29,14 @@ export default widget({ name: "Lowered Budget", size: [320, 200] }, () => (${tre
 }
 
 test("check rejects node counts after painted row and column lowering", () => {
-  const groups = Array.from({ length: 5 }, (_, group) =>
-    `<column key="g${group}">${Array.from({ length: 24 }, (_, child) => `<row key="r${group}-${child}" class="bg-[#111]" />`).join("")}</column>`,
+  const groups = Array.from({ length: 16 }, (_, group) =>
+    `<column key="g${group}">${Array.from({ length: 32 }, (_, child) => `<row key="r${group}-${child}" class="bg-[#111]" />`).join("")}</column>`,
   ).join("");
   const { root, widget } = fixture(source(`<column>${groups}</column>`));
   try {
     const checked = runCli(root, "check", widget);
     assert.equal(checked.status, 1);
-    assert.match(checked.stderr, /LoweredWidgetNodeLimit: this tree lowers to 246 Native nodes \(limit 128\)/);
+    assert.match(checked.stderr, /LoweredWidgetNodeLimit: this tree lowers to 1041 Native nodes \(limit 1024\)/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -56,7 +56,7 @@ test("check rejects depth after painted layout lowering", () => {
 });
 
 test("check budgets only the exported widget's reachable tree", () => {
-  const dead = `<column>${Array.from({ length: 128 }, () => "<row />").join("")}</column>`;
+  const dead = `<column>${Array.from({ length: 1024 }, () => "<row />").join("")}</column>`;
   const widgetSource = `import { widget } from "@weaver/sdk";
 const DeadPreview = () => (${dead});
 export default widget({ name: "Reachable Budget", size: [320, 200] }, () => <text>live</text>);
@@ -71,7 +71,7 @@ export default widget({ name: "Reachable Budget", size: [320, 200] }, () => <tex
 });
 
 test("check takes the maximum across every JSX return branch", () => {
-  const oversized = `<column>${Array.from({ length: 128 }, () => "<row />").join("")}</column>`;
+  const oversized = `<column>${Array.from({ length: 1024 }, () => "<row />").join("")}</column>`;
   const widgetSource = `import { widget } from "@weaver/sdk";
 function Branch({ large }: { large: boolean }) {
   if (!large) return <text>small</text>;
@@ -83,7 +83,7 @@ export default widget({ name: "Branch Budget", size: [320, 200] }, () => <Branch
   try {
     const checked = runCli(root, "check", widget);
     assert.equal(checked.status, 1);
-    assert.match(checked.stderr, /LoweredWidgetNodeLimit: this tree lowers to 129 Native nodes/);
+    assert.match(checked.stderr, /LoweredWidgetNodeLimit: this tree lowers to 1025 Native nodes/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -109,25 +109,25 @@ export default widget({ name: "Branch Maximum", size: [320, 200] }, () => <Branc
 });
 
 test("check names the direct-child budget and authored ask", () => {
-  const children = Array.from({ length: 25 }, () => "<row />").join("");
+  const children = Array.from({ length: 65 }, () => "<row />").join("");
   const { root, widget } = fixture(source(`<column>${children}</column>`));
   try {
     const checked = runCli(root, "check", widget);
     assert.equal(checked.status, 1);
     assert.match(checked.stderr, /LoweredWidgetChildLimit/);
-    assert.match(checked.stderr, /max_children=24, asked for 25, headroom=-1/);
+    assert.match(checked.stderr, /max_children=64, asked for 65, headroom=-1/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
 
 test("check names the static text byte budget and authored ask", () => {
-  const { root, widget } = fixture(source(`<text>${"x".repeat(193)}</text>`));
+  const { root, widget } = fixture(source(`<text>${"x".repeat(1025)}</text>`));
   try {
     const checked = runCli(root, "check", widget);
     assert.equal(checked.status, 1);
     assert.match(checked.stderr, /LoweredWidgetTextLimit/);
-    assert.match(checked.stderr, /max_text_bytes=192, asked for 193, headroom=-1/);
+    assert.match(checked.stderr, /max_text_bytes=1024, asked for 1025, headroom=-1/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -147,19 +147,19 @@ test("check names the canvas budget and authored ask", () => {
 });
 
 test("check counts statically evident implicit text children", () => {
-  const primitives = Array.from({ length: 128 }, (_, index) => `{${index}}`).join("");
+  const primitives = Array.from({ length: 1024 }, (_, index) => `{${index}}`).join("");
   const { root, widget } = fixture(source(`<column>${primitives}</column>`));
   try {
     const checked = runCli(root, "check", widget);
     assert.equal(checked.status, 1);
-    assert.match(checked.stderr, /LoweredWidgetNodeLimit: this tree lowers to 129 Native nodes/);
+    assert.match(checked.stderr, /LoweredWidgetNodeLimit: this tree lowers to 1025 Native nodes/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
 
 test("check resolves one level of local imported components", () => {
-  const importedTree = `<column>${Array.from({ length: 128 }, () => "<row />").join("")}</column>`;
+  const importedTree = `<column>${Array.from({ length: 1024 }, () => "<row />").join("")}</column>`;
   const widgetSource = `import { widget } from "@weaver/sdk";
 import { ImportedTree as Tree } from "./tree";
 export default widget({ name: "Imported Budget", size: [320, 200] }, () => <Tree />);
@@ -170,7 +170,7 @@ export default widget({ name: "Imported Budget", size: [320, 200] }, () => <Tree
   try {
     const checked = runCli(root, "check", widget);
     assert.equal(checked.status, 1);
-    assert.match(checked.stderr, /LoweredWidgetNodeLimit: this tree lowers to 129 Native nodes/);
+    assert.match(checked.stderr, /LoweredWidgetNodeLimit: this tree lowers to 1025 Native nodes/);
     assert.match(checked.stderr, /one level of relative imports/);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -178,7 +178,7 @@ export default widget({ name: "Imported Budget", size: [320, 200] }, () => <Tree
 });
 
 test("check resolves a directly imported default function component", () => {
-  const importedTree = `<column>${Array.from({ length: 128 }, () => "<row />").join("")}</column>`;
+  const importedTree = `<column>${Array.from({ length: 1024 }, () => "<row />").join("")}</column>`;
   const widgetSource = `import { widget } from "@weaver/sdk";
 import Tree from "./tree";
 export default widget({ name: "Default Import Budget", size: [320, 200] }, () => <Tree />);
@@ -189,14 +189,14 @@ export default widget({ name: "Default Import Budget", size: [320, 200] }, () =>
   try {
     const checked = runCli(root, "check", widget);
     assert.equal(checked.status, 1);
-    assert.match(checked.stderr, /LoweredWidgetNodeLimit: this tree lowers to 129 Native nodes/);
+    assert.match(checked.stderr, /LoweredWidgetNodeLimit: this tree lowers to 1025 Native nodes/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
 
 test("check resolves a directly imported aliased default export", () => {
-  const importedTree = `<column>${Array.from({ length: 128 }, () => "<row />").join("")}</column>`;
+  const importedTree = `<column>${Array.from({ length: 1024 }, () => "<row />").join("")}</column>`;
   const widgetSource = `import { widget } from "@weaver/sdk";
 import Tree from "./tree";
 export default widget({ name: "Aliased Default Budget", size: [320, 200] }, () => <Tree />);
@@ -207,14 +207,14 @@ export default widget({ name: "Aliased Default Budget", size: [320, 200] }, () =
   try {
     const checked = runCli(root, "check", widget);
     assert.equal(checked.status, 1);
-    assert.match(checked.stderr, /LoweredWidgetNodeLimit: this tree lowers to 129 Native nodes/);
+    assert.match(checked.stderr, /LoweredWidgetNodeLimit: this tree lowers to 1025 Native nodes/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
 
 test("check resolves nested helpers in their declaring module", () => {
-  const oversized = `<column>${Array.from({ length: 128 }, () => "<row />").join("")}</column>`;
+  const oversized = `<column>${Array.from({ length: 1024 }, () => "<row />").join("")}</column>`;
   const widgetSource = `import { widget } from "@weaver/sdk";
 import { SmallTree } from "./small";
 import { LargeTree } from "./large";
@@ -228,7 +228,7 @@ export default widget({ name: "Module Scope Budget", size: [320, 200] }, () => <
   try {
     const checked = runCli(root, "check", widget);
     assert.equal(checked.status, 1);
-    assert.match(checked.stderr, /LoweredWidgetNodeLimit: this tree lowers to 129 Native nodes/);
+    assert.match(checked.stderr, /LoweredWidgetNodeLimit: this tree lowers to 1025 Native nodes/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

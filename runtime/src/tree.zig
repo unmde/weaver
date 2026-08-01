@@ -1,12 +1,50 @@
 const std = @import("std");
 const native_sdk = @import("native_sdk");
 
-pub const max_nodes: usize = 128;
-pub const max_children: usize = 24;
-pub const max_text_bytes: usize = 192;
-pub const max_source_bytes: usize = 260;
+// Retained-tree receipt (2026-07-30): executing every shipped TSX example
+// measured 54 lowered nodes at worst (noro-shell). The Native SDK's realistic
+// three-pane view measures about 500 nodes, so 1024 is the shared ~2x
+// worst-good tripwire. @sizeOf(Node) is 1,928 bytes: one Tree reserves
+// 1,974,272 bytes for slots, and the reusable transaction snapshot reserves a
+// second arena (3,948,544 bytes total address space after first render).
+// Slots/large fields are undefined until occupied and snapshots copy occupied
+// slots only, so ~900 unused slots are neither zeroed nor copied; OS pages are
+// touched as IDs become live. The Model's node-indexed slider mirror adds one
+// eager 4 KiB array. Pinned by cli/src/index.ts nativeWidgetNodeLimit.
+pub const max_nodes: usize = 1024;
+// The examples measured 24 direct children (noro-shell and now-playing).
+// 64 leaves 2.7x headroom for ordinary lists. The child array contributes 256
+// bytes to each occupied 1,928-byte Node; unoccupied slots stay untouched.
+// Pinned by cli/src/index.ts nativeWidgetChildLimit.
+pub const max_children: usize = 64;
+// The longest shipped text node is 122 UTF-8 bytes; provider metadata may be
+// 512 bytes per field. 1024 is 2x that protocol-sized good case. Text storage
+// contributes 1 KiB to each occupied Node; unoccupied slots stay untouched.
+// Pinned by cli/src/index.ts nativeWidgetTextByteLimit.
+pub const max_text_bytes: usize = 1024;
+// Image-source receipt (2026-07-30): shipped relative asset paths peak at 24
+// UTF-8 bytes and the provider wire admits 259-byte art paths. 1024 leaves
+// almost 4x headroom over that cross-process good case. Sources allocate their
+// exact length; even if all 1024 nodes were abused as images, retained source
+// storage is bounded to 1 MiB plus 1 MiB in an in-flight transaction snapshot.
+// Pinned by cli/src/index.ts nativeWidgetSourceByteLimit; release-audit.mjs
+// enforces equality across the language boundary.
+pub const max_source_bytes: usize = 1024;
+// Lucide 1.26.0 measures 2,099 UTF-8 bytes for its largest normalized path
+// ("puzzle"); shipped widgets measure 1,037 bytes. 8 KiB leaves 3.9x headroom.
+// Paths allocate their exact length, so the unused allowance costs no memory.
+// Pinned by cli/src/icon-paths.ts MAX_ICON_PATH_BYTES.
 pub const max_icon_path_bytes: usize = 8 * 1024;
+// Font discovery accepts 1..63-byte file stems and the longest shipped family
+// is 17 bytes. This is a cross-boundary format bound (not an OS path limit);
+// the inline bytes live only in lazily occupied Nodes. Pinned by
+// cli/src/index.ts MAX_WIDGET_FONT_FAMILY_BYTES.
 pub const max_font_family_bytes: usize = 63;
+// The shipped examples use one canvas per view. Eight permits a dense good
+// dashboard with four independently refreshed plots and leaves 2x headroom.
+// Each CanvasState is 294,960 bytes (~2.25 MiB reserved across eight), but its
+// command/point arrays stay undefined and pages are touched only as canvases
+// draw. Pinned by cli/src/index.ts nativeWidgetCanvasLimit.
 pub const max_canvases: usize = 8;
 // Authored-canvas batch budgets, sized to the Native SDK's per-view
 // display-list budget (`canvas_limits.max_canvas_commands_per_view` = 2048)
@@ -69,17 +107,16 @@ pub const InteractionStyle = struct {
     }
 };
 
-/// One bounded retained node. M0 deliberately keeps ownership simple: JS ids
-/// index this table, strings and child lists live inline, and a whole widget
-/// cannot silently turn bridge traffic into an unbounded native heap.
+/// One bounded retained node. JS ids index the tree's reserved table. Common
+/// strings and child lists live inline; rare, independently-sized asset
+/// strings are exact heap allocations.
 pub const Node = struct {
-    alive: bool = false,
     lifetime: u64 = 0,
     kind: Kind = .column,
     parent: ?NodeId = null,
-    children: [max_children]NodeId = @splat(0),
+    children: [max_children]NodeId = undefined,
     child_count: usize = 0,
-    text: [max_text_bytes]u8 = @splat(0),
+    text: [max_text_bytes]u8 = undefined,
     text_len: usize = 0,
     padding: f32 = 0,
     padding_top: f32 = -1,
@@ -108,7 +145,7 @@ pub const Node = struct {
     text_shadow: ?native_sdk.canvas.TextShadow = null,
     font_scale: f32 = 1,
     font_weight: FontWeight = .regular,
-    font_family: [max_font_family_bytes]u8 = @splat(0),
+    font_family: [max_font_family_bytes]u8 = undefined,
     font_family_len: usize = 0,
     text_align: TextAlign = .start,
     line_height: f32 = 0,
@@ -140,10 +177,11 @@ pub const Node = struct {
     handles_change: bool = false,
     value: f32 = 0,
     max: f32 = 1,
-    source: [max_source_bytes]u8 = @splat(0),
-    source_len: usize = 0,
+    /// Asset paths have no useful protocol bound. Allocate the authored value
+    /// exactly instead of turning an arbitrary path length into a tree budget.
+    source: []u8 = &.{},
     /// Rare, independently-budgeted icon geometry. Keeping this heap-owned
-    /// avoids adding 8 KiB to every one of the 128 retained nodes.
+    /// avoids adding 8 KiB to every retained node.
     icon_path: []u8 = &.{},
     icon_view_box: native_sdk.geometry.RectF = native_sdk.geometry.RectF.init(0, 0, 24, 24),
     icon_stroke: f32 = 0,
@@ -156,7 +194,7 @@ pub const Node = struct {
     }
 
     pub fn sourceSlice(self: *const Node) []const u8 {
-        return self.source[0..self.source_len];
+        return self.source;
     }
 
     pub fn iconPathSlice(self: *const Node) []const u8 {
@@ -207,8 +245,12 @@ pub const CanvasState = struct {
 /// synchronization.
 pub const Tree = struct {
     allocator: std.mem.Allocator = std.heap.page_allocator,
-    nodes: [max_nodes]Node = [_]Node{.{}} ** max_nodes,
-    canvases: [max_canvases]CanvasState = [_]CanvasState{.{}} ** max_canvases,
+    // Occupancy makes the large node arena a lazy reservation: never inspect
+    // a slot unless its bit is set.
+    occupied: std.StaticBitSet(max_nodes) = std.StaticBitSet(max_nodes).initEmpty(),
+    nodes: [max_nodes]Node = undefined,
+    canvas_occupied: std.StaticBitSet(max_canvases) = std.StaticBitSet(max_canvases).initEmpty(),
+    canvases: [max_canvases]CanvasState = undefined,
     root: ?NodeId = null,
     generation: u64 = 0,
     canvas_generation: u64 = 0,
@@ -225,10 +267,12 @@ pub const Tree = struct {
 
     fn deinitNodes(self: *Tree) void {
         const allocator = self.allocator;
-        for (&self.nodes) |*entry| {
+        for (&self.nodes, 0..) |*entry, index| {
+            if (!self.occupied.isSet(index)) continue;
+            if (entry.source.len > 0) allocator.free(entry.source);
             if (entry.icon_path.len > 0) allocator.free(entry.icon_path);
-            entry.icon_path = &.{};
         }
+        self.occupied = std.StaticBitSet(max_nodes).initEmpty();
     }
 
     pub fn beginBatch(self: *Tree) Error!void {
@@ -239,7 +283,7 @@ pub const Tree = struct {
             } else try self.allocator.create(Tree);
             errdefer {
                 snapshot.deinitNodes();
-                snapshot.* = .{ .allocator = self.allocator };
+                resetEmpty(snapshot, self.allocator);
                 self.snapshot_storage = snapshot;
             }
             try self.cloneInto(snapshot);
@@ -288,24 +332,24 @@ pub const Tree = struct {
         self.* = snapshot.*;
         self.transaction_snapshot = null;
         self.snapshot_storage = snapshot;
-        rebaseCanvasPointSlices(snapshot, self);
-        snapshot.* = .{ .allocator = allocator };
+        rebaseInternalSlices(snapshot, self);
+        resetEmpty(snapshot, allocator);
     }
 
     pub fn moveFrom(self: *Tree, source: *Tree) void {
         self.deinit();
         const source_allocator = source.allocator;
         self.* = source.*;
-        rebaseCanvasPointSlices(source, self);
-        source.* = .{ .allocator = source_allocator };
+        rebaseInternalSlices(source, self);
+        resetEmpty(source, source_allocator);
     }
 
     pub fn nodeCount(self: *const Tree) usize {
-        var count: usize = 0;
-        for (&self.nodes) |*node_value| if (node_value.alive) {
-            count += 1;
-        };
-        return count;
+        return self.occupied.count();
+    }
+
+    pub fn isNodeSlotOccupied(self: *const Tree, index: usize) bool {
+        return index < max_nodes and self.occupied.isSet(index);
     }
 
     pub const CanvasAncestorViolation = struct {
@@ -316,7 +360,7 @@ pub const Tree = struct {
 
     pub fn canvasAncestorViolation(self: *const Tree) ?CanvasAncestorViolation {
         for (&self.nodes, 0..) |*node_value, index| {
-            if (!node_value.alive or node_value.kind != .canvas) continue;
+            if (!self.occupied.isSet(index) or node_value.kind != .canvas) continue;
             const canvas_id: NodeId = @intCast(index + 1);
             var ancestor_id = node_value.parent;
             while (ancestor_id) |id| {
@@ -338,16 +382,13 @@ pub const Tree = struct {
         const allocator = self.allocator;
         const snapshot_storage = self.snapshot_storage;
         const next_generation = self.generation +% 1;
-        self.* = .{
-            .allocator = allocator,
-            .generation = next_generation,
-            .snapshot_storage = snapshot_storage,
-        };
+        resetEmpty(self, allocator);
+        self.generation = next_generation;
+        self.snapshot_storage = snapshot_storage;
 
         const root_id: NodeId = 1;
         const text_id: NodeId = 2;
         self.nodes[0] = .{
-            .alive = true,
             .lifetime = self.next_node_lifetime,
             .kind = .column,
             .children = block: {
@@ -361,9 +402,9 @@ pub const Tree = struct {
             .grow = 1,
             .background = native_sdk.canvas.Color.rgba8(52, 12, 18, 255),
         };
+        self.occupied.set(0);
         self.next_node_lifetime +%= 1;
         self.nodes[1] = .{
-            .alive = true,
             .lifetime = self.next_node_lifetime,
             .kind = .text,
             .parent = root_id,
@@ -373,6 +414,7 @@ pub const Tree = struct {
             .line_height = 1.25,
             .line_clamp = 6,
         };
+        self.occupied.set(1);
         self.next_node_lifetime +%= 1;
         const safe_length = validUtf8Prefix(message, @min(message.len, max_text_bytes));
         @memcpy(self.nodes[1].text[0..safe_length], message[0..safe_length]);
@@ -381,17 +423,43 @@ pub const Tree = struct {
     }
 
     fn cloneInto(self: *const Tree, destination: *Tree) Error!void {
-        destination.* = self.*;
-        destination.transaction_snapshot = null;
-        destination.snapshot_storage = null;
-        for (&destination.nodes) |*node_value| node_value.icon_path = &.{};
+        resetEmpty(destination, self.allocator);
+        destination.root = self.root;
+        destination.generation = self.generation;
+        destination.next_node_lifetime = self.next_node_lifetime;
+        destination.batch_depth = self.batch_depth;
+        destination.batch_changed = self.batch_changed;
         errdefer destination.deinitNodes();
-        for (self.nodes, 0..) |node_value, index| {
+        for (&self.nodes, 0..) |*node_value, index| {
+            if (!self.occupied.isSet(index)) continue;
+            destination.nodes[index] = node_value.*;
+            destination.nodes[index].source = &.{};
+            destination.nodes[index].icon_path = &.{};
+            destination.occupied.set(index);
+            if (node_value.source.len > 0) {
+                destination.nodes[index].source = try self.allocator.dupe(u8, node_value.source);
+            }
             if (node_value.icon_path.len > 0) {
                 destination.nodes[index].icon_path = try self.allocator.dupe(u8, node_value.icon_path);
             }
         }
-        rebaseCanvasPointSlices(self, destination);
+        for (&self.canvases, 0..) |*canvas, index| {
+            if (!self.canvas_occupied.isSet(index)) continue;
+            const copy = &destination.canvases[index];
+            resetCanvas(copy);
+            copy.owner = canvas.owner;
+            copy.layout_width = canvas.layout_width;
+            copy.layout_height = canvas.layout_height;
+            copy.command_layout_width = canvas.command_layout_width;
+            copy.command_layout_height = canvas.command_layout_height;
+            copy.command_count = canvas.command_count;
+            copy.point_count = canvas.point_count;
+            copy.fingerprint = canvas.fingerprint;
+            @memcpy(copy.commands[0..canvas.command_count], canvas.commands[0..canvas.command_count]);
+            @memcpy(copy.points[0..canvas.point_count], canvas.points[0..canvas.point_count]);
+            destination.canvas_occupied.set(index);
+        }
+        rebaseInternalSlices(self, destination);
     }
 
     fn recycleSnapshot(self: *Tree) void {
@@ -400,7 +468,7 @@ pub const Tree = struct {
         snapshot.transaction_snapshot = null;
         snapshot.snapshot_storage = null;
         snapshot.deinitNodes();
-        snapshot.* = .{ .allocator = self.allocator };
+        resetEmpty(snapshot, self.allocator);
         std.debug.assert(self.snapshot_storage == null);
         self.snapshot_storage = snapshot;
     }
@@ -424,19 +492,23 @@ pub const Tree = struct {
 
     pub fn createNode(self: *Tree, kind: Kind) Error!NodeId {
         for (&self.nodes, 0..) |*slot, index| {
-            if (slot.alive) continue;
+            if (self.occupied.isSet(index)) continue;
             var canvas_index: ?usize = null;
             if (kind == .canvas) {
                 canvas_index = for (&self.canvases, 0..) |*canvas, candidate| {
-                    if (canvas.owner == 0) break candidate;
+                    _ = canvas;
+                    if (!self.canvas_occupied.isSet(candidate)) break candidate;
                 } else return error.CanvasLimit;
             }
-            slot.* = .{ .alive = true, .lifetime = self.next_node_lifetime, .kind = kind };
+            slot.* = .{ .lifetime = self.next_node_lifetime, .kind = kind };
+            self.occupied.set(index);
             self.next_node_lifetime +%= 1;
             if (self.next_node_lifetime == 0) self.next_node_lifetime = 1;
             if (canvas_index) |canvas_slot| {
                 const id: NodeId = @intCast(index + 1);
-                self.canvases[canvas_slot] = .{ .owner = id };
+                resetCanvas(&self.canvases[canvas_slot]);
+                self.canvases[canvas_slot].owner = id;
+                self.canvas_occupied.set(canvas_slot);
                 slot.canvas_slot = @intCast(canvas_slot + 1);
             }
             self.changed();
@@ -447,15 +519,15 @@ pub const Tree = struct {
 
     pub fn node(self: *Tree, id: NodeId) Error!*Node {
         if (id == 0 or id > max_nodes) return error.InvalidNode;
+        if (!self.occupied.isSet(id - 1)) return error.InvalidNode;
         const result = &self.nodes[id - 1];
-        if (!result.alive) return error.InvalidNode;
         return result;
     }
 
     pub fn nodeConst(self: *const Tree, id: NodeId) Error!*const Node {
         if (id == 0 or id > max_nodes) return error.InvalidNode;
+        if (!self.occupied.isSet(id - 1)) return error.InvalidNode;
         const result = &self.nodes[id - 1];
-        if (!result.alive) return error.InvalidNode;
         return result;
     }
 
@@ -759,8 +831,9 @@ pub const Tree = struct {
         if (value.len > max_source_bytes) return error.TextTooLong;
         const target = try self.node(id);
         if (std.mem.eql(u8, target.sourceSlice(), value)) return;
-        @memcpy(target.source[0..value.len], value);
-        target.source_len = value.len;
+        const replacement = try self.allocator.dupe(u8, value);
+        if (target.source.len > 0) self.allocator.free(target.source);
+        target.source = replacement;
         self.changed();
     }
 
@@ -840,8 +913,8 @@ pub const Tree = struct {
         if (canvas.fingerprint == fingerprint and canvas.command_count > 0 and
             canvas.command_layout_width == canvas.layout_width and canvas.command_layout_height == canvas.layout_height) return;
         var commands_in_other_canvases: usize = 0;
-        for (&self.canvases) |*other| {
-            if (other.owner != id) commands_in_other_canvases += other.command_count;
+        for (&self.canvases, 0..) |*other, index| {
+            if (self.canvas_occupied.isSet(index) and other.owner != id) commands_in_other_canvases += other.command_count;
         }
         const command_limit = max_canvas_commands -| commands_in_other_canvases;
         // Validate the complete bounded batch before replacing the last good
@@ -1006,9 +1079,10 @@ pub const Tree = struct {
         var children: [max_children]NodeId = undefined;
         @memcpy(children[0..count], target.children[0..count]);
         for (children[0..count]) |child_id| self.removeSubtree(child_id);
-        if (target.canvas_slot > 0) self.canvases[target.canvas_slot - 1] = .{};
+        if (target.canvas_slot > 0) self.canvas_occupied.unset(target.canvas_slot - 1);
+        if (target.source.len > 0) self.allocator.free(target.source);
         if (target.icon_path.len > 0) self.allocator.free(target.icon_path);
-        target.* = .{};
+        self.occupied.unset(id - 1);
     }
 
     fn isAncestor(self: *Tree, ancestor: NodeId, descendant: NodeId) Error!bool {
@@ -1029,8 +1103,33 @@ pub const Tree = struct {
     }
 };
 
-fn rebaseCanvasPointSlices(source: *const Tree, destination: *Tree) void {
+fn resetCanvas(canvas: *CanvasState) void {
+    canvas.owner = 0;
+    canvas.layout_width = 0;
+    canvas.layout_height = 0;
+    canvas.command_layout_width = 0;
+    canvas.command_layout_height = 0;
+    canvas.command_count = 0;
+    canvas.point_count = 0;
+    canvas.fingerprint = 0;
+}
+
+fn resetEmpty(tree: *Tree, allocator: std.mem.Allocator) void {
+    tree.allocator = allocator;
+    tree.occupied = std.StaticBitSet(max_nodes).initEmpty();
+    tree.canvas_occupied = std.StaticBitSet(max_canvases).initEmpty();
+    tree.root = null;
+    tree.generation = 0;
+    tree.next_node_lifetime = 1;
+    tree.batch_depth = 0;
+    tree.batch_changed = false;
+    tree.transaction_snapshot = null;
+    tree.snapshot_storage = null;
+}
+
+fn rebaseInternalSlices(source: *const Tree, destination: *Tree) void {
     for (&destination.canvases, 0..) |*canvas, canvas_index| {
+        if (!destination.canvas_occupied.isSet(canvas_index)) continue;
         const source_canvas = &source.canvases[canvas_index];
         for (canvas.commands[0..canvas.command_count]) |*command| {
             switch (command.*) {
@@ -1229,13 +1328,13 @@ test "error surface is deterministic and replaces authored content" {
     var tree: Tree = .{ .allocator = std.testing.allocator };
     defer tree.deinit();
     _ = try tree.createNode(.canvas);
-    tree.showError("render failed\nnode capacity exhausted: max_nodes=128, asked for 129");
+    tree.showError("render failed\nnode capacity exhausted: max_nodes=1024, asked for 1025");
     try std.testing.expectEqual(@as(usize, 2), tree.nodeCount());
     try std.testing.expectEqual(@as(NodeId, 1), tree.root.?);
     try std.testing.expectEqual(Kind.column, (try tree.nodeConst(1)).kind);
     try std.testing.expectEqual(Kind.text, (try tree.nodeConst(2)).kind);
     try std.testing.expectEqualStrings(
-        "render failed\nnode capacity exhausted: max_nodes=128, asked for 129",
+        "render failed\nnode capacity exhausted: max_nodes=1024, asked for 1025",
         (try tree.nodeConst(2)).textSlice(),
     );
 }
@@ -1259,9 +1358,9 @@ test "canvas ancestor violations name clipping and opacity separately" {
     try std.testing.expectEqual(.opacity, faded.reason);
 }
 
-test "interaction style storage stays fixed and bounded" {
+test "interaction style storage stays fixed per occupied node" {
     try std.testing.expectEqual(@as(usize, 104), @sizeOf(InteractionStyle));
-    try std.testing.expectEqual(@as(usize, 26 * 1024), @sizeOf(InteractionStyle) * 2 * max_nodes);
+    try std.testing.expectEqual(@as(usize, 208), @sizeOf(InteractionStyle) * 2);
 }
 
 test "tree stores styling breadth layout wire properties" {
@@ -1460,4 +1559,18 @@ test "a failed canvas batch preserves the last good frame and shared budget" {
     // Failed work contributes nothing to the per-view budget.
     try tree.setCanvasCommands(second, &.{ 1, 0, 0, 1, 1, 0xffffffff });
     try std.testing.expectEqual(@as(usize, 1), (try tree.canvasStateConst(second)).command_count);
+}
+
+test "asset source paths are bounded, allocate exactly, and survive transaction snapshots" {
+    var tree: Tree = .{ .allocator = std.testing.allocator };
+    defer tree.deinit();
+    const image = try tree.createNode(.image);
+    const long_source = [_]u8{'a'} ** max_source_bytes;
+    try tree.setSource(image, &long_source);
+    try tree.beginBatch();
+    try tree.setSource(image, "replacement.png");
+    tree.abortBatch();
+    try std.testing.expectEqualStrings(&long_source, (try tree.nodeConst(image)).sourceSlice());
+    const over_limit = [_]u8{'b'} ** (max_source_bytes + 1);
+    try std.testing.expectError(error.TextTooLong, tree.setSource(image, &over_limit));
 }

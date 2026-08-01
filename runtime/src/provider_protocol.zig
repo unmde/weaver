@@ -1,10 +1,23 @@
 const std = @import("std");
+const media_pending = @import("media_pending.zig");
 const media_protocol = @import("media_protocol.zig");
 
+// The largest possible media publication is derived and receipted in
+// media_protocol.zig; aliasing it prevents a second frame-size budget.
 pub const frame_line_capacity: usize = media_protocol.max_media_frame_bytes;
+// One host publication cycle can contain CPU, memory, audio, and media: four
+// frames. Four slots preserve that complete measured protocol shape; entries
+// reserve 4 * 12,502 = 50,008 bytes, with pages touched as frames arrive.
 pub const frame_queue_capacity: usize = 4;
-pub const ack_queue_capacity: usize = 4;
+// One acknowledgement slot per live media command. Derivation makes a queue/
+// tracker mismatch impossible; four slots cost only fixed AckSlot metadata.
+pub const ack_queue_capacity: usize = media_pending.capacity;
+// The longest legal seek command (u64 seek, JS-safe id, newline) measures 86
+// UTF-8 bytes. 256 leaves almost 3x protocol-format headroom and costs one
+// fixed stack buffer while a command is sent.
 pub const command_line_capacity: usize = 256;
+// IEEE-754's largest exactly representable integer. This is a JS/wire
+// invariant, not a capacity budget; larger IDs cannot round-trip exactly.
 pub const max_safe_id: u64 = 9_007_199_254_740_991;
 
 pub const Ack = struct {

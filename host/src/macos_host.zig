@@ -19,6 +19,13 @@ const c = @cImport({
 const max_widgets = supervisor.max_widgets;
 const max_path_bytes = supervisor.max_path_bytes;
 const provider_environment = "WEAVER_HOST_ENDPOINT";
+const shared_renderer_environment = "NATIVE_SDK_GPU_SHARED_RENDERER";
+const render_host_name_environment = "WEAVER_RENDER_HOST_NAME";
+const render_host_default_name = "com.weaver.render-host";
+/// Restart backoff for a crashed render host. Widgets reconnect lazily on
+/// their existing 1/5/30 s retry cadence, so one second of host absence
+/// costs at most one retained-frame beat.
+const render_host_restart_backoff_ms = 1000;
 const art_cache_environment = "WEAVER_ART_CACHE";
 const backend_environment = "WEAVER_BACKEND_FILE";
 
@@ -431,6 +438,15 @@ const Host = struct {
     /// helper on a player-less CI runner.
     automation_seam: bool = false,
     status_write_failures: u64 = 0,
+    /// The shared render host: one Metal-owning process every widget's
+    /// frames route through (docs/macos-memory-handoff.md carries the
+    /// receipts — widgets drop from ~125 MB to ~30 MB because only this
+    /// process pays the GPU driver's per-process submission arena).
+    /// Supervised here like a widget: crash -> respawn with backoff;
+    /// widgets reconnect on their own.
+    render_host_name: []const u8 = render_host_default_name,
+    render_host_process: ?posix.pid_t = null,
+    render_host_restart_at_ms: u64 = 0,
 
     fn loadRegistry(self: *Host) !void {
         const owned_bytes = std.Io.Dir.cwd().readFileAlloc(self.io, self.registry_path, self.allocator, .limited(256 * 1024)) catch |err| switch (err) {
@@ -559,6 +575,70 @@ const Host = struct {
         }
     }
 
+    /// Keep exactly one render host alive. The automation seam keeps the
+    /// legacy in-process renderer (its verdicts sample the widget's own
+    /// drawable), so it neither spawns a host nor points widgets at one.
+    fn superviseRenderHost(self: *Host, now_ms: u64) void {
+        if (self.automation_seam) return;
+        if (self.render_host_process) |pid| {
+            var status: c_int = 0;
+            const result = posix.system.waitpid(pid, &status, posix.W.NOHANG);
+            if (posix.errno(result) != .SUCCESS or result == 0) return;
+            std.log.warn("render host pid={d} exited; restarting in {d} ms (widgets keep retained frames and reconnect)", .{ pid, render_host_restart_backoff_ms });
+            self.removeChildMarker(pid);
+            self.render_host_process = null;
+            self.render_host_restart_at_ms = now_ms + render_host_restart_backoff_ms;
+        }
+        if (self.render_host_process != null or now_ms < self.render_host_restart_at_ms) return;
+        const argv = [_][]const u8{ self.runtime_exe, "--render-host", self.render_host_name };
+        var environment = self.environ_map.clone(self.allocator) catch return;
+        defer environment.deinit();
+        const child = std.process.spawn(self.io, .{
+            .argv = &argv,
+            .environ_map = &environment,
+            .stdin = .ignore,
+            .stdout = .ignore,
+            .stderr = .ignore,
+            .pgid = 0,
+        }) catch |err| {
+            std.log.err("render host spawn failed: {s}; retrying in {d} ms", .{ @errorName(err), render_host_restart_backoff_ms });
+            self.render_host_restart_at_ms = now_ms + render_host_restart_backoff_ms;
+            return;
+        };
+        self.render_host_process = child.id.?;
+        self.writeChildMarker(child.id.?) catch {};
+        std.log.info("render host started pid={d} name={s}", .{ child.id.?, self.render_host_name });
+    }
+
+    fn stopRenderHost(self: *Host) void {
+        const pid = self.render_host_process orelse return;
+        // Same escalation as widget teardown: the marker is removed only
+        // after the process is actually dead and reaped — a TERM-ignoring
+        // host must never outlive its recovery marker, or the next weaverd
+        // cannot find the orphan.
+        posix.kill(pid, .TERM) catch {};
+        var status: c_int = 0;
+        const deadline = monotonicMilliseconds() + 1500;
+        var dead = false;
+        while (monotonicMilliseconds() < deadline) {
+            const result = posix.system.waitpid(pid, &status, posix.W.NOHANG);
+            if (posix.errno(result) == .CHILD or (posix.errno(result) == .SUCCESS and result != 0)) {
+                dead = true;
+                break;
+            }
+            std.Io.sleep(self.io, .fromMilliseconds(20), .awake) catch break;
+        }
+        if (!dead) {
+            posix.kill(pid, .KILL) catch {};
+            while (true) {
+                const result = posix.system.waitpid(pid, &status, 0);
+                if (posix.errno(result) != .INTR) break;
+            }
+        }
+        self.removeChildMarker(pid);
+        self.render_host_process = null;
+    }
+
     fn restartAfterMediaChannelFailure(self: *Host, slot: *Slot, now_ms: u64) void {
         std.log.warn("restarting widget {s} after fatal provider channel failure", .{slot.name()});
         self.stopSlot(slot, false);
@@ -621,6 +701,12 @@ const Host = struct {
         try environment.put(backend_environment, backend_path);
         if (endpoint_path) |path| try environment.put(provider_environment, path);
         if (slot.wants_media) try environment.put(art_cache_environment, self.art_cache_root);
+        if (!self.automation_seam) {
+            // The macOS cutover: weaverd-owned widgets render through the
+            // shared host and never create a Metal device in-process.
+            try environment.put(shared_renderer_environment, "1");
+            try environment.put(render_host_name_environment, self.render_host_name);
+        }
         const dev_argv = [_][]const u8{ self.runtime_exe, "--dev", dist };
         const run_argv = [_][]const u8{ self.runtime_exe, dist };
         const argv: []const []const u8 = if (slot.dev) &dev_argv else &run_argv;
@@ -1051,6 +1137,7 @@ fn run(init: std.process.Init) !void {
         .media_provider = &media_provider,
         .art_cache_root = art_cache_root,
         .automation_seam = c.weaver_macos_automation_seam() != 0,
+        .render_host_name = init.environ_map.get(render_host_name_environment) orelse render_host_default_name,
     };
     defer host.audio_provider.deinit();
     try host.loadRegistry();
@@ -1079,6 +1166,7 @@ fn run(init: std.process.Init) !void {
             },
         };
         const now = monotonicMilliseconds();
+        host.superviseRenderHost(now);
         host.supervise(now);
         host.drainMediaCommands(now);
         host.sampleAudio(now);
@@ -1104,6 +1192,7 @@ fn run(init: std.process.Init) !void {
         if (!stopping) std.Io.sleep(init.io, .fromMilliseconds(if (host.hasAudioSubscribers()) 30 else 50), .awake) catch {};
     }
     for (&host.slots) |*slot| if (slot.platform.process != null) host.stopSlot(slot, true);
+    host.stopRenderHost();
     host.audio_provider.setActive(false, monotonicMilliseconds());
     host.media_provider.setActive(false);
     // The down acknowledgement is sent before slot teardown. Detached command

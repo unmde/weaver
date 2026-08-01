@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -311,6 +311,8 @@ export default widget({
   writeFileSync(join(scratch, "visualizer-two", "widget.tsx"), visualizerSource
     .replace('name: "Visualizer"', 'name: "Visualizer 2"')
     .replace("offset: [24, 24]", "offset: [336, 24]"), "utf8");
+  cpSync(join(repoRoot, "examples", "visualizer", "assets"), join(scratch, "visualizer-two", "assets"), { recursive: true });
+  cpSync(join(repoRoot, "examples", "visualizer", "Cozette-Subset.ttf"), join(scratch, "visualizer-two", "Cozette-Subset.ttf"));
   writeFileSync(audioControl, "s", "utf8");
   const visualizerInstalls = await Promise.all([
     runAsync(["install", join(repoRoot, "examples", "visualizer")]),

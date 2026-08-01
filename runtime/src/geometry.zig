@@ -15,6 +15,10 @@ pub const Saved = struct {
     scale: f32,
 };
 
+// Geometry receipt (2026-07-29): the complete encoded record is bounded by
+// the 128-byte formatter below (the round-trip fixture is 33 bytes). A 512-byte
+// read cap leaves 4x format/whitespace headroom. Reads allocate actual length,
+// so unused allowance costs no memory.
 const max_file_bytes: usize = 512;
 
 /// One widget owns one small JSON record beside (not inside) its
@@ -46,6 +50,9 @@ pub const Store = struct {
     /// Write beside the destination, then rename over it — a killed
     /// widget process never leaves a truncated record behind.
     pub fn save(self: *const Store, value: Saved) !void {
+        // Three finite f32 values plus JSON punctuation fit in <128 bytes by
+        // construction; the measured round-trip record is 33. Undefined stack
+        // storage costs 128 bytes only while saving.
         var buffer: [128]u8 = undefined;
         const bytes = try format(&buffer, value);
         var cwd = std.Io.Dir.cwd();
@@ -63,6 +70,8 @@ pub fn format(buffer: []u8, value: Saved) ![]const u8 {
 
 pub fn parse(bytes: []const u8) ?Saved {
     const Record = struct { x: f64, y: f64, scale: f64 };
+    // The parser arena is 2x max_file_bytes, leaving one input-sized copy of
+    // headroom for this flat three-number object. It costs 1 KiB on load only.
     var parse_buffer: [1024]u8 = undefined;
     var fixed = std.heap.FixedBufferAllocator.init(&parse_buffer);
     const record = std.json.parseFromSliceLeaky(Record, fixed.allocator(), bytes, .{}) catch return null;

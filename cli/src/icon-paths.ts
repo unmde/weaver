@@ -1,6 +1,11 @@
 import { createRequire } from "node:module";
 import { SVGPathData, SVGPathDataTransformer, type SVGCommand } from "svg-pathdata";
 
+// Lucide Static 1.26.0 contains 1,749 icons; normalizing the whole catalog
+// measured "puzzle" largest at 2,099 UTF-8 bytes (45 path elements), while
+// shipped widgets peak at 1,037. 8 KiB leaves 3.9x byte headroom. The runtime
+// allocates exact path length, so unused allowance costs no memory. Pinned to
+// runtime/src/tree.zig max_icon_path_bytes.
 export const MAX_ICON_PATH_BYTES = 8 * 1024;
 export const LUCIDE_STATIC_VERSION = "1.26.0";
 export const LUCIDE_STATIC_SHA1 = "cdaec64ebb9ba10d9ce0fc065184b9dde3eb992d";
