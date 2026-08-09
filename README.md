@@ -90,6 +90,18 @@ installer/updater, or public gallery. Only noro-player has cleared the full
 beta skin-parity bar. Those are the roadmap, not footnotes; see
 [`docs/ROADMAP.md`](docs/ROADMAP.md) for the current sequence.
 
+## Sponsors
+
+Weaver's open-source development is supported by:
+
+<a href="https://www.greptile.com/open-source">
+  <img src="https://www.greptile.com/wordmark-logo-green.svg" alt="Greptile" height="32">
+</a>
+
+[Greptile's Open Source Program](https://www.greptile.com/open-source) provides AI code review for the project.
+
+**[OpenAI — Codex for Open Source](https://openai.com/form/codex-for-oss/)** provides tooling and credits for open-source maintenance.
+
 ## Quickstart
 
 Prerequisites: Windows 11 or macOS 14.2+, [Node 22+](https://nodejs.org), and
