@@ -34,7 +34,7 @@ only answers: is each number justified, and if not, what should it be?
 
 The seed inventory below was produced with:
 
-```
+```sh
 rg -n 'pub const max_|const max_|_cap|Limit|MAX_' runtime/src cli/src sdk/src
 ```
 
@@ -75,22 +75,23 @@ as constants.
   resize.
 - `runtime/native-sdk/src/runtime/canvas_limits.zig` — the model citizen.
   Read it before writing any receipt; match its format.
+- `runtime/src/main.zig` `max_images = 16` and
+  `max_image_load_attempts = 3` — receipts are present; verify only that their
+  assumptions and mirrors remain synchronized.
 
 ### Runtime, unreceipted
 
 - `runtime/src/bridge.zig:27-28` `max_timers = 16`, `max_fetches = 4`.
   4 concurrent fetches for a widget that polls two APIs plus loads art may be
   tight; measure.
-- `runtime/src/main.zig:73-74` `max_images = 16`, `max_image_load_attempts = 3`.
 - `runtime/src/network.zig:10-11` request/response caps at 5 MiB each.
 - `runtime/src/provider_protocol.zig:5-7` frame/ack queue capacity 4,
   command_line_capacity 256.
 - `runtime/src/media_protocol.zig:3-5` text 512, source_app 256, art_path 259.
 - `runtime/src/geometry.zig:18` `max_file_bytes = 512` for the geometry file.
-- Also from the error-propagation brief: the 256 KiB decoded-image cap
-  (`canvas_limits.zig:118`, widget profile) — hit by any real album art; the
-  bundled cover.jpg sits exactly at it. This one has a receipt problem AND a
-  sizing problem.
+- The decoded-image cap is now 1 MiB. A 256×256 RGBA image is 256 KiB and
+  passes; verify the receipt and CLI/runtime mirror rather than treating that
+  measured fixture as over-budget.
 - QuickJS stack bounds (see commit `20b5a46`) — find where the bound is set
   and whether it has a receipt.
 
@@ -106,13 +107,16 @@ as constants.
 
 ## Mirrored constants — resizes must move in lockstep
 
-- `cli/src/index.ts:1006-1007` `nativeWidgetNodeLimit = 128`,
-  `nativeWidgetDepthLimit = 32` are hand-copied mirrors of the runtime
-  budgets so `weaver check` can fail early. Any resize of `tree.zig` budgets
-  that skips these makes check lie. Preferred fix while you're there: emit or
-  import the numbers from one source of truth so this class of drift can't
-  recur; if that's not obvious to do, at minimum leave a comment on both sides
-  pointing at each other.
+- `cli/src/index.ts` mirrors the runtime tree limits for nodes (1024), depth
+  (32), children (64), text bytes (1024), source bytes (1024), and canvases
+  (8) so `weaver check` can fail early. `scripts/release-audit.mjs` enforces
+  lockstep; any new mirror must join that audit.
+- `cli/src/index.ts:maxImageStreamBytes` ↔
+  `runtime/src/main.zig:max_image_stream_bytes`.
+- `cli/src/index.ts:nativeImagePixelByteLimit` ↔
+  `runtime/src/main.zig:max_image_rgba_bytes`.
+- `cli/src/index.ts:nativeWidgetSourceByteLimit` ↔
+  `runtime/src/tree.zig:max_source_bytes`.
 - Depth limit 32: find the runtime-side counterpart and receipt both.
 - Precedent for cross-boundary pinning done right:
   `canvas_limits.zig:46-57` documents that the AppKit host pins
@@ -137,11 +141,13 @@ as constants.
 
 ## Acceptance
 
-- `rg -n 'pub const max_|const max_|MAX_' runtime/src cli/src sdk/src` returns
-  zero constants that lack either a receipt comment or a "protocol/OS bound"
-  comment at the definition site.
-- `tree.zig` and `cli/src/index.ts` budget mirrors agree (ideally by
-  construction).
+- Re-run the full inventory query—including `_cap`, `Limit`, `MAX_`, and
+  camelCase `max...` names—across `runtime/src`, `cli/src`, and `sdk/src`, plus
+  the separate SDK soft-limit sweep for slicing and truncation. For every
+  result, inspect the definition site and require an adjacent receipt or
+  protocol/OS-bound comment; counting names alone is not an acceptance check.
+- `tree.zig`, `runtime/src/main.zig`, and `cli/src/index.ts` budget mirrors
+  agree (ideally by construction).
 - noro-shell with the +6-node repro from the error-propagation brief renders
   fine under the resized budgets.
 - Nothing in this pass adds a new error path or check rule — if you find

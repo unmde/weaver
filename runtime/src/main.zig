@@ -666,6 +666,56 @@ fn view(ui: *WidgetUi, model: *const Model) WidgetUi.Node {
     return result;
 }
 
+/// The retained TSX projection depends on the authored tree plus the global
+/// log-failure fallback. Immediate Canvas pixels deliberately use their own
+/// generation and are projected by `projectSameViewUpdate` below.
+fn viewRevision(model: *const Model) u64 {
+    return model.tree.generation *% 2 +% @intFromBool(widget_log.failed());
+}
+
+/// Canvas callbacks mutate fixed command storage in `Tree.canvases`; the
+/// retained Native layout already owns the corresponding widget geometry.
+/// Re-point the retained slices (their lengths may change), emit once for all
+/// canvases, and keep TSX construction + flex layout off the frame loop.
+fn projectSameViewUpdate(
+    runtime: *native_sdk.Runtime,
+    window_id: native_sdk.platform.WindowId,
+    canvas_label: []const u8,
+    model: *const Model,
+    msg: Msg,
+) anyerror!bool {
+    switch (msg) {
+        .canvas_frame => {},
+        else => return true,
+    }
+
+    var updates: [tree_mod.max_canvases]native_sdk.runtime.CanvasWidgetImmediateUpdate = undefined;
+    var update_count: usize = 0;
+    for (&model.tree.canvases, 0..) |*canvas_state, canvas_index| {
+        if (!model.tree.canvas_occupied.isSet(canvas_index)) continue;
+        const id = canvas_state.owner;
+        if (id == 0) continue;
+        const node = try model.tree.nodeConst(id);
+        // These decorations are also stored in `immediate_commands`; until
+        // the batch API carries a composed metadata tail, keep their exact
+        // semantics by taking the ordinary rebuild path.
+        if (!node.hover_style.isEmpty() or !node.pressed_style.isEmpty() or
+            node.shadow != null or node.text_shadow != null or node.iconPathSlice().len != 0)
+        {
+            return false;
+        }
+        updates[update_count] = .{
+            .id = native_sdk.canvas.globalWidgetId(.stack, native_sdk.canvas.uiKey(id)),
+            .commands = canvas_state.slice(),
+        };
+        update_count += 1;
+    }
+    if (update_count > 0) {
+        _ = try runtime.setCanvasWidgetImmediateCommands(window_id, canvas_label, updates[0..update_count]);
+    }
+    return true;
+}
+
 fn noteProjectionFailure(comptime format: []const u8, args: anytype) void {
     projection_failed_this_view = true;
     if (projection_failure_latched) return;
@@ -1306,6 +1356,8 @@ pub fn main(init: std.process.Init) !void {
         .tokens = tokens,
         .fonts = fonts,
         .update_fx = update,
+        .view_revision = viewRevision,
+        .project_update = projectSameViewUpdate,
         .init_fx = initEffects,
         .view = view,
         .sync = syncNativeState,

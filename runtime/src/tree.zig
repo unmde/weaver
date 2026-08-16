@@ -426,6 +426,7 @@ pub const Tree = struct {
         resetEmpty(destination, self.allocator);
         destination.root = self.root;
         destination.generation = self.generation;
+        destination.canvas_generation = self.canvas_generation;
         destination.next_node_lifetime = self.next_node_lifetime;
         destination.batch_depth = self.batch_depth;
         destination.batch_changed = self.batch_changed;
@@ -1120,6 +1121,7 @@ fn resetEmpty(tree: *Tree, allocator: std.mem.Allocator) void {
     tree.canvas_occupied = std.StaticBitSet(max_canvases).initEmpty();
     tree.root = null;
     tree.generation = 0;
+    tree.canvas_generation = 0;
     tree.next_node_lifetime = 1;
     tree.batch_depth = 0;
     tree.batch_changed = false;
@@ -1265,6 +1267,7 @@ test "aborting a render batch restores the exact committed tree" {
     try tree.appendChild(root, canvas);
     try tree.setRoot(root);
     const committed_generation = tree.generation;
+    const committed_canvas_generation = tree.canvas_generation;
 
     try tree.beginBatch();
     try tree.setText(label, "partial");
@@ -1272,9 +1275,11 @@ test "aborting a render batch restores the exact committed tree" {
     try tree.setCanvasCommands(canvas, &.{ 5, 2, 0xff0000ff, 3, 10, 11, 12, 13, 14, 15 });
     const partial = try tree.createNode(.panel);
     try tree.appendChild(root, partial);
+    try std.testing.expectEqual(committed_canvas_generation +% 1, tree.canvas_generation);
     tree.abortBatch();
 
     try std.testing.expectEqual(committed_generation, tree.generation);
+    try std.testing.expectEqual(committed_canvas_generation, tree.canvas_generation);
     try std.testing.expectEqual(@as(usize, 4), tree.nodeCount());
     try std.testing.expectEqualStrings("committed", (try tree.nodeConst(label)).textSlice());
     try std.testing.expectEqualStrings("M 0 0 L 1 1", (try tree.nodeConst(icon)).iconPathSlice());

@@ -10,11 +10,14 @@ forensics on this platform again. Branch state: weaver `78f8cdf` →
 ## The finding, in one paragraph
 
 The ~85–96 MB of dirty "owned physical footprint (unmapped) (graphics)"
-that every Weaver widget carried on this machine is the Apple GPU driver's
+that every measured continuously presenting Weaver widget carried on this
+machine is the Apple GPU driver's
 **per-process command-submission working set**: a ~95 MB arena the driver
 commits to any process that submits Metal command buffers in a sustained
 cadence (≥ ~1 Hz), plus ~2.4 MB per additional presenting layer, reclaimed
-after ~2–5 seconds of submission silence. It is not window setup, not
+after submission silence. The samples bound that release only indirectly: the
+arena was held by 1-second submissions, did not establish across 5-second gaps,
+and was gone by the 10-second idle checkpoint. It is not window setup, not
 device creation, not presentation (offscreen renders trigger it), not
 drawable size (240×110 and 960×440 pay the same), and not anything Weaver
 allocates. Weaver pinned it forever because `renderFrame` presents
@@ -39,8 +42,9 @@ subscription fee, billed to the submitting process.** Everything follows:
 - Lazy commit, idle release: it is not eagerly reserved at device
   creation (one present ≈ 1 MB), and it releases within seconds of
   silence. Held at 1 s submission intervals; never establishes at 5 s
-  intervals. So no live widget can duck it by pacing — a seconds clock is
-  pinned forever.
+  intervals. The measured 1 Hz workload stays pinned; the measured 0.2 Hz
+  workload does not establish the arena. Cadences between them were not
+  measured.
 
 ## Method teachings (how the name was found)
 

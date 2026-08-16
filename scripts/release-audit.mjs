@@ -7,7 +7,7 @@ import { dirname, extname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const expectedNativeCommit = "7368f7f59e09c372311e884190d88006a73ce97f";
+const expectedNativeCommit = "4c5c0999c2324b8dc2016625e85571e554b2484a";
 
 function filesBelow(root) {
   const output = [];
@@ -61,7 +61,7 @@ const trackedBuildProducts = tracked.filter((path) =>
 assert.deepEqual(trackedBuildProducts, [], `tracked build products found:\n${trackedBuildProducts.join("\n")}`);
 
 const nativeCommit = execFileSync("git", ["rev-parse", "HEAD"], { cwd: join(repoRoot, "runtime", "native-sdk") }).toString("utf8").trim();
-assert.equal(nativeCommit, expectedNativeCommit, "Native SDK submodule is not pinned to the reviewed fork-stack head");
+assert.equal(nativeCommit, expectedNativeCommit, "Native SDK submodule is not pinned to the reviewed merge commit");
 
 const treeSource = readFileSync(join(repoRoot, "runtime", "src", "tree.zig"), "utf8");
 const runtimeMainSource = readFileSync(join(repoRoot, "runtime", "src", "main.zig"), "utf8");

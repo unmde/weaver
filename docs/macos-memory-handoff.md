@@ -5,7 +5,7 @@ harness) on Dara's other laptop, session id
 `019fafbc-4c73-7ef3-a1e6-cd3ffd497f8f`, 2026-07-29. This doc is the recovered
 state of that thread plus everything needed to continue. It lives on branch
 `feat/macos-memory-work`, which is the complete working set: this doc, the
-audit briefs, the `myclock/` bakeoff fixture, and the pinned native-sdk
+audit briefs, the `examples/myclock/` bakeoff fixture, and the pinned native-sdk
 memory work.
 
 ## Goal
@@ -35,10 +35,10 @@ widgets are available as test subjects.
   framebufferOnly, analytic rounded clips, the Metal tiled-image primitive,
   and diagnostics-only screenshot/cache/task-ledger receipts. Setup:
   `git submodule update --init`, then in `runtime/native-sdk`:
-  `git fetch origin && git checkout macos-memory-shared-renderer-prep`.
-- `myclock/` at the repo root is the clean isolated-benchmark fixture
-  (`myclock/dist` is the bundle the bakeoff harness takes). Ignore any
-  stale `.weaver-dev-port` in it.
+  `git fetch origin macos-memory-shared-renderer-prep && git checkout --detach
+  6a8e6178`.
+- `examples/myclock/` is the clean isolated-benchmark fixture
+  (`examples/myclock/dist` is the bundle the bakeoff harness takes).
 - The audit briefs (`docs/receipt-sweep-brief.md`,
   `docs/error-propagation-brief.md`) are separate passes; do not mix
   them into this work.
@@ -111,29 +111,26 @@ use the window-capture approach in the weaver memory note
 
 ## Remaining work, in order
 
-1. Rebuild, restart Noro on the new binary (verify PID start time > build
-   time), confirm the tiled-image win: expect cache payload to drop ~4 MB
-   more and entries 37 -> ~31, IOAccelerator to drop further.
-2. Visually verify: outer 51px rounded clip, tile seams/orientation/opacity,
-   progress-strip bottom corners, button borders / asymmetric corner radii.
-   Re-run `test-canvas` (841 tests) after the tile patch.
-3. Shadows: 28 entries / 2.45 MB still rasterized. Analytic shadow parity is
+1. Tiled-image validation is complete: the cache payload fell by the expected
+   ~4 MB, the composited screenshot passed visual comparison, and
+   `test-canvas` passed 841/841 after the patch (checkpoint below).
+2. Shadows: 28 entries / 2.45 MB still rasterized. Analytic shadow parity is
    harder; measure before attempting.
-4. **The remaining wall:** see "The shared-renderer experiment" below. This
+3. **The remaining wall:** see "The shared-renderer experiment" below. This
    is the real fight for the 20 MB target and has its own phased plan.
-5. Keep the per-widget heap wins honest: re-sample after each change,
+4. Keep the per-widget heap wins honest: re-sample after each change,
    multiple samples (footprint numbers were noisy run to run, ±10 MB).
 
 ## The shared-renderer experiment (the ~90 MB wall)
 
 ### Background
 
-~89-91 MB "owned unmapped graphics" per process exists for EVERY widget,
-tiny or complex, Metal composite or software pixels — because both paths
-present through the same CAMetalLayer. Isolated bakeoff: Myclock 131.9 MB
-(metal) vs 128.6 MB (software), only 3.4 MB apart. This baseline is
-Metal/IOAccelerator driver + framework memory, not widget content. Without
-solving it, the per-widget floor is ~130 MB.
+On the measured M3 Pro-class machine, sustained Metal submission at roughly
+1 Hz or faster establishes an ~89-96 MB per-process "owned unmapped graphics"
+working set. Both the Metal-composite and software-pixel paths paid it because
+both presented through CAMetalLayer. The same workload's graphics ledger was
+near zero on the M2 Air, so ~130 MB is not a universal per-widget floor; it is
+a hardware- and workload-scoped result.
 
 **Key discovery: weaver's Windows runtime already solved this.** Widget
 processes on Windows are device-less — display-list packets go over a pipe
@@ -216,15 +213,18 @@ renderer will not reclaim it, and the plan must stop here and be rethought
 
 ### Phase 1 — one-widget spike (ugly, hardcoded, throwaway)
 
-Route ONE widget (myclock/dist, the clean fixture) through a minimal Metal
+Route ONE widget (`examples/myclock/dist`, the clean fixture) through a minimal Metal
 presenter running in a second process, frames delivered via IOSurface into
 the widget window's CALayer. Ignore crash-reconnect, multi-client, and
 protocol cleanliness. Deliverable: the widget process's footprint with real
 weaver content (QuickJS + packet ABI) and a screenshot proving it renders.
 Record the number here.
 
-**GATE:** widget process should land in the 20s-30s. If it doesn't, vmmap
-it, name what is still resident, and record that before any Phase 2 work.
+**SUPERSEDED GATE:** the original target was for the widget process to land in
+the 20s-30s, but the Phase 1 kickoff calibration below replaced that fixed
+total-footprint target. The active gate is categorical: the widget process's
+`ledger_tag_graphics_footprint` must stay near zero. Report the remaining
+hardware-specific content cost separately before any Phase 2 work.
 
 **Scaling check (falsification condition 3):** extend the spike to N
 clients — run 1, 2, 4, 8 myclock instances through the one host and record
@@ -315,264 +315,13 @@ For each PR:
   below. The probe result stands, but it answered the wrong question: the
   wall is workload-scoped, not window-scoped, and it reproduces on other
   hardware.**
-- Phase 1 (spike): **ALL GATES PASSED 2026-07-30 — see "Phase 1 spike
-  results" below.** Widget process 27.4-30.2 MB with ZERO
-  owned-unmapped-graphics regions (the ~95 MB arena never appears
-  widget-side); host pays it once and scales at ~1.75 MB per widget,
-  linear through N=8; steady state flat after one spike-plumbing leak
-  (missing per-frame autorelease pool) was named by control run,
-  fixed, and re-verified. Rendering visually correct, 841/841
-  test-canvas, appkit retained-canvas steps pass.
-- Phase 2 (slices — one line per merged PR): **in progress (2026-07-30).**
-  - PR 0 (base): native#19 "Cut per-widget graphics memory on macOS" —
-    the prep branch's verified memory work rebased onto weaver-main.
-    Greptile 5/5, zero findings, checks green; awaiting merge.
-  - Slice 1: native#20 "Add IOSurface presentation path for macOS GPU
-    surfaces" (`NATIVE_SDK_GPU_IOSURFACE_PRESENT`, stacked on #19).
-    Ring-of-3 IOSurface presenter, refuse-don't-block, completion-ordered
-    contents flip, exact renderFrame parity. No memory win claimed
-    (133.06 vs 133.01 MB myclock; renderer still in-process — the win
-    lands with slices 2-3). Greptile 5/5, zero findings; awaiting merge.
-  - Slice 2: native#22 "Add the macOS render host and its mach renderer
-    protocol" — headless renderer mode reusing the one composite path,
-    renderer_protocol_mach.h (versioned hello, ool packets, port-
-    descriptor surfaces, no-senders teardown). Live receipts: driver
-    round trip verified byte-exact clear color; idle host 16.8-17.2 MB
-    (arena reclaims on idle — a host with no animating widgets is
-    cheap); 5 connect/render/disconnect cycles release all per-client
-    state. Review: three Greptile rounds fixed real findings (message
-    shape checks + destroy-whole disposal, client retain-cycle teardown,
-    honest refusal for surfaceless static frames, one-outstanding-frame
-    enforcement, orphaned reply-right disposal, oversized-message
-    drain); final score 5/5 "safe to merge". Merged.
-  - Slice 3: native#23 "Add the device-less shared-renderer widget
-    client for macOS" (`NATIVE_SDK_GPU_SHARED_RENDERER=1`). Lazy
-    connect + reconnect-after-crash per the Windows contract; 5 s
-    send AND reply tripwires (a wedged host can never freeze a widget
-    main thread); surface cache with per-frame right disposal; loud
-    device-less refusals feeding the existing 1/5/30 s retry
-    machinery. Live receipts: production myclock at **29.5 MB flat,
-    ZERO owned-unmapped-graphics regions** (baseline 125.3 MB / 85 MB
-    arena) against the slice-2 host; rendering live and correct by
-    capture; full crash drill — host killed (retained frame stayed on
-    glass, loud logs), host restarted (reconnected, clock resumed).
-    Review: one real finding (unbounded mach send) fixed; final 5/5
-    "safe to merge". Awaiting merge.
-  - Slice 4 (two PRs, one per repo). Native half: native#24 "Add a
-    per-client frame budget tripwire to the render host" — every frame
-    timed monotonically (CLOCK_UPTIME_RAW) from arrival; over-budget
-    frames log budget/measured/pid/trips. The 250 ms tripwire has a
-    measured receipt: myclock median 1.4 ms/frame, worst 21.9 ms
-    (warmup first present), n=20 — >11x the worst observed. Greptile
-    5/5. Also native#25 (one-line contains-check fix caught by weaver
-    CI; merged). Weaver half: weaver#47 "Cut macOS widgets over to the
-    shared renderer" — `weaver-widget --render-host`, weaverd spawns
-    and supervises the host (crash -> respawn in 1 s, TERM/KILL reap
-    before marker removal), cutover env on all weaverd-spawned widgets
-    (automation seam keeps in-process rendering), native pin + release
-    audit ratchet bumped. **Acceptance receipts (isolated-HOME weaverd,
-    8 registered clock widgets):** every widget 32.2-35.8 MB with ZERO
-    owned-unmapped-graphics regions; 31-minute hold flat within
-    ±0.3 MB per widget, host non-increasing (168.5 -> 158.9 MB, slope
-    -165 KB/min; CSV
-    `.zig-cache/macos-memory/phase1-spike/slice4-acceptance-drift-8x30min.csv`);
-    host kill -9 -> weaverd respawn in 1 s -> widgets reconnected and
-    resumed live rendering. Full weaver CI green (gate, both headless
-    legs, session smoke). Review findings (unbounded teardown, usage
-    string) fixed. Awaiting merge.
-
-  - Roster verification (post-slice-4, 2026-07-31): widening the
-    acceptance net past clock widgets found TWO cutover blockers, both
-    the same class — registered resources ride pre-packet side channels
-    that never crossed the process boundary. native#26 "Forward
-    registered images across the renderer channel" fixes both:
-    - **Images**: device-less Noro rendered everything except its album
-      art (region blank; captures archived). Packets carry only id +
-      fingerprint references; pixels ride `uploadGpuSurfaceImage`. Now a
-      generalized resource-upload message (ool payload, 1 MiB image
-      tripwire per canvas_limits) feeds per-client headless stores; one
-      storage implementation shared with the in-process path.
-    - **Fonts** (caught live by Dara, side-by-side): text rasterized in
-      the host with the system face instead of the registered font
-      (Cozette) — wider glyphs, truncation. Faces now ride the same
-      channel into a PER-CLIENT font table swapped in around each
-      present (process-table font ids would collide across widgets);
-      registration is record-and-best-effort since fonts register before
-      the host may be reachable.
-    - Both replay after a host crash (fonts first, then images); the
-      crash drill shows the art region and title band byte-identical
-      across a host kill -9 + weaverd respawn. Review hardening across
-      five Greptile rounds: shape checks + destroy-whole disposal for
-      resource messages, half-replayed sessions torn down, host-refused
-      resources dropped from the replay set (poison prevention), unknown
-      resource kinds rejected. Final 5/5; merged. Noro
-      device-less: 43.1 MB flat, zero arena regions (in-process
-      baseline ~155-166 MB).
-      NOTE: weaver#47 merged minutes before its pin bump landed, so
-      master briefly carried the cutover without resource forwarding;
-      weaver#48 (pin -> native 7368f7f5 + audit ratchet, full CI green,
-      Greptile 5/5) completes it. The cutover is honest only with #48
-      merged.
-
-    Named follow-ups (recorded, not smuggled): automation-seam
-    conversion to the shared renderer; event-driven presenting (drop
-    the 60 Hz pump — approved separately, battery/CPU work, not
-    memory). **Transport receipt
-    (2026-07-30, Mac15,6, macOS 26.5.2):** a non-launchd process CAN
-    claim a dynamic per-user bootstrap name via `bootstrap_check_in`
-    (probe: `bootstrap_check_in(com.weaver.spike.render-host) =>
-    Success`), a sibling process finds it via `bootstrap_look_up`, and
-    an IOSurface send right rides a mach port descriptor —
-    `IOSurfaceLookupFromMachPort` resolved the surface with the pixel
-    pattern intact (id match, 64x64 verified). Probe source:
-    `.zig-cache/macos-memory/phase2-transport-spike/` (throwaway).
-    Consequence: the renderer channel is mach end-to-end — no unix
-    socket, no deprecated `kIOSurfaceIsGlobal`, ool descriptors for
-    packet payloads, port descriptors for surface delivery, dead-name
-    notifications for crash detection. Versioned hello per the Windows
-    renderer_protocol.h contract; per-frame pool discipline (the Phase 1
-    leak lesson).
-
-### Phase 1 spike results (2026-07-30, Mac15,6, macOS 26.5.2)
-
-Branch state weaver `b0545ff` / native `6a8e6178` plus the throwaway
-spike patch (saved at `.zig-cache/macos-memory/phase1-spike/*.patch`
-with all raw receipts; spike code stays out of every PR). Build finished
-14:33:47; every measured PID started after it (stale-PID discipline
-held; Dara's four live dev widgets were left running and excluded).
-Measurements: `footprint --noCategories --swapped --format bytes`
-(10x1s samples), `vmmap --summary`, `footprint` category tables.
-
-**Spike shape.** Same `weaver-widget` binary in two env-gated modes.
-`WEAVER_SPIKE_RENDER_HOST=<socket>`: owns the only Metal device; per
-client it runs the unchanged NSGP decode + composite into
-`canvasTexture`, then the presenter pipeline renders into a
-double-buffered IOSurface-backed BGRA texture instead of a drawable.
-`WEAVER_SPIKE_CLIENT=<socket>`: the widget process creates NO Metal
-object at all (no device, no queue, no CAMetalLayer — plain CALayer);
-raw NSGP packets go over the unix socket, one blocking reply per frame
-(the Windows contract's pacing), and the reply's IOSurface becomes
-`layer.contents`. Frame events ride the existing nil-drawable
-"complete logically" path.
-
-**Baseline reproduction (step 1):** fresh myclock, PID 10131 (started
-14:22:30): 125,354,920 B phys_footprint flat over 5 samples; vmmap:
-**85 MB dirty "Owned physical footprint (unmapped) (graphics)", 33
-regions** — the recorded wall, still current.
-
-**One-widget gate (recalibrated: categorical, not a bare total):**
-
-| Process | phys_footprint (10x1s) | Owned unmapped (graphics) |
-|---|---:|---:|
-| Widget client PID 45693 | 30,212,984 B flat (peak 30.4 MB) | **none — zero regions** |
-| Render host PID 44662 | 119,440,056 B flat | 89 MB dirty / 34 regions |
-
-The widget's whole footprint category table is CPU-side (MALLOC/__DATA/
-stack); graphics categories: IOAccelerator 64 KB, IOSurface 864 KB
-virtual / 0 dirty. The arena moved to the submitting process and is
-paid once, exactly as the gpu-ledger receipts predicted. Widget total
-30.2 MB ≈ the Air's 31.3 MB software-content floor for full Weaver +
-Myclock — i.e. content cost without the arena, on the arena machine.
-Dara's original "20s-30s MB in Activity Monitor" number is met as
-written.
-
-**Visual + tests:** screenshot of the spike widget window
-(`spike-myclock-render.png`) shows the clock correct (time, seconds,
-date, rounded corners); a 3 s later capture differs only in the seconds
-region (live, not frozen). test-canvas 841/841; the three
-appkit-gpu retained-canvas build steps pass. Production paths are
-untouched when the env vars are unset.
-
-**Scaling check (falsification condition 3):** N myclock clients
-against the one host, ~15 s settle, 3-5 samples each:
-
-| N | Host phys_footprint | Per-widget slope from N=1 |
-|---|---:|---:|
-| 1 | 119,456,440 B | — |
-| 2 | 121,225,912 B | +1.77 MB |
-| 4 | 124,666,552 B | +1.74 MB |
-| 8 | 131,695,312 B | +1.75 MB |
-
-Linear, ~1.75 MB per widget (the probe predicted ~2.4 MB per presenting
-layer; offscreen IOSurface targets come in under that). All 8 widget
-processes at N=8: 27.4-30.1 MB, every one with zero
-owned-unmapped-graphics regions.
-
-**30-minute drift hold (8 widgets):** 32 per-minute samples over 1886 s
-(`.zig-cache/macos-memory/phase1-spike/drift-8x30min.csv`):
-
-- All 8 widget processes: FLAT. Each stayed within ±0.2 MB of its start
-  (e.g. 30.0 -> 30.0 MB); second-half least-squares slopes are all
-  slightly NEGATIVE (-0.6 to -5.6 KB/min) — no upward trend anywhere on
-  the widget side.
-- The host: NOT flat. 131.8 -> 137.5 MB, second-half slope
-  **+180 KB/min, steady, leak-shaped** — falsification condition 3's
-  drift clause, honestly fired as measured on the spike host.
-- Naming the drift (two `footprint` category snapshots 6 min apart,
-  saved as `spike-host-footprint-t0/t1.txt`): **only MALLOC_SMALL grew**
-  (12 -> 13 MB, ~170 KB/min — the whole slope). Every graphics category
-  was flat across the same window: owned-unmapped-graphics 93 MB / 41
-  regions unchanged, IOAccelerator (graphics) 7,344 KB unchanged,
-  IOSurface 6,656 KB / 25 regions unchanged. The drift is a CPU-side
-  heap leak (~22 KB/min per 1 Hz client), NOT arena/surface/driver
-  growth — the design-scaling categories hold a flat steady state.
-- Attribution control: the host runs weaver's UNCHANGED per-frame
-  composite path, so the leak may be pre-existing in production weaver
-  (never sampled longer than ~30 s before). A 30-minute control of one
-  production myclock (no spike) is recorded in
-  `control-production-myclock-drift.csv` — see the verdict below for
-  what it showed.
-
-**Spike crudenesses that are findings for Phase 2, not gate failures:**
-blocking round trip per frame on the widget main thread; deprecated
-`kIOSurfaceIsGlobal` + `IOSurfaceLookup` for surface transport (Phase 2
-should move to mach-port/XPC transfer per the Windows handle-duplication
-analog); no reconnect-after-host-crash (client logs loudly and refuses,
-widget goes retained-frame static); host keeps one off-window view per
-client (fonts/images ride the packet, so myclock needs nothing else —
-image-heavy widgets need the image-upload ABI forwarded); the pixel and
-JSON fallbacks refuse loudly in client mode rather than forwarding.
-
-**Verdict:** falsification conditions 1 and 2 did not fire — per-widget
-overhead is ~1.75 MB in the host (not ~20 MB+), host growth with N is
-linear (not super-linear), and the widget process never commits the
-arena. Condition 3 fired in part: widgets hold a flat steady state, but
-the spike HOST drifts upward at ~180 KB/min in MALLOC_SMALL (CPU heap;
-all graphics categories flat). Per the plan this is recorded as a
-stop-and-report finding rather than pushed through. The control run
-proved the leak was spike plumbing (production is flat), the named
-cause (missing per-frame autorelease pool in the host's reader loop)
-was fixed, and the re-hold confirmed flat steady state — condition 3 is
-now fully cleared with a turn-it-on-and-off receipt. **All Phase 1
-gates pass.** Phase 2 (reviewed production slices mirroring the Windows
-shared-renderer contract) is unblocked; its implementation must keep
-per-frame pool discipline on every long-lived renderer loop, and its
-own gates re-verify the 30-minute hold.
-
-**Control result (production myclock, no spike):** the sampler was cut
-at 17 min by a session restart, but 17 per-minute samples
-(`control-production-myclock-drift.csv`, 60 s-1023 s) are decisive at
-the observed leak rate: phys_footprint 133.5 -> 133.6 MB (slope
-+8.7 KB/min, within noise), MALLOC_SMALL 8,176 -> 8,160 KB (slope
--1.7 KB/min, FLAT). At the spike host's per-client rate (~22 KB/min)
-the control would have grown ~380 KB over this window; it grew none.
-**The leak is spike-introduced, not production behavior.** Named
-suspect: the spike host's per-connection reader loop runs forever
-inside one dispatch block, so autoreleased per-frame objects (the
-packet NSMutableData among them) never drain — the same
-missing-autorelease-pool class as diagnosed fix #1 of this handoff.
-
-**Verification of the name (per-frame @autoreleasepool added to the
-loop, fresh host + 8 clients, 22-minute re-hold,
-`drift2-8x22min-poolfix.csv`):** the drift is gone. Host slope fell
-from +180 KB/min to +9.5 KB/min overall — and the residual is entirely
-front-loaded warmup: MALLOC_SMALL climbs 5,200 -> 5,408 KB in the first
-~11 minutes and then holds byte-identical at 5,408 KB for the final 10
-samples (second-half slope +0.73 KB/min; host footprint second-half
-+3.6 KB/min, within 16 KB-page sampling noise). All 8 widgets flat
-again (slopes -0.6 to +0.9 KB/min, 28.4-29.3 MB). Host steady state on
-the fixed binary: 130.5 MB. The leak was the missing pool, nothing
-else; the turn-it-off receipt closes it.
+- Phase 1 (spike): **not started.** Un-blocked 2026-07-30: the wall was
+  named (per-process Metal submission working set — see the "wall is
+  named" section below and `docs/gpu-ledger-wall-brief.md`) and Dara
+  re-approved the shared-renderer plan on that receipt. This is the next
+  work.
+- Phase 2 (slices — one line per merged PR): **not started; gated on
+  Phase 1.**
 
 ### 2026-07-30 continuation receipts
 
@@ -743,22 +492,21 @@ answer: the wall is real, it moves with whoever submits, and it is paid
 per process. Event-driven presenting (drop the unconditional 60 Hz pump;
 Windows already works this way — "frames exist only on demand") is worth
 doing for CPU/battery and makes the shared host cheap, but is NOT the
-memory fix by itself: 1 Hz submission still holds the full arena, so any
-live widget stays pinned until it stops submitting Metal at all.
+memory fix by itself for the measured seconds-clock workload: 1 Hz submission
+still holds the full arena, while the measured 0.2 Hz workload does not
+establish it. Intermediate cadences were not measured.
 
 Phase 1 (the one-widget spike, myclock through an out-of-process Metal
-presenter into an IOSurface-backed CALayer) is therefore the next step,
-with its gates unchanged — expect the widget process in the 20s-30s MB
-given the measured ~10 MB device-less floor plus Myclock's ~31 MB
-software-content footprint on the Air. Note the Phase 1 gate numbers were
-written against Air-class content costs; on this machine the honest
-expectation is "widget footprint minus the ~95 MB arena", verified by
-vmmap category, not a single total.
+presenter into an IOSurface-backed CALayer) is therefore the next step, with
+the recalibrated gate: the widget process must keep
+`ledger_tag_graphics_footprint` near zero. Report the hardware-specific content
+cost separately from the removed arena; do not treat a fixed total-footprint
+estimate as the acceptance criterion.
 
 ## Validation status at handoff
 
 - Native platform tests: pass.
-- `test-canvas`: 841/841 pass (before tile patch — rerun after).
+- `test-canvas`: 841/841 pass after the tile patch.
 - Direct runtime suite: 57 pass, 1 skip.
 - Known false negative: `zig build test` wrapper misclassifies an intentional
   provider-timeout warning on stderr as failure; the direct test executable
@@ -773,12 +521,13 @@ mise exec zig@0.16.0 -- zig build -Doptimize=ReleaseFast
 
 # isolated bakeoff (myclock is the clean fixture; Noro can't run isolated —
 # its media provider intentionally requires Weaverd)
+# Use `--candidate software` for the software-path comparison.
 python3 scripts/macos-renderer-bakeoff.py \
   --runtime runtime/zig-out/bin/weaver-widget \
-  --candidate metal-composite \        # or: software
-  --bundles myclock/dist \
+  --candidate software \
+  --bundles examples/myclock/dist \
   --count 1 --warmup-seconds 5 --sample-seconds 5 \
-  --output .zig-cache/myclock-metal.json --stage-trace
+  --output .zig-cache/myclock-software.json --stage-trace
 
 # live measurement (get ACTIVE pid from weaver status --json first)
 footprint --noCategories --swapped --format bytes -p <PID>

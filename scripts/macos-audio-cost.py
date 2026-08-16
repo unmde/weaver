@@ -28,6 +28,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--visualizer-revision",
                         help="read examples/visualizer/widget.tsx from this git revision instead of the working tree")
+    parser.add_argument("--active-sample-output", type=Path,
+                        help="write a macOS sample of the first active Visualizer process")
+    parser.add_argument("--active-sample-seconds", type=int, default=5)
     return parser.parse_args()
 
 
@@ -67,27 +70,59 @@ def cpu_seconds(value: str) -> float:
     return days * 86400 + int(hours) * 3600 + int(minutes) * 60 + float(seconds)
 
 
-def process_cpu_time(pids: list[int]) -> float:
-    rows = command(["/bin/ps", "-o", "cputime=", "-p", ",".join(map(str, pids))]).splitlines()
-    return sum(cpu_seconds(row.strip()) for row in rows if row.strip())
+def process_cpu_times(pids: list[int]) -> dict[int, float]:
+    requested = list(dict.fromkeys(pids))
+    rows = command([
+        "/bin/ps", "-o", "pid=", "-o", "cputime=", "-p", ",".join(map(str, requested)),
+    ]).splitlines()
+    snapshot: dict[int, float] = {}
+    for row in rows:
+        fields = row.strip().split(maxsplit=1)
+        if len(fields) == 2:
+            snapshot[int(fields[0])] = cpu_seconds(fields[1])
+    missing = [pid for pid in requested if pid not in snapshot]
+    if missing:
+        raise RuntimeError(f"ps CPU snapshot omitted pids: {missing}")
+    return snapshot
 
 
-def process_sample(pids: list[int], interval_seconds: float = 1.0) -> dict[str, Any]:
-    cpu_before = process_cpu_time(pids)
+def process_sample(pids: list[int], window_server_pid: int,
+                   interval_seconds: float = 1.0) -> dict[str, Any]:
+    sampled_pids = [*pids, window_server_pid]
+    cpu_before = process_cpu_times(sampled_pids)
     interval_before = time.monotonic()
     time.sleep(interval_seconds)
-    cpu_after = process_cpu_time(pids)
+    cpu_after = process_cpu_times(sampled_pids)
     interval_after = time.monotonic()
     rows = command(["/bin/ps", "-o", "rss=", "-p", ",".join(map(str, pids))]).splitlines()
     footprint = command(["/usr/bin/footprint", "-f", "bytes", *sum((["-p", str(pid)] for pid in pids), [])])
     match = re.search(r"^\s*phys_footprint:\s+(\d+) B$", footprint, re.MULTILINE)
     if not match:
         raise RuntimeError("footprint did not report aggregate phys_footprint")
+    cpu_percent_by_pid = {
+        str(pid): max(0, cpu_after[pid] - cpu_before[pid]) / (interval_after - interval_before) * 100
+        for pid in pids
+    }
     return {
-        "cpu_percent_one_core": max(0, cpu_after - cpu_before) / (interval_after - interval_before) * 100,
+        "cpu_percent_one_core": sum(cpu_percent_by_pid.values()),
+        "cpu_percent_one_core_by_pid": cpu_percent_by_pid,
+        "window_server_cpu_percent_one_core": (
+            max(0, cpu_after[window_server_pid] - cpu_before[window_server_pid])
+            / (interval_after - interval_before) * 100
+        ),
         "rss_bytes": sum(int(row.strip()) * 1024 for row in rows if row.strip()),
         "physical_footprint_bytes": int(match.group(1)),
     }
+
+
+def replace_unique(source: str, old: str, new: str, *, label: str, revision: str) -> str:
+    count = source.count(old)
+    if count != 1:
+        raise RuntimeError(
+            f"Cannot prepare Visualizer from {revision}: expected exactly one {label} marker "
+            f"{old!r}, found {count}. Select a compatible revision or update the harness source markers."
+        )
+    return source.replace(old, new, 1)
 
 
 def summarize(samples: list[dict[str, Any]]) -> dict[str, Any]:
@@ -97,7 +132,8 @@ def summarize(samples: list[dict[str, Any]]) -> dict[str, Any]:
             "min": min(sample[field] for sample in samples),
             "max": max(sample[field] for sample in samples),
         }
-        for field in ("cpu_percent_one_core", "rss_bytes", "physical_footprint_bytes")
+        for field in ("cpu_percent_one_core", "window_server_cpu_percent_one_core",
+                      "rss_bytes", "physical_footprint_bytes")
     } | {"samples": samples}
 
 
@@ -116,6 +152,7 @@ def main() -> int:
     data_root = Path(environment["HOME"]) / "Library" / "Application Support" / "Weaver"
     status_path = data_root / "status.json"
     node = shutil.which("node") or "node"
+    window_server_pid = int(command(["/usr/bin/pgrep", "-x", "WindowServer"]).splitlines()[0])
     installed: list[str] = []
 
     def cli(*arguments: str) -> str:
@@ -132,7 +169,7 @@ def main() -> int:
         pids = [before["hostPid"], *[widget["pid"] for widget in before.get("widgets", [])]]
         samples = []
         for _ in range(args.sample_seconds):
-            samples.append(process_sample(pids))
+            samples.append(process_sample(pids, window_server_pid))
         after = status()
         return {
             "label": label,
@@ -141,6 +178,12 @@ def main() -> int:
             "providers_after": after["providers"],
             "provider_frame_delta": after["providers"]["audioProviderFrames"] - before["providers"]["audioProviderFrames"],
             "pipe_frame_delta": after["providers"]["audioPipeFrames"] - before["providers"]["audioPipeFrames"],
+            "cpu_percent_one_core_by_pid": {
+                str(pid): round(statistics.fmean(
+                    sample["cpu_percent_one_core_by_pid"][str(pid)] for sample in samples
+                ), 3)
+                for pid in pids
+            },
             **summarize(samples),
         }
 
@@ -156,6 +199,7 @@ def main() -> int:
         "sample_seconds": args.sample_seconds,
         "visualizer_source": args.visualizer_revision or "working tree",
         "cpu_metric": "one-second deltas of ps cumulative CPU time divided by monotonic wall time, summed across weaverd and participating Widget processes; 100 percent is one saturated core",
+        "window_server_cpu_metric": "aligned one-second deltas of WindowServer cumulative CPU time; this is system-wide and the unsubscribed-host workload is its per-run background control",
         "memory_metrics": {
             "physical_footprint": "footprint aggregate phys_footprint, de-duplicated across selected processes",
             "rss": "ps RSS summed across selected processes",
@@ -175,8 +219,12 @@ def main() -> int:
             shutil.copytree(VISUALIZER.parent, directory, dirs_exist_ok=True,
                             ignore=shutil.ignore_patterns("dist", "tsconfig.json", "widget.tsx"))
             source = visualizer_source
-            source = source.replace('name: "Visualizer"', f'name: "Visualizer {index}"')
-            source = source.replace("offset: [420, 400]", f"offset: [{24 + (index - 1) * 352}, 24]")
+            revision = args.visualizer_revision or "working tree"
+            source = replace_unique(source, 'name: "Visualizer"', f'name: "Visualizer {index}"',
+                                    label="widget name", revision=revision)
+            source = replace_unique(source, "offset: [420, 400]",
+                                    f"offset: [{24 + (index - 1) * 352}, 24]",
+                                    label="anchor offset", revision=revision)
             (directory / "widget.tsx").write_text(source, encoding="utf-8")
             cli("install", str(directory))
             installed.append(f"Visualizer {index}")
@@ -187,6 +235,12 @@ def main() -> int:
                  and status()["providers"]["audioAvailability"] == "live"
                  and status()["providers"]["audioProviderFrames"] > 2)
         output["workloads"].append(measure("host + two active Visualizers"))
+        if args.active_sample_output:
+            active = status()
+            widget_pid = active["widgets"][0]["pid"]
+            args.active_sample_output.parent.mkdir(parents=True, exist_ok=True)
+            command(["/usr/bin/sample", str(widget_pid), str(args.active_sample_seconds), "1",
+                     "-file", str(args.active_sample_output)])
 
         control.write_text("s", encoding="utf-8")
         wait_for("silent provider parking", lambda: status().get("providers", {}).get("audioSilent") is True)

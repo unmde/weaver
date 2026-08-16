@@ -1,0 +1,12 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "jsx": "react-jsx",
+    "jsxImportSource": "@weaver/sdk",
+    "types": ["@weaver/sdk"]
+  },
+  "include": ["widget.tsx"]
+}

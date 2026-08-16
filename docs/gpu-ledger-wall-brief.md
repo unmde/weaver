@@ -8,8 +8,10 @@ its "2026-07-30 correction" section for the full evidence trail. Vocabulary
 
 ## The finding you are chasing
 
-On this machine, on branch `feat/macos-memory-work` (weaver `c099db6`,
-native submodule on `macos-memory-shared-renderer-prep` at `6a8e6178`):
+This brief was opened on branch `feat/macos-memory-work` at weaver `c099db6`.
+The recorded measurements below were taken at weaver `78f8cdf` with native
+`6a8e6178`; `0db488a` is the subsequent documentation state, not a measurement
+commit.
 
 - Bare NSWindow + CAMetalLayer + Metal device + one presented frame:
   9.705 MiB mean physical footprint (~1.1 MB graphics ledger).
@@ -39,15 +41,24 @@ state.
 
 1. **Reproduce first.** From `runtime/`:
    `mise exec zig@0.16.0 -- zig build -Doptimize=ReleaseFast`, then run
-   `runtime/zig-out/bin/weaver-widget myclock/dist`, verify the PID started
+   `runtime/zig-out/bin/weaver-widget examples/myclock/dist`, verify the PID started
    after the build finished, and sample `footprint -p <pid>` after a 5 s
    warmup. Expect ~120-125 MB with ~85 MB owned-unmapped-graphics. Record
    the number before touching anything.
-2. **Software-candidate discriminator.** Force the software rendering path
-   (the prior thread's bakeoff had a `software` candidate; find the forcing
-   mechanism in the runtime) and measure. The old thread saw software at
-   128.6 MB — if software is still wall-height, the trigger is in the
-   CAMetalLayer present loop shared by both paths, not in canvas GPU
+2. **Software-candidate discriminator.** Run:
+
+   ```sh
+   python3 scripts/macos-renderer-bakeoff.py \
+     --runtime runtime/zig-out/bin/weaver-widget \
+     --candidate software \
+     --bundles examples/myclock/dist \
+     --count 1 \
+     --output .zig-cache/myclock-software.json
+   ```
+
+   The harness sets `WEAVER_FORCE_SOFTWARE=1` for this candidate. The old thread
+   saw software at 128.6 MB — if software is still wall-height, the trigger is
+   in the CAMetalLayer present loop shared by both paths, not in canvas GPU
    rendering.
 3. **Redraw-rate variation.** Myclock ticks at 1 Hz (`timer` +
    `gpu_surface_frame` every second). Compare a static widget (no timer,
@@ -106,16 +117,16 @@ layer config: BGRA8, framebufferOnly=YES, opaque=YES,
 allowsNextDrawableTimeout=NO, 480x220 drawable) presenting clears in a
 sustained loop:
 
-| Probe workload | Graphics ledger (steady) | phys_footprint |
-|---|---:|---:|
-| Before loop starts | 82 KB | 9.0 MB |
-| 60 Hz present loop, 240x110 window | **95.6 MB** (established within the first ~5 frames) | 110.5 MB |
-| 1 Hz present loop | **95.5 MB** (held between presents) | 109.2 MB |
-| 0.2 Hz present loop (5 s gaps) | 0.2-3.3 MB (never establishes) | 12-14 MB |
-| 10 s after any loop stops | ≤1 MB | 13-14 MB |
-| Offscreen clears at 60 Hz — no window, no CAMetalLayer, no present | **96.1 MB** | 103.2 MB |
-| 60 Hz IOSurface content updates via plain CALayer, no Metal device | **0-16 KB** | 10.0 MB |
-| One process, N presenting CAMetalLayers (n=1/4/8, 60 Hz) | 95.6 / 103.3 / 112.7 MB | 109.5 / 122.5 / 136.9 MB |
+| Probe workload | Graphics-ledger observation | phys_footprint observation | Sampling / aggregation |
+|---|---:|---:|---|
+| Before loop starts | 82 KB | 9.0 MB | Single pre-loop sample |
+| 60 Hz present loop, 240x110 window | **95.6 MB** (established within the first ~5 frames) | 110.5 MB | Reported steady-state sample; count/window not recorded |
+| 1 Hz present loop | **95.5 MB** (held between presents) | 109.2 MB | Reported between-present sample; count/window not recorded |
+| 0.2 Hz present loop (5 s gaps) | 0.2-3.3 MB (never establishes) | 12-14 MB | Observed range; count/window not recorded |
+| 10 s after any loop stops | ≤1 MB | 13-14 MB | Final sample at the 10-second idle checkpoint |
+| Offscreen clears at 60 Hz — no window, no CAMetalLayer, no present | **96.1 MB** | 103.2 MB | Reported steady-state sample; count/window not recorded |
+| 60 Hz IOSurface content updates via plain CALayer, no Metal device | **0-16 KB** | 10.0 MB | Observed range plus reported footprint; count/window not recorded |
+| One process, N presenting CAMetalLayers (n=1/4/8, 60 Hz) | 95.6 / 103.3 / 112.7 MB | 109.5 / 122.5 / 136.9 MB | One reported value per layer count; window not recorded |
 
 **The name:** the ~85-96 MB "owned physical footprint (unmapped)
 (graphics)" is the Apple GPU driver's **per-process command-submission
@@ -123,9 +134,10 @@ working set** on this hardware/OS. It is committed as soon as a process
 submits Metal command buffers in a sustained cadence — presentation is not
 required (offscreen row), a window is not required, and the render target
 size barely matters. It is one arena per process (~95 MB) plus ~2.4 MB per
-additional presenting layer. The driver reclaims it after roughly 2-5
-seconds of submission silence (held at 1 s intervals, never established at
-5 s intervals, gone within 10 s of idle) — Weaver never goes silent because
+additional presenting layer. The receipt bounds idle reclamation without
+pinning an unsupported interval: held at 1-second submissions, never
+established across 5-second gaps, and gone within 10 seconds of idle. Weaver
+never goes silent because
 `renderFrame` presents unconditionally from a 60 Hz display timer
 (`appkit_host.m` layer setup / renderFrame), so every widget process pins
 the arena forever. The M2 Air's driver sizes this working set near zero for
@@ -142,9 +154,9 @@ device-less widget process, two independent ways:
 
 1. In-process tuning cannot reach the target on this hardware. Damage-driven
    presenting (stop the unconditional 60 Hz loop) only releases the arena
-   for widgets quieter than ~0.2 Hz; any live widget (a clock ticking
-   seconds) holds it. Worth doing anyway for battery/honesty, but it is not
-   the memory fix.
+   for the measured 0.2 Hz workload; the measured 1 Hz seconds clock holds it.
+   Intermediate cadences were not measured. Worth doing anyway for
+   battery/honesty, but it is not the memory fix for 1 Hz-or-faster widgets.
 2. A widget process that submits **no Metal at all** and shows frames via
    IOSurface contents on a plain CALayer measures ~10 MB footprint even at
    60 Hz content updates (probe row above). Whatever process renders pays

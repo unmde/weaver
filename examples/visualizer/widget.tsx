@@ -12,6 +12,7 @@ const cellCount = 14;
 const cellHeight = 3;
 const cellGap = 2;
 const barGap = 2;
+const barWidth = 11;
 const segments = 24;
 
 const levels = Array.from({ length: barCount }, () => 0);
@@ -21,6 +22,10 @@ function readout(rms: number): string {
   if (rms <= 0.0005) return "--";
   const db = Math.round(20 * Math.log10(rms));
   return `${db > 0 ? "+" : ""}${db} DB`;
+}
+
+function readoutValue(audio: AudioData): string {
+  return readout(audio.rms);
 }
 
 function hasSignal(audio: AudioData): boolean {
@@ -39,7 +44,7 @@ export default widget({
   useEffect(() => audio.subscribe((next) => {
     if (hasSignal(next)) setActive(true);
   }), [audio]);
-  const readoutSignal = audio.map((next) => readout(next.rms));
+  const readoutSignal = audio.map(readoutValue);
   return (
     <stack class="size-full rounded-[20px]">
       <column class="size-full bg-[#1a1a1a] rounded-[20px] border border-[#000000] shadow-[0_1px_2px_0_#ffffff1a] shadow-inner p-[14px]">
@@ -51,7 +56,11 @@ export default widget({
               onFrame={(ctx, frame) => {
                 const sample = audio.value;
                 ctx.clear();
-                const barWidth = (ctx.width - barGap * (barCount - 1)) / barCount;
+                // Integer point geometry remains pixel-aligned at every
+                // integral backing scale, so solid cells stay direct Metal
+                // quads instead of taking the antialiased raster fallback.
+                const meterWidth = barCount * barWidth + (barCount - 1) * barGap;
+                const meterX = Math.floor((ctx.width - meterWidth) / 2);
                 const pitch = cellHeight + cellGap;
                 const ladder = cellCount * pitch - cellGap;
                 const base = ctx.height - (ctx.height - ladder) / 2;
@@ -70,7 +79,7 @@ export default widget({
                   // Peak-hold falls far slower than the bar, the way a hardware
                   // meter parks its cap after a transient.
                   peaks[index] = Math.max(levels[index], peaks[index] - 0.22 * dt);
-                  const x = index * (barWidth + barGap);
+                  const x = meterX + index * (barWidth + barGap);
                   ctx.fillRect(x, base - ladder, barWidth, ladder, "#ffffff17");
                   const lit = Math.round(levels[index] * cellCount);
                   if (lit > 0) {
@@ -93,8 +102,10 @@ export default widget({
                   ? Math.max(0, Math.min(1, (20 * Math.log10(sample.rms) + 48) / 48))
                   : 0;
                 const lit = Math.round(level * segments);
+                const stripWidth = segments * 13 - 1;
+                const stripX = Math.floor((ctx.width - stripWidth) / 2);
                 for (let index = 0; index < segments; index += 1) {
-                  ctx.fillRect(index * 13, ctx.height - 3, 12, 3, index < lit ? "#ffffffff" : "#ffffff17");
+                  ctx.fillRect(stripX + index * 13, ctx.height - 3, 12, 3, index < lit ? "#ffffffff" : "#ffffff17");
                 }
                 if (!hasSignal(sample) && levels.every((value) => value < 0.008) && peaks.every((value) => value < 0.02)) {
                   setActive(false);

@@ -1,3 +1,7 @@
+---
+status: superseded by ADR-0018
+---
+
 # macOS renders healthy Widgets in-process through Metal; software remains the reference and fallback
 
 The macOS M5 bakeoff measured complete production Widget processes, not an

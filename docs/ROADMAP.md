@@ -1,54 +1,100 @@
 # Roadmap
 
-Ordering set by Dara, 2026-07-15. Current state: M0–M4b, fork consolidation,
-dev hot-swap/logs, the Windows per-monitor DPI contract, and the macOS
-developer-build implementation stack are complete. The portable `.weave`
-pack/install boundary is implemented; capability grants are the next
-trust-boundary work. macOS physical-session blockers remain explicit rather
-than being relabeled as implementation work.
+Last reconciled: 2026-07-31 against `origin/master` at `705f89d`.
 
-1. **Fork consolidation — complete** — consolidate the stacked fork branches into one
-   clean `weaver-main` lineage; make the widget capacity profile a build option
-   so stock fork tests pass. The general TLS problem from #114 was upstreamed;
-   Weaver's capacity, widget-windowing, and presenter changes remain fork-owned
-   because they serve Weaver rather than Native SDK's product surface.
-2. **Dev polish — complete** — state-preserving hot-swap for `weaver dev`, `weaver logs
-   <widget>`, better errors. Multi-monitor anchoring and the per-monitor DPI
-   audit are complete; see [Windows DPI scaling](dpi-scaling.md).
-3. **`weaver pack` / `weaver install` — artifact complete, grants next** — the
-   `.weave` file is deterministic zipped source + declared surface + lineage
-   (source-is-the-artifact, ADR 0004). Install validates and builds a
-   Weaver-owned copy, audits quiet capabilities, and never registers the
-   sender's workspace. Next: the loud capability consent UI from ADR 0002 and
-   the first real gated capability.
-4. **`weaver remix`** — copy an installed widget's source to an editable
-   folder, bump lineage, hand to your agent. Conjure skill v2 covering the
-   full API surface.
-5. **The manager + API breadth** — weaverd tray + widget-list/cost/permission
-   surface (candidate: first Weaver app built with Weaver). Remote images,
-   canvas gradients/paths, media control, network/battery providers.
-   Styling + media ordering set 2026-07-21: see
-   [API breadth — ordered work list](api-breadth-orders.md); gate is a
-   pixel-faithful noro-player port.
-6. **[macOS](macos-port-brief.md) — developer stack complete, physical gates open** —
-   performance-native AppKit windowing, measured retained Metal with software
-   fallback, host-owned providers, artifact/daemon parity, and Apple
-   silicon/Intel CI. External-display/desktop-management, real audio consent
-   and routes, sleep/wake, physical Intel, and notarized packaging remain named
-   verification/distribution work.
-7. **Gallery** — hosted browse / one-click install / remix lineage /
-   capability badges.
-8. **Packaging** — installer/winget bundle (weaverd, renderer, runtime, CLI,
-   esbuild), weaverd login auto-start. Built last by design; note: it gates
-   the gallery's public launch, since gallery users need an install story.
+Weaver is a capable cross-platform engine in pre-alpha, not yet a complete
+end-user product. The authoring/runtime/artifact spine is real and the
+noro-player fidelity gate is complete. The missing center is the trust and
+management shell that turns those pieces into the full **Conjure → Share →
+Remix** loop.
 
-## Beta acceptance bar
+## What exists now
 
-Set 2026-07-27: before beta, Weaver must 100% recreate every skin in
-[skin parity targets](skin-parity-targets.md) to the noro-player standard
-(indistinguishable side-by-side + functional parity, attended-verified on
-both OSes). That list — not speculation — is the demand signal that orders
-the remaining breadth work (alive pack, providers, loud capability rungs).
+| Surface | State | Receipt / boundary |
+|---|---|---|
+| TSX + Tailwind-like authoring | Working on Windows and macOS | Retained reconciler, hooks, styling packs, icons/images/stack/interaction, Canvas, and agent-readable `weaver check`; public contract in [`sdk/CONTRACT.md`](../sdk/CONTRACT.md) |
+| Native runtime and desktop windowing | Working developer builds | Zig + QuickJS, no browser/webview, per-Widget crash isolation, transparent desktop surfaces, Windows per-monitor DPI, AppKit parity |
+| Renderer | Working; performance hardening active | Shared GPU renderer on Windows; macOS shared-renderer cutover landed in PR #47 after the per-process Metal submission wall was measured |
+| Providers | Working, bounded surface | Time, CPU, memory, audio, and media; collection is host-owned and subscriber-driven; network access is per-Widget through declared origins |
+| Media parity gate | Complete | Metadata, artwork, transport, seek, and noro-player attended on both OSes; macOS exact 15.4 floor and shipping notarization remain unverified |
+| Dev lifecycle | Working | `init`, `check`, `bundle`, state-preserving `dev`, logs, host status, crash/backoff recovery |
+| Portable artifact lifecycle | Working | Deterministic source-carrying `.weave`, inspect/install/replace/uninstall, install-owned source boundary |
+| End-user product | Missing | No manager, loud grant UI, remix command, signed installer/updater, or public gallery |
+| Beta breadth | 1 target complete | noro-player is done; the remaining in-scope [`skin parity targets`](skin-parity-targets.md) are the demand signal |
 
-Not on the roadmap: GPU text atlases (until profiling demands), JSX sugar
-layer (TSX won), web embedding (cut), Linux (acknowledged, unloved — ADR 0006).
+“Working” here means the developer-build path exists with tests and recorded
+evidence. It does not mean stable API, public distribution, or beta support.
+
+## The gaps, in dependency order
+
+1. **Close the current performance lineage.** The macOS shared renderer is on
+   `master`, while the Visualizer/Canvas CPU reductions were developed on the
+   older `feat/macos-memory-work` lineage. Reconcile only the still-relevant
+   patches onto the shared-renderer head, then remeasure the complete workload.
+   Publish 1/2/4/8-Widget physical-footprint, CPU, wakeup, frame, recovery, and
+   30-minute drift receipts. [`ADR 0018`](adr/0018-macos-shared-metal-renderer.md)
+   records the shipped architecture and supersedes the older in-process
+   decision.
+2. **Build the trust surface and thin manager together.** Add the tray/menu-bar
+   manager with Widget list, start/stop, health, measured cost, logs, declared
+   origins/capabilities, and permission state. Implement ADR 0002's loud grant
+   flow here, beginning with the first skin-demanded rung (`launch-app` or
+   `open-url`). Every denial and unavailable provider must remain actionable
+   from both the UI and `weaver status --json`.
+3. **Complete the Loop with `weaver remix`.** Export the installed source to an
+   editable directory, preserve provenance, append lineage, and hand the result
+   to the agent. Upgrade the conjure skill to cover the full current SDK and add
+   a remix skill that can act from the artifact and its diagnostics alone.
+4. **Earn beta breadth one named skin at a time.** Use
+   [`skin-parity-targets.md`](skin-parity-targets.md), not a speculative API
+   wishlist. The derived backlog currently includes animation, gradients,
+   blur/glow, canvas paths/arcs, rotated text, text input, multi-Widget suites,
+   launch/open capabilities, and weather/network/GPU/RSS/mail providers. Each
+   addition lands with the demanding skin, cross-platform pixels and behavior,
+   idle/active receipts, and agent-facing check errors.
+5. **Close the physical platform matrix.** Verify macOS external displays,
+   Stage Manager/Spaces/fullscreen/lock, sleep/wake, audio revoke and route
+   recovery, Bluetooth/AirPlay, physical Intel, and MediaRemote at exactly
+   macOS 15.4. Repeat the relevant interaction and performance receipts on the
+   Windows release floor. Unverified hardware behavior stays named.
+6. **Define the gallery contract, then package.** The gallery can develop its
+   browse, provenance, lineage, capability-badge, and one-click-install
+   contract before packaging, but it does not launch publicly first. Ship a
+   signed/notarized macOS direct-distribution bundle and a Windows installer
+   containing the host, renderer, runtime, CLI, builder, startup registration,
+   updater, repair, and clean uninstall. The macOS MediaRemote route makes Mac
+   App Store distribution out of scope unless that provider strategy changes.
+7. **Launch the gallery.** Seed it with the attended skin recreations, preserve
+   source visibility and lineage through install/remix/re-publish, and make
+   declared access obvious before install.
+
+## Release bars
+
+### Alpha
+
+A person who has not cloned the repository can install Weaver, prompt an agent
+to conjure a Widget, inspect and grant its declared access, keep it running
+across login/restart, see its real resource bill, install a `.weave`, remix it,
+and cleanly remove both the Widget and Weaver on Windows and macOS.
+
+### Beta
+
+Every in-scope target in [`skin-parity-targets.md`](skin-parity-targets.md) is
+indistinguishable side-by-side and functionally equivalent on both OSes, with
+attended evidence. Target 14 (TranslucentTaskbar) needs an explicit scope
+ruling because it modifies an OS-owned surface rather than creating a Widget.
+The packaged update/repair/uninstall paths and the public gallery loop must
+also pass.
+
+### v1
+
+The Alpha and Beta bars hold across the supported hardware/OS matrix; crash
+recovery, upgrades, provider failure, permission changes, and multi-Widget
+cost have long-run receipts; the authoring and artifact contracts are stable
+enough that an agent can build and repair Widgets without repository knowledge.
+
+## Deliberate non-goals
+
+GPU text atlases until profiling demands them; a second JSX sugar layer (TSX
+won); embedded web pages; App Store distribution with the current macOS media
+route; Linux until it has an owner and measured product demand.

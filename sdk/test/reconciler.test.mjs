@@ -85,6 +85,7 @@ test("widget renders one native generation and providers use native timers", asy
       sdk.h("text", { class: "text-[13px] text-center leading-tight tracking-[-0.5px] line-clamp-2 tabular-nums font-bold font-mono text-shadow-md" }, time.ss),
       sdk.h("text", null, cpu.percent.toFixed(1)),
       sdk.h("text", null, audio.bands[0].toFixed(2)),
+      sdk.h("text", null, false, null, undefined, "conditional"),
       sdk.h("text", null, media.title),
       sdk.h("text", null, `${media.status}:${media.sourceApp}`),
       media.artPath
@@ -279,13 +280,22 @@ function isolatedNative() {
 test("provider signals update bound text and sampled values without a root render", async () => {
   const source = `
     import { h, useProviderSignal, useState, widget } from "./src/index.ts";
+    const percent = (value) => Math.round(value.rms * 100);
     widget({ name: "Signal fixture", size: [100, 50], subscribe: ["audio"] }, () => {
       const audio = useProviderSignal("audio");
       const [visible, setVisible] = useState(true);
+      const mapped = audio.map(percent);
+      globalThis.mappedSignalIsStable = mapped === audio.map(percent);
+      globalThis.audioSignal = audio;
+      globalThis.laterSignalListenerCalls = 0;
+      globalThis.installThrowingSignalListeners = () => {
+        audio.subscribe(() => { throw new Error("signal listener exploded"); });
+        audio.subscribe(() => { globalThis.laterSignalListenerCalls += 1; });
+      };
       globalThis.readRms = () => audio.value.rms;
       globalThis.hideText = () => setVisible(false);
       return visible
-        ? h("text", { class: "text-white" }, audio.map((value) => Math.round(value.rms * 100)))
+        ? h("text", { class: "text-white" }, mapped)
         : h("panel", null);
     });
   `;
@@ -310,6 +320,7 @@ test("provider signals update bound text and sampled values without a root rende
   };
   const context = { native };
   vm.runInNewContext(output.outputFiles[0].text, context);
+  assert.equal(context.mappedSignalIsStable, true);
   assert.equal(fixtureOperations.filter(([name]) => name === "beginBatch").length, 1);
   assert.equal(fixtureOperations.findLast(([name]) => name === "setText")[2], "0");
 
@@ -323,10 +334,54 @@ test("provider signals update bound text and sampled values without a root rende
 
   context.hideText();
   await Promise.resolve();
+  assert.ok(fixtureOperations.some(([name, type]) => name === "createNode" && type === "panel"),
+    "the fixture did not re-render to <panel>; the unmount assertion would be vacuous");
   const textWritesAfterUnmount = fixtureOperations.filter(([name]) => name === "setText").length;
   fixtureProviderCallback('{"provider":"audio","value":{"rms":0.7,"bands":[0.9]}}');
   assert.equal(context.readRms(), 0.7);
   assert.equal(fixtureOperations.filter(([name]) => name === "setText").length, textWritesAfterUnmount);
+
+  assert.throws(() => context.audioSignal.subscribe(null), /Signal\.subscribe\(listener\) requires a function/);
+  assert.throws(() => context.audioSignal.map(null), /Signal\.map\(project\) requires a function/);
+  context.installThrowingSignalListeners();
+  fixtureProviderCallback('{"provider":"audio","value":{"rms":0.8,"bands":[1]}}');
+  assert.equal(context.laterSignalListenerCalls, 1);
+  const signalReport = fixtureOperations.findLast(([name]) => name === "reportError");
+  assert.equal(signalReport[1], "signal listener");
+  assert.match(signalReport[2], /signal listener exploded/);
+});
+
+async function signalTextValidationError(children) {
+  const source = `
+    import { h, useProviderSignal, widget } from "./src/index.ts";
+    widget({ name: "Signal validation", size: [100, 50], subscribe: ["audio"] }, () => {
+      const audio = useProviderSignal("audio");
+      return h("text", null, ${children});
+    });
+  `;
+  const output = await build({
+    stdin: { contents: source, resolveDir: fileURLToPath(new URL("..", import.meta.url)), sourcefile: "signal-validation-fixture.ts" },
+    bundle: true, format: "iife", platform: "neutral", write: false,
+  });
+  const reports = [];
+  const native = {
+    ...isolatedNative(),
+    hostAvailable() { return true; },
+    reportError(...args) { reports.push(args); },
+  };
+  vm.runInNewContext(output.outputFiles[0].text, { native });
+  return reports[0]?.[1] ?? "";
+}
+
+test("signal text validation errors stay exact and actionable", async () => {
+  assert.match(
+    await signalTextValidationError("audio, audio"),
+    /A bound <text> must contain exactly one Signal child; format the complete label with signal\.map\(\.\.\.\)/,
+  );
+  assert.match(
+    await signalTextValidationError('h("panel", null)'),
+    /^Error: <text> children must be strings, numbers, or one Signal; received object/,
+  );
 });
 
 async function runBoundaryFixture(mode) {

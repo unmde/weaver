@@ -1526,7 +1526,8 @@ function validateMediaTransportCapability(project: SourceProject, errors: string
 
 function validateSource(project: SourceProject): string[] {
   const errors: string[] = [];
-  type ProviderName = "time" | "cpu" | "memory" | "audio" | "media";
+  const providerNames = ["time", "cpu", "memory", "audio", "media"] as const;
+  type ProviderName = (typeof providerNames)[number];
   const usedProviders = new Map<ProviderName, Set<"useProvider" | "useProviderSignal">>();
   const stateVariantAncestry = (node: ts.JsxOpeningElement | ts.JsxSelfClosingElement): "pressable" | "component-boundary" | "none" => {
     let current: ts.Node | undefined = node.parent;
@@ -1652,11 +1653,17 @@ function validateSource(project: SourceProject): string[] {
     if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) &&
         (node.expression.text === "useProvider" || node.expression.text === "useProviderSignal")) {
       const argument = node.arguments[0];
-      if (argument && ts.isStringLiteral(argument) && ["time", "cpu", "memory", "audio", "media"].includes(argument.text)) {
+      if (argument && ts.isStringLiteral(argument) && (providerNames as readonly string[]).includes(argument.text)) {
         const provider = argument.text as ProviderName;
         const hooks = usedProviders.get(provider) ?? new Set<"useProvider" | "useProviderSignal">();
         hooks.add(node.expression.text);
         usedProviders.set(provider, hooks);
+      } else if (argument && ts.isStringLiteral(argument)) {
+        errors.push(locationMessage(
+          node.getSourceFile(),
+          argument,
+          `${node.expression.text}("${argument.text}") names no known provider; available providers: ${providerNames.join(", ")}`,
+        ));
       }
     }
     if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === "wfetch") {

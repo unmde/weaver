@@ -3,13 +3,12 @@
 **Conjure. Share. Remix.** — desktop widgets built by prompting your agent,
 shared as source, remixed by anyone's agent.
 
-Weaver is a cross-platform desktop widget platform (think Rainmeter, rebuilt
-for 2026): widgets are single TypeScript components rendered by a native
-runtime — no browser, no webview. Each widget is its own crash-isolated
-process, drawn with per-pixel transparency on the desktop layer. Current
-platform-specific cost measurements are published with the milestone results;
-the corrected macOS retained renderer is roughly 28.5 MB for the measured quiet
-Clock Widget and is not represented by the older Windows memory number.
+Weaver is an agent-native, cross-platform desktop widget platform (think
+Rainmeter, rebuilt for 2026). A Widget is a TypeScript component rendered by a
+Zig/QuickJS runtime through Weaver's fork of Vercel Labs' Native SDK — no
+browser and no webview. Widgets are crash-isolated, GPU-rendered where that is
+the measured winner, and presented with per-pixel transparency on the desktop
+layer.
 
 ```tsx
 import { useProvider, widget } from "@weaver/sdk";
@@ -37,15 +36,35 @@ That file is a complete widget. It is also the *distribution format*: a
 shared Weaver widget is always its source — what you read is what runs, and
 every install is a potential remix.
 
+![Weaver running a live audio spectrum and media Widget beside its TSX source](docs/readme/weaver-live-desktop.png)
+
+## Why Weaver is different
+
+- **Prompt-to-desktop authoring.** TSX, familiar hooks, and Tailwind-like
+  classes give coding agents a surface they already know. `weaver check`
+  returns errors intended to be actionable without reading Weaver's code.
+- **Native pixels without a browser tax.** A small Zig runtime embeds QuickJS
+  and projects retained operations into a native renderer instead of shipping
+  Chromium with every Widget.
+- **Source is the artifact.** A deterministic `.weave` contains readable
+  source, assets, declared access, provenance, and remix lineage — never an
+  opaque executable.
+- **Isolation without duplicated collection.** Widgets fail independently;
+  expensive system data is collected once by the host, fanned out only to
+  subscribers, and reported unavailable instead of fabricated.
+- **Performance has receipts.** CPU, physical footprint, wakeups, frame
+  cadence, and multi-Widget cost are product gates. Limits are measured
+  tripwires with named diagnostics, not silent guesses.
+
 ## Status: v0 (pre-alpha), Windows + macOS developer builds
 
-The conjure and source-sharing loops work end to end on Windows and macOS:
+The authoring and source-sharing paths work end to end on Windows and macOS:
 scaffold → agent edits the TSX → `weaver check` (agent-readable errors) →
 `weaver dev` → live widget. The portable `init` / `check` / `bundle` / `pack` /
 `inspect` / `install` / `uninstall` / `logs` lifecycle uses the same `.weave`
 bytes and install-owned source boundary on both platforms. macOS now has its
 native supervisor, acknowledged lifecycle, crash/backoff recovery, process
-cost status, state-preserving dev hot swap, retained Metal renderer, and
+cost status, state-preserving dev hot swap, a host-owned shared renderer, and
 host-owned providers from the stacked
 [Lane D implementation plan](docs/macos-port-brief.md). See the honest milestone
 notes in [`docs/m0-results.md`](docs/m0-results.md) and
@@ -56,11 +75,32 @@ change.
 Host-owned CPU, memory, and audio providers now run on both platforms and stay
 off with no subscriber. macOS audio uses one public Core Audio process tap and
 one shared analysis/fan-out pipeline; unavailable permission or hardware is
-reported explicitly and never replaced with fake frames. macOS media is
-explicitly unavailable in v0: public APIs at the 14.2 floor do not observe
-other applications' Now Playing sessions, so Weaver sends no fake media frame
-and does not depend on private MediaRemote APIs. See
-[`ADR 0015`](docs/adr/0015-macos-media-provider-unavailable.md).
+reported explicitly and never replaced with fake frames. Media metadata,
+artwork, transport controls, and seek work on Windows and on macOS 15.4+.
+macOS uses a supervised, isolated MediaRemote adapter because public APIs do
+not expose the system-wide session; that choice is suitable for direct
+distribution, not the Mac App Store, and remains honest-unavailable on older
+macOS versions or adapter failure. See
+[`ADR 0017`](docs/adr/0017-macos-mediaremote-adapter.md) and the attended
+[`media v2 results`](docs/media-v2-results.md).
+
+The engine is ahead of the product shell. There is not yet an end-user
+manager, loud capability-consent flow, `weaver remix` command, signed
+installer/updater, or public gallery. Only noro-player has cleared the full
+beta skin-parity bar. Those are the roadmap, not footnotes; see
+[`docs/ROADMAP.md`](docs/ROADMAP.md) for the current sequence.
+
+## Sponsors
+
+Weaver's open-source development is supported by:
+
+<a href="https://www.greptile.com/?utm_source=oss_badge&utm_medium=readme&utm_campaign=greptile_for_open_source">
+  <img src="https://www.greptile.com/badge.svg" alt="Greptile: The War on Bugs" width="600">
+</a>
+
+[Greptile's Open Source Program](https://www.greptile.com/open-source) provides AI code review for the project.
+
+**[OpenAI — Codex for Open Source](https://openai.com/form/codex-for-oss/)** provides tooling and credits for open-source maintenance.
 
 ## Quickstart
 
@@ -149,14 +189,15 @@ disabling SIP, Gatekeeper, the firewall, or any global security control.
 | macOS 14.2+ Intel | Build, runtime/host/unit, portable artifact and nonvisual daemon lifecycle | Physical Intel hardware unverified |
 | Linux | None | Unsupported |
 
-The initial distribution is a source checkout and ad-hoc-signed developer host,
+The current distribution is a source checkout and ad-hoc-signed developer host,
 not a notarized installer, login item, App Store product, or universal package.
 The remaining physical limits are explicit: external-display arrangements,
 Stage Manager/Space/fullscreen/lock and sleep/wake coverage, post-grant System
 Audio revocation and physical route recovery, Bluetooth/AirPlay, and Developer
 ID notarization are not inferred from automation. OS screen capture, Show
 Desktop, and integrated-output System Audio capture now have physical evidence.
-macOS media is unavailable by ADR 0015.
+The macOS MediaRemote route still needs exact-floor testing at 15.4 and a
+shipping signed/notarized bundle gate.
 See [`macos-m12-results.md`](docs/macos-m12-results.md) and the live
 [`macos-run-status.md`](docs/macos-run-status.md) for the exact gates and
 blockers.

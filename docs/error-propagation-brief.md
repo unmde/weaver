@@ -58,26 +58,23 @@ budget, the limit, and the ask. But:
   "appendChild failed" / "insertBefore failed" (`bridge.zig:185,195`) which is
   how `max_children = 24` surfaces. Bring these up to the `failFmt` standard.
 - All of them then die in Seam 1 anyway. Both halves need fixing.
-- `runtime/src/tree.zig:4-21` budgets (`max_nodes 128`, `max_children 24`,
-  `max_text_bytes 192`, `max_canvases 8`) are *statically checkable* for the
-  initial tree — `weaver check` should count nodes/children of the authored
-  JSX and fail with headroom numbers instead of letting the runtime discover
-  it. (Separately: 128 is probably just too small — native SDK uses 1024/view
-  and documents why it abandoned 128/256 — but that's a sizing decision, not
-  this pass.)
+- `runtime/src/tree.zig` budgets (`max_nodes 1024`, `max_children 64`,
+  `max_text_bytes 1024`, `max_canvases 8`) are statically checked for the
+  initial tree. `weaver check` validates the lowered representation—not just
+  authored JSX—so generated layout/text nodes and canvases count. Every
+  `max_nodes`, `max_children`, `max_text_bytes`, and `max_canvases` failure
+  reports the configured limit, requested amount, and remaining headroom.
 
 ## Seam 4 — image failures are log-only, screen-silent
 
 - `runtime/src/main.zig:119` and `:1012` log `ImageTooLarge` etc. to the
   per-widget log, then render proceeds with a black hole where the image was.
   Nothing on screen, nothing in the dev CLI stream, `weaver check` passes.
-- The 256 KiB decoded-RGBA cap
-  (`runtime/native-sdk/src/runtime/canvas_limits.zig:118`, widget profile) is
-  hit by *any* real album art; the bundled `cover.jpg` is 256×256 = exactly at
-  the cap. `weaver check` can decode bundled assets and fail with the exact
-  dimensions/byte math at check time. Host-fed `media.artPath` art needs either
-  host-side downscale-to-fit or a runtime log + on-widget placeholder that says
-  why.
+- The pinned Native widget profile permits 1 MiB of decoded RGBA. A 256×256
+  image is 256 × 256 × 4 = 262,144 bytes (256 KiB), so it passes. `weaver check`
+  reads local image dimensions and reports the decoded-byte calculation without
+  decoding pixels. Runtime failures report dimensions plus requested bytes.
+  Images over 1 MiB need downscaling or an on-widget placeholder that says why.
 
 ## Seam 5 — dev loop failure modes
 
@@ -95,16 +92,14 @@ budget, the limit, and the ask. But:
   (`runtime/src/main.zig:362` evaluateCandidate) — extend that rejection to
   candidates whose *first render* throws, and keep the old bundle running.
 
-## Seam 6 — canvas prerequisites are unchecked
+## Seam 6 — dynamic canvas denial remains screen-silent
 
-- A `<canvas>` under a clipping ancestor (`overflow-hidden`) or behind an
-  opacity layer never gets a host GPU surface; today the entire widget blanks
-  with no diagnostic. The rule is already written down as a *comment* in
-  `examples/visualizer/widget.tsx:3-5` — it should be a `weaver check` error
-  (the ancestor chain is statically known) plus a runtime log if the surface
-  is denied dynamically. Precedent: `CanvasNeedsExplicitSize`
-  (`cli/src/index.ts:1373`) already does exactly this for percent sizing —
-  same shape, new rule.
+- `weaver check` already reports statically knowable clipping and opacity
+  violations as `CanvasNeedsUnclippedAncestors` and
+  `CanvasNeedsOpaqueAncestors`; the relevant validators live in
+  `cli/src/index.ts:1527-1681`. The remaining gap is a runtime diagnostic when
+  the host denies a canvas surface dynamically, so the widget cannot blank
+  without a named reason.
 
 ## Seam 7 — empty-catch inventory
 
@@ -146,5 +141,8 @@ One integration test per seam that used to be silent, each asserting a named
 error is visible at the correct surface. The canonical one: a widget whose
 tree exceeds `max_nodes` must (a) fail `weaver check` naming the budget and
 count, and if forced through anyway (b) log
-`node capacity exhausted: max_nodes=128, asked for 129` and (c) render an
-error surface — never uninitialized memory, never a silent flat fill.
+`node capacity exhausted: max_nodes=1024, asked for 1025` and (c) render an
+error surface — never uninitialized memory, never a silent flat fill. A failed
+first render must commit only the error surface with no partially built nodes;
+a failed hot-swap first render must keep the previously active tree and bundle
+unchanged.

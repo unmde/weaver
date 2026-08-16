@@ -4,6 +4,8 @@ import test from "node:test";
 import { compileClass, UtilityError } from "../src/class-compiler.ts";
 
 const contract = readFileSync(new URL("../CONTRACT.md", import.meta.url), "utf8").replaceAll("\r\n", "\n");
+const declarations = readFileSync(new URL("../index.d.ts", import.meta.url), "utf8").replaceAll("\r\n", "\n");
+const reconciler = readFileSync(new URL("../src/reconciler.ts", import.meta.url), "utf8").replaceAll("\r\n", "\n");
 const consolidated = contract.slice(contract.indexOf("## Consolidated v0.4 authoring tables"));
 
 function firstColumnAfter(header) {
@@ -42,5 +44,26 @@ test("consolidated class table representatives compile and omitted families stay
   for (const authored of representatives) assert.doesNotThrow(() => compileClass(authored), authored);
   for (const authored of ["bg-gradient-to-r", "transition-colors", "absolute", "hover:p-2"]) {
     assert.throws(() => compileClass(authored), UtilityError, authored);
+  }
+});
+
+function declarationBlock(source, pattern, label) {
+  const match = source.match(pattern);
+  assert.ok(match, `missing ${label}`);
+  return match[0];
+}
+
+function providerOverloads(source, hook) {
+  return source.match(new RegExp(`^export function ${hook}\\(name: "[^"]+"\\): [^;]+;`, "gm")) ?? [];
+}
+
+test("public Signal and provider declarations match their runtime source", () => {
+  const signalPattern = /^export interface Signal<out T> \{[\s\S]*?^\}/m;
+  assert.equal(
+    declarationBlock(declarations, signalPattern, "public Signal declaration"),
+    declarationBlock(reconciler, signalPattern, "runtime Signal declaration"),
+  );
+  for (const hook of ["useProvider", "useProviderSignal"]) {
+    assert.deepEqual(providerOverloads(declarations, hook), providerOverloads(reconciler, hook));
   }
 });

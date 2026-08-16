@@ -196,6 +196,7 @@ interface CanvasBinding {
 interface MutableSignal<T> extends Signal<T> { emit(value: T): void }
 const canvases = new Map<number, CanvasBinding>();
 const signals = new WeakSet<object>();
+const signalMaps = new WeakMap<object, WeakMap<Function, Signal<unknown>>>();
 const colorCache: Record<string, number> = Object.create(null) as Record<string, number>;
 
 native.onCanvasResize((id, width, height) => runWidgetCallback("canvas resize callback", () => {
@@ -515,14 +516,17 @@ function reconcileHost(parentId: number | null, previous: Instance | null, vnode
   }
   applyElementProps(instance, vnode.props);
   if (type === "text") {
-    const binding = vnode.children.find(isSignal);
+    const children = vnode.children.filter(isRenderable);
+    const binding = children.find(isSignal);
     if (binding) {
-      if (vnode.children.length !== 1) throw new Error("A bound <text> must contain exactly one Signal child; format the complete label with signal.map(...)");
+      if (children.length !== 1) throw new Error("A bound <text> must contain exactly one Signal child; format the complete label with signal.map(...)");
       bindHostText(instance, binding);
     } else {
       unbindHostText(instance);
-      const text = vnode.children.map((child) => {
-        if (typeof child !== "string" && typeof child !== "number") throw new Error("<text> children must be strings, numbers, or one Signal");
+      const text = children.map((child) => {
+        if (typeof child !== "string" && typeof child !== "number") {
+          throw new Error(`<text> children must be strings, numbers, or one Signal; received ${typeof child}`);
+        }
         return String(child);
       }).join("");
       setHostText(instance, text);
@@ -1181,7 +1185,20 @@ function createSignal<T>(initial: T): MutableSignal<T> {
     },
     emit(value: T): void {
       current = value;
-      for (const listener of listeners) listener(value);
+      let failed = false;
+      let firstError: unknown;
+      // Deliver one coherent emission to the subscription snapshot before
+      // failing the widget. A user listener must not prevent retained text or
+      // later listeners from observing the value that was already committed.
+      for (const listener of [...listeners]) {
+        try {
+          listener(value);
+        } catch (error) {
+          if (!failed) firstError = error;
+          failed = true;
+        }
+      }
+      if (failed) failWidget("signal listener", firstError);
     },
   };
   signals.add(signal);
@@ -1189,6 +1206,13 @@ function createSignal<T>(initial: T): MutableSignal<T> {
 }
 
 function mapSignal<T, U>(source: Signal<T>, project: (value: T) => U): Signal<U> {
+  let projections = signalMaps.get(source);
+  if (!projections) {
+    projections = new WeakMap<Function, Signal<unknown>>();
+    signalMaps.set(source, projections);
+  }
+  const cached = projections.get(project);
+  if (cached) return cached as Signal<U>;
   const mapped: Signal<U> = {
     get value(): U { return project(source.value); },
     subscribe(listener: (value: U) => void): () => void {
@@ -1201,6 +1225,7 @@ function mapSignal<T, U>(source: Signal<T>, project: (value: T) => U): Signal<U>
     },
   };
   signals.add(mapped);
+  projections.set(project, mapped as Signal<unknown>);
   return mapped;
 }
 
