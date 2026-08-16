@@ -177,7 +177,7 @@ try {
 
   run(["init", "media-recovery"]);
   writeFileSync(join(scratch, "media-recovery", "widget.tsx"), `
-import { useInterval, useMediaTransport, useProvider, useState, useStorage, widget } from "@weaver/sdk";
+import { useInterval, useMediaTransport, useProvider, useStorage, widget } from "@weaver/sdk";
 
 export default widget({
   name: "Media Recovery",
@@ -188,11 +188,8 @@ export default widget({
 }, () => {
   const media = useProvider("media");
   const transport = useMediaTransport();
-  const [attempted, setAttempted] = useState(false);
   const [outcome, setOutcome] = useStorage("transport", "pending");
   useInterval(() => {
-    if (attempted) return;
-    setAttempted(true);
     void transport.pause().then((ok) => {
       setOutcome(\`resolved:\${ok}\`);
       console.log(\`media recovery command resolved:\${ok}\`);
@@ -205,7 +202,6 @@ export default widget({
 });
 `, "utf8");
   const recoveryFramesBeforeInstall = status().providers.mediaPipeFrames;
-  writeFileSync(providerSendFailure, "fail-next-send", "utf8");
   run(["install", "media-recovery"]);
   const firstRecovery = await waitFor("initial media recovery Widget", () => {
     const document = status();
@@ -220,6 +216,14 @@ export default widget({
     .map((entry) => entry.name);
   assert.equal(firstRecoverySockets.length, 1, "initial recovery Widget did not own exactly one provider endpoint");
 
+  // Arm the one-shot send failure only now, after the pre-crash Widget's pid
+  // and endpoint are captured from settled status. Arming before install races
+  // the fixture's first transport attempt against status.json's write cadence:
+  // on a slow runner the first status snapshot that qualifies as "running with
+  // frames" can already be the replacement, and the crash this section exists
+  // to observe has then already happened. The fixture retries pause every two
+  // seconds, so a post-arm attempt consumes the marker deterministically.
+  writeFileSync(providerSendFailure, "fail-next-send", "utf8");
   const replacementRecovery = await waitFor("runtime-fatal provider send recovery", () => {
     const document = status();
     const widget = document?.widgets?.[0];
@@ -242,10 +246,16 @@ export default widget({
   // boundary instead of waiting for useStorage's unrelated debounced file
   // write; keeping the deliberately crash-injected fixture alive after the
   // callback races the synthetic supervisor backoff and tests persistence,
-  // not media-channel recovery.
+  // not media-channel recovery. The contract is that a callback ARRIVES over
+  // the replaced channel; its boolean tracks whether the machine has a live
+  // media session (false on hosted runners, true beside a real player), so
+  // wait for a resolution logged after the replacement was captured rather
+  // than for either literal value.
+  const resolvedLineCount = () => widgetLogs().split("media recovery command resolved:").length - 1;
+  const resolutionsAtReplacement = resolvedLineCount();
   await waitFor(
     "successful media command after runtime-fatal recovery",
-    () => widgetLogs().includes("media recovery command resolved:false"),
+    () => resolvedLineCount() > resolutionsAtReplacement,
     15_000,
   );
   run(["uninstall", "Media Recovery"]);
