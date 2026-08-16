@@ -112,14 +112,6 @@ provider frame. `map` memoizes by source signal and projector identity. Define a
 projector once outside the component (`const label = signal.map(format)`) so
 unrelated renders reuse the binding instead of unsubscribing and resubscribing.
 
-`useProvider` is the declarative path: each value schedules a component render.
-`useProviderSignal` is the high-frequency retained path: it updates `.value`
-without rendering the component. A canvas samples `.value` inside `onFrame`.
-A `<text>` may contain one mapped signal, which updates only that native text
-node; format the whole label in `signal.map(...)`. `subscribe` is for edge
-transitions such as waking a paused canvas, not for rebuilding the tree on each
-provider frame.
-
 ## Hot swap
 `weaver dev` evaluates a valid changed bundle in a fresh JS context before replacing the running one.
 Root hook slots are seeded by position when slot kind and value type all match; refs keep `current`, while effects restart.
