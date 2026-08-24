@@ -1,0 +1,51 @@
+name: Setup cached Zig 0.16.0
+description: Restore the pinned Zig toolchain and configure its shared build cache directory.
+
+runs:
+  using: composite
+  steps:
+    - name: Restore Windows Zig toolchain
+      if: runner.os == 'Windows'
+      id: zig-windows
+      uses: actions/cache@v5
+      with:
+        path: ${{ runner.temp }}/zig/zig-x86_64-windows-0.16.0
+        key: zig-toolchain-0.16.0-${{ runner.os }}-${{ runner.arch }}
+
+    - name: Install Windows Zig toolchain
+      if: runner.os == 'Windows' && steps.zig-windows.outputs.cache-hit != 'true'
+      shell: pwsh
+      run: |
+        Invoke-WebRequest -Uri "https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip" -OutFile zig.zip
+        Expand-Archive zig.zip -DestinationPath "$env:RUNNER_TEMP\zig"
+
+    - name: Configure Windows Zig
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        Add-Content $env:GITHUB_PATH "$env:RUNNER_TEMP\zig\zig-x86_64-windows-0.16.0"
+        Add-Content $env:GITHUB_ENV "ZIG_GLOBAL_CACHE_DIR=$env:RUNNER_TEMP\zig-global-cache"
+
+    - name: Restore macOS Zig toolchain
+      if: runner.os == 'macOS'
+      id: zig-macos
+      uses: actions/cache@v5
+      with:
+        path: ${{ runner.temp }}/zig-aarch64-macos-0.16.0
+        key: zig-toolchain-0.16.0-${{ runner.os }}-${{ runner.arch }}
+
+    - name: Install macOS Zig toolchain
+      if: runner.os == 'macOS' && steps.zig-macos.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        curl --fail --location --retry 3 \
+          "https://ziglang.org/download/0.16.0/zig-aarch64-macos-0.16.0.tar.xz" \
+          --output "$RUNNER_TEMP/zig.tar.xz"
+        tar -xf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP"
+
+    - name: Configure macOS Zig
+      if: runner.os == 'macOS'
+      shell: bash
+      run: |
+        echo "$RUNNER_TEMP/zig-aarch64-macos-0.16.0" >> "$GITHUB_PATH"
+        echo "ZIG_GLOBAL_CACHE_DIR=$RUNNER_TEMP/zig-global-cache" >> "$GITHUB_ENV"

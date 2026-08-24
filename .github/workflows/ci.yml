@@ -13,11 +13,11 @@ jobs:
   gate:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           submodules: recursive
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: npm
@@ -33,41 +33,19 @@ jobs:
       - name: Release contract audit
         run: npm run audit:release
 
-      - name: Install Zig 0.16.0
-        shell: pwsh
-        run: |
-          Invoke-WebRequest -Uri "https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip" -OutFile zig.zip
-          Expand-Archive zig.zip -DestinationPath "$env:RUNNER_TEMP\zig"
-          Add-Content $env:GITHUB_PATH "$env:RUNNER_TEMP\zig\zig-x86_64-windows-0.16.0"
+  windows-cli:
+    name: Windows CLI and portable contracts
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
 
-      - name: Configure Zig cache directory
-        shell: pwsh
-        run: Add-Content $env:GITHUB_ENV "ZIG_GLOBAL_CACHE_DIR=$env:RUNNER_TEMP\zig-global-cache"
-
-      - name: Restore Zig build cache
-        uses: actions/cache@v4
+      - uses: actions/setup-node@v6
         with:
-          path: |
-            ${{ runner.temp }}/zig-global-cache
-            runtime/.zig-cache
-            host/.zig-cache
-          key: zig-0.16.0-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ github.sha }}
-          restore-keys: |
-            zig-0.16.0-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-
+          node-version: 22
+          cache: npm
 
-      - name: Build runtime (ReleaseFast)
-        working-directory: runtime
-        run: zig build -Doptimize=ReleaseFast -Dweb-layer=exclude -Dtrace=off
-
-      - name: Runtime tests
-        working-directory: runtime
-        run: zig build test -Doptimize=ReleaseFast -Dweb-layer=exclude -Dtrace=off
-
-      - name: Build and test host
-        working-directory: host
-        run: |
-          zig build -Doptimize=ReleaseFast
-          zig build test -Doptimize=ReleaseFast
+      - name: Install workspaces
+        run: npm ci
 
       - name: Portable install ownership smoke
         shell: pwsh
@@ -90,15 +68,67 @@ jobs:
           if (-not (Test-Path ciclock\dist\bundle.js)) { throw "bundle missing" }
           if (-not (Test-Path ciclock\dist\widget.json)) { throw "manifest missing" }
 
+  windows-runtime:
+    name: Windows runtime
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - uses: ./.github/actions/setup-zig
+
+      - name: Restore runtime build cache
+        uses: actions/cache@v5
+        with:
+          path: |
+            ${{ runner.temp }}/zig-global-cache
+            runtime/.zig-cache
+          key: zig-build-0.16.0-${{ runner.os }}-${{ runner.arch }}-runtime-${{ hashFiles('runtime/build.zig', 'runtime/build.zig.zon', 'runtime/src/**', 'runtime/vendor/**', 'runtime/native-sdk/build.zig', 'runtime/native-sdk/build.zig.zon', 'runtime/native-sdk/src/**') }}
+          restore-keys: |
+            zig-build-0.16.0-${{ runner.os }}-${{ runner.arch }}-runtime-
+
+      - name: Build runtime (ReleaseFast)
+        working-directory: runtime
+        run: zig build -Doptimize=ReleaseFast -Dweb-layer=exclude -Dtrace=off
+
+      - name: Runtime tests
+        working-directory: runtime
+        run: zig build test -Doptimize=ReleaseFast -Dweb-layer=exclude -Dtrace=off
+
+  windows-host:
+    name: Windows host
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: ./.github/actions/setup-zig
+
+      - name: Restore host build cache
+        uses: actions/cache@v5
+        with:
+          path: |
+            ${{ runner.temp }}/zig-global-cache
+            host/.zig-cache
+          key: zig-build-0.16.0-${{ runner.os }}-${{ runner.arch }}-host-${{ hashFiles('host/build.zig', 'host/build.zig.zon', 'host/src/**', 'host/macos/**', 'host/assets/**') }}
+          restore-keys: |
+            zig-build-0.16.0-${{ runner.os }}-${{ runner.arch }}-host-
+
+      - name: Build and test host
+        working-directory: host
+        run: |
+          zig build -Doptimize=ReleaseFast
+          zig build test -Doptimize=ReleaseFast
+
   macos-headless:
     name: macOS headless (apple-silicon)
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           submodules: recursive
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: npm
@@ -114,40 +144,17 @@ jobs:
       - name: Release contract audit
         run: npm run audit:release
 
-      - name: Install Zig 0.16.0
-        run: |
-          curl --fail --location --retry 3 \
-            "https://ziglang.org/download/0.16.0/zig-aarch64-macos-0.16.0.tar.xz" \
-            --output "$RUNNER_TEMP/zig.tar.xz"
-          tar -xf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP"
-          echo "$RUNNER_TEMP/zig-aarch64-macos-0.16.0" >> "$GITHUB_PATH"
+      - uses: ./.github/actions/setup-zig
 
-      - name: Configure Zig cache directory
-        run: echo "ZIG_GLOBAL_CACHE_DIR=$RUNNER_TEMP/zig-global-cache" >> "$GITHUB_ENV"
-
-      - name: Restore Zig build cache
-        uses: actions/cache@v4
+      - name: Restore host build cache
+        uses: actions/cache@v5
         with:
           path: |
             ${{ runner.temp }}/zig-global-cache
-            runtime/.zig-cache
             host/.zig-cache
-            runtime/native-sdk/.zig-cache
-          key: zig-0.16.0-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ github.sha }}
+          key: zig-build-0.16.0-${{ runner.os }}-${{ runner.arch }}-host-${{ hashFiles('host/build.zig', 'host/build.zig.zon', 'host/src/**', 'host/macos/**', 'host/assets/**') }}
           restore-keys: |
-            zig-0.16.0-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-
-
-      - name: Runtime platform-service seam
-        working-directory: runtime
-        run: zig build test-platform-services
-
-      - name: Build runtime (ReleaseFast)
-        working-directory: runtime
-        run: zig build -Doptimize=ReleaseFast
-
-      - name: Runtime tests including loopback HTTPS
-        working-directory: runtime
-        run: zig build test
+            zig-build-0.16.0-${{ runner.os }}-${{ runner.arch }}-host-
 
       - name: Build and test macOS host
         working-directory: host
@@ -174,23 +181,79 @@ jobs:
       - name: Vendored MediaRemote adapter static audit
         run: spikes/macos-mediaremote-adapter/static-audit.sh
 
-      - name: Native SDK stock profile
-        working-directory: runtime/native-sdk
+  macos-runtime:
+    name: macOS runtime (apple-silicon)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - uses: ./.github/actions/setup-zig
+
+      - name: Restore runtime build cache
+        uses: actions/cache@v5
+        with:
+          path: |
+            ${{ runner.temp }}/zig-global-cache
+            runtime/.zig-cache
+          key: zig-build-0.16.0-${{ runner.os }}-${{ runner.arch }}-runtime-${{ hashFiles('runtime/build.zig', 'runtime/build.zig.zon', 'runtime/src/**', 'runtime/vendor/**', 'runtime/native-sdk/build.zig', 'runtime/native-sdk/build.zig.zon', 'runtime/native-sdk/src/**') }}
+          restore-keys: |
+            zig-build-0.16.0-${{ runner.os }}-${{ runner.arch }}-runtime-
+
+      - name: Runtime platform-service seam
+        working-directory: runtime
+        run: zig build test-platform-services
+
+      - name: Build runtime (ReleaseFast)
+        working-directory: runtime
+        run: zig build -Doptimize=ReleaseFast
+
+      - name: Runtime tests including loopback HTTPS
+        working-directory: runtime
         run: zig build test
 
-      - name: Native SDK Weaver widget profile
+  macos-native-sdk:
+    name: macOS Native SDK (${{ matrix.profile }})
+    runs-on: macos-15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - profile: stock
+            arguments: ""
+          - profile: widget
+            arguments: -Dwidget-profile=true
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - uses: ./.github/actions/setup-zig
+
+      - name: Restore Native SDK build cache
+        uses: actions/cache@v5
+        with:
+          path: |
+            ${{ runner.temp }}/zig-global-cache
+            runtime/native-sdk/.zig-cache
+          key: zig-build-0.16.0-${{ runner.os }}-${{ runner.arch }}-native-sdk-${{ matrix.profile }}-${{ hashFiles('runtime/native-sdk/build.zig', 'runtime/native-sdk/build.zig.zon', 'runtime/native-sdk/src/**') }}
+          restore-keys: |
+            zig-build-0.16.0-${{ runner.os }}-${{ runner.arch }}-native-sdk-${{ matrix.profile }}-
+
+      - name: Test Native SDK ${{ matrix.profile }} profile
         working-directory: runtime/native-sdk
-        run: zig build test -Dwidget-profile=true
+        run: zig build test ${{ matrix.arguments }}
 
   macos-session:
     name: macOS session (apple-silicon)
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           submodules: recursive
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: npm
@@ -198,37 +261,23 @@ jobs:
       - name: Clean-checkout bootstrap
         run: npm ci
 
-      - name: Install Zig 0.16.0
-        run: |
-          curl --fail --location --retry 3 \
-            "https://ziglang.org/download/0.16.0/zig-aarch64-macos-0.16.0.tar.xz" \
-            --output "$RUNNER_TEMP/zig.tar.xz"
-          tar -xf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP"
-          echo "$RUNNER_TEMP/zig-aarch64-macos-0.16.0" >> "$GITHUB_PATH"
+      - uses: ./.github/actions/setup-zig
 
-      - name: Configure Zig cache directory
-        run: echo "ZIG_GLOBAL_CACHE_DIR=$RUNNER_TEMP/zig-global-cache" >> "$GITHUB_ENV"
-
-      - name: Restore Zig build cache
-        uses: actions/cache@v4
+      - name: Restore session build cache
+        uses: actions/cache@v5
         with:
           path: |
             ${{ runner.temp }}/zig-global-cache
             runtime/.zig-cache
             host/.zig-cache
-          key: zig-0.16.0-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ github.sha }}
+          key: zig-build-0.16.0-${{ runner.os }}-${{ runner.arch }}-session-${{ hashFiles('runtime/build.zig', 'runtime/build.zig.zon', 'runtime/src/**', 'runtime/vendor/**', 'runtime/native-sdk/build.zig', 'runtime/native-sdk/build.zig.zon', 'runtime/native-sdk/src/**', 'host/build.zig', 'host/build.zig.zon', 'host/src/**', 'host/macos/**', 'host/assets/**') }}
           restore-keys: |
-            zig-0.16.0-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-
-
-      - name: Clean-checkout Quickstart builds
-        run: |
-          (cd runtime && zig build -Doptimize=ReleaseFast)
-          (cd host && zig build -Doptimize=ReleaseFast)
+            zig-build-0.16.0-${{ runner.os }}-${{ runner.arch }}-session-
 
       - name: Record hosted display capability
         run: system_profiler SPDisplaysDataType
 
-      - name: Rebuild host and runtime with automation seams for the smoke
+      - name: Build host and runtime with automation seams for the smoke
         run: |
           (cd runtime && zig build -Doptimize=ReleaseFast -Dautomation-seam=true)
           (cd host && zig build -Doptimize=ReleaseFast -Dautomation-seam=true)

@@ -90,19 +90,29 @@ assert.match(plist, /<key>LSUIElement<\/key>\s*<true\/>/u);
 assert.match(plist, /<key>NSAudioCaptureUsageDescription<\/key>\s*<string>[^<]+<\/string>/u);
 
 const workflow = readFileSync(join(repoRoot, ".github", "workflows", "ci.yml"), "utf8");
+const zigSetupAction = readFileSync(join(repoRoot, ".github", "actions", "setup-zig", "action.yml"), "utf8");
 for (const required of [
   "windows-latest",
   "macos-15",
-  "actions/cache@v4",
-  "ZIG_GLOBAL_CACHE_DIR",
+  "actions/cache@v5",
+  "./.github/actions/setup-zig",
+  "hashFiles(",
+  "windows-runtime:",
+  "windows-host:",
+  "macos-runtime:",
+  "macos-native-sdk:",
   "cancel-in-progress: true",
   "spikes/macos-media-observation/build.sh",
   "cli/test/macos-host-control-smoke.mjs",
   "cli/test/macos-host-smoke.mjs",
 ]) assert.ok(workflow.includes(required), `CI workflow is missing ${required}`);
+for (const required of ["actions/cache@v5", "ZIG_GLOBAL_CACHE_DIR", "zig-toolchain-0.16.0-"]) {
+  assert.ok(zigSetupAction.includes(required), `cached Zig setup is missing ${required}`);
+}
 for (const [forbidden, reason] of [
   ["macos-15-intel", "Intel macOS is outside Weaver's supported targets"],
   ["needs: macos-headless", "the independent macOS session smoke must start in parallel"],
+  ["github.job }}-${{ github.sha", "Zig caches must follow component inputs instead of churning on every commit"],
 ]) {
   assert.equal(workflow.includes(forbidden), false, `CI workflow contains ${forbidden}: ${reason}`);
 }
