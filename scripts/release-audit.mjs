@@ -99,6 +99,9 @@ for (const required of [
   "hashFiles(",
   "windows-runtime:",
   "Ensure Windows media runtime",
+  "cpu-baseline-native-",
+  "zig build -Dcpu=baseline -Doptimize=ReleaseFast -Dweb-layer=exclude -Dtrace=off",
+  "zig build test -Dcpu=baseline -Doptimize=ReleaseFast -Dweb-layer=exclude -Dtrace=off",
   "Build and test Windows host",
   "macos-runtime:",
   "macos-native-sdk:",
@@ -107,6 +110,11 @@ for (const required of [
   "cli/test/macos-host-control-smoke.mjs",
   "cli/test/macos-host-smoke.mjs",
 ]) assert.ok(workflow.includes(required), `CI workflow is missing ${required}`);
+assert.equal(
+  workflow.match(/-Dcpu=baseline/gu)?.length,
+  4,
+  "every Windows native Zig build and test must use the cross-runner cache CPU",
+);
 for (const required of ["actions/cache@v5", "ZIG_GLOBAL_CACHE_DIR", "zig-toolchain-0.16.0-"]) {
   assert.ok(zigSetupAction.includes(required), `cached Zig setup is missing ${required}`);
 }
