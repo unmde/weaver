@@ -44,6 +44,81 @@ jobs:
     # Blacksmith schedules this label across Intel gen-1 and AMD gen-2 hosts.
     # Pin the CI CPU so Zig cache entries remain reusable across both pools.
     steps:
+      - name: Begin Windows media runtime install
+        shell: pwsh
+        run: |
+          $installerPath = Join-Path $env:RUNNER_TEMP 'weaver-install-media.ps1'
+          $resultPath = Join-Path $env:RUNNER_TEMP 'weaver-media-install.json'
+          $statePath = Join-Path $env:RUNNER_TEMP 'weaver-media-install-state.json'
+          $installerBody = @'
+          $ErrorActionPreference = 'Stop'
+          $temporaryResultPath = "$resultPath.tmp"
+          try {
+            $mediaDlls = @('mf.dll', 'mfplat.dll')
+            $missing = $mediaDlls | Where-Object {
+              -not (Test-Path (Join-Path $env:WINDIR "System32\$_"))
+            }
+            $installed = $missing.Count -gt 0
+            $restartNeeded = 'No'
+            if ($installed) {
+              Import-Module ServerManager
+              $install = Install-WindowsFeature -Name Server-Media-Foundation
+              if (-not $install.Success) {
+                throw "Could not install Server-Media-Foundation; missing: $($missing -join ', ')"
+              }
+              $restartNeeded = $install.RestartNeeded.ToString()
+              if ($restartNeeded -eq 'Yes') {
+                throw 'Server-Media-Foundation requires a runner restart'
+              }
+            }
+            $stillMissing = $mediaDlls | Where-Object {
+              -not (Test-Path (Join-Path $env:WINDIR "System32\$_"))
+            }
+            if ($stillMissing) {
+              throw "Windows media runtime is still missing: $($stillMissing -join ', ')"
+            }
+            @{
+              status = 'success'
+              installed = $installed
+              restartNeeded = $restartNeeded
+            } | ConvertTo-Json -Compress | Set-Content $temporaryResultPath
+          } catch {
+            @{
+              status = 'failure'
+              error = $_.Exception.Message
+            } | ConvertTo-Json -Compress | Set-Content $temporaryResultPath
+          } finally {
+            if (Test-Path $temporaryResultPath) {
+              Move-Item $temporaryResultPath $resultPath -Force
+            }
+          }
+          '@
+          $escapedResultPath = $resultPath.Replace("'", "''")
+          $installer = "`$resultPath = '$escapedResultPath'`r`n$installerBody"
+          Set-Content $installerPath $installer
+          $startedAt = [DateTime]::UtcNow
+          # Task Scheduler launches outside the Actions runner's Windows job,
+          # so the installer can intentionally span checkout and setup steps.
+          $taskName = "weaver-media-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          $action = New-ScheduledTaskAction `
+            -Execute (Get-Command pwsh).Source `
+            -Argument "-NoLogo -NoProfile -NonInteractive -File `"$installerPath`""
+          $principal = New-ScheduledTaskPrincipal `
+            -UserId 'SYSTEM' `
+            -LogonType ServiceAccount `
+            -RunLevel Highest
+          Register-ScheduledTask `
+            -TaskName $taskName `
+            -Action $action `
+            -Principal $principal `
+            -Force | Out-Null
+          Start-ScheduledTask -TaskName $taskName
+          @{
+            taskName = $taskName
+            startedAt = $startedAt.ToString('O')
+          } | ConvertTo-Json -Compress | Set-Content $statePath
+          Write-Host "Started Windows media runtime preparation as scheduled task $taskName"
+
       - uses: actions/checkout@v6
         with:
           submodules: recursive
@@ -58,30 +133,6 @@ jobs:
 
       - uses: ./.github/actions/setup-zig
 
-      - name: Ensure Windows media runtime
-        shell: pwsh
-        run: |
-          $mediaDlls = @('mf.dll', 'mfplat.dll')
-          $missing = $mediaDlls | Where-Object {
-            -not (Test-Path (Join-Path $env:WINDIR "System32\$_"))
-          }
-          if ($missing) {
-            Import-Module ServerManager
-            $result = Install-WindowsFeature -Name Server-Media-Foundation
-            if (-not $result.Success) {
-              throw "Could not install Server-Media-Foundation; missing: $($missing -join ', ')"
-            }
-            if ($result.RestartNeeded -eq 'Yes') {
-              throw 'Server-Media-Foundation requires a runner restart'
-            }
-          }
-          $stillMissing = $mediaDlls | Where-Object {
-            -not (Test-Path (Join-Path $env:WINDIR "System32\$_"))
-          }
-          if ($stillMissing) {
-            throw "Windows media runtime is still missing: $($stillMissing -join ', ')"
-          }
-
       - name: Restore Windows native build cache
         uses: actions/cache@v5
         with:
@@ -92,6 +143,51 @@ jobs:
           key: zig-build-v3-0.16.0-blacksmith-${{ runner.os }}-${{ runner.arch }}-cpu-baseline-native-${{ hashFiles('runtime/build.zig', 'runtime/build.zig.zon', 'runtime/src/**', 'runtime/vendor/**', 'runtime/native-sdk/build.zig', 'runtime/native-sdk/build.zig.zon', 'runtime/native-sdk/src/**', 'host/build.zig', 'host/build.zig.zon', 'host/src/**', 'host/macos/**', 'host/assets/**') }}
           restore-keys: |
             zig-build-v3-0.16.0-blacksmith-${{ runner.os }}-${{ runner.arch }}-cpu-baseline-native-
+
+      - name: Wait for Windows media runtime
+        shell: pwsh
+        run: |
+          $resultPath = Join-Path $env:RUNNER_TEMP 'weaver-media-install.json'
+          $statePath = Join-Path $env:RUNNER_TEMP 'weaver-media-install-state.json'
+          $state = Get-Content $statePath -Raw | ConvertFrom-Json
+          $startedAt = [DateTime]::Parse($state.startedAt).ToUniversalTime()
+          # Receipt: Blacksmith installation took 37-58.8 seconds on measured runs.
+          # Two minutes is a failure tripwire, not part of the expected path.
+          $deadline = $startedAt.AddSeconds(120)
+          try {
+            while (-not (Test-Path $resultPath)) {
+              if ([DateTime]::UtcNow -ge $deadline) {
+                Stop-ScheduledTask -TaskName $state.taskName -ErrorAction SilentlyContinue
+                throw 'Server-Media-Foundation preparation exceeded the 120-second tripwire'
+              }
+              $task = Get-ScheduledTask -TaskName $state.taskName -ErrorAction SilentlyContinue
+              if (-not $task) {
+                throw 'Server-Media-Foundation preparation task disappeared before producing a result'
+              }
+              if ($task.State -ne 'Running') {
+                $taskInfo = Get-ScheduledTaskInfo -TaskName $state.taskName
+                throw "Server-Media-Foundation preparation exited without a result (task result $($taskInfo.LastTaskResult))"
+              }
+              Start-Sleep -Seconds 1
+            }
+            $result = Get-Content $resultPath -Raw | ConvertFrom-Json
+            if ($result.status -ne 'success') {
+              throw "Server-Media-Foundation preparation failed: $($result.error)"
+            }
+            $missing = @('mf.dll', 'mfplat.dll') | Where-Object {
+              -not (Test-Path (Join-Path $env:WINDIR "System32\$_"))
+            }
+            if ($missing) {
+              throw "Windows media runtime is still missing: $($missing -join ', ')"
+            }
+            $elapsed = [DateTime]::UtcNow - $startedAt
+            Write-Host "Windows media runtime ready after $([Math]::Round($elapsed.TotalSeconds, 1)) seconds (installed=$($result.installed))"
+          } finally {
+            Unregister-ScheduledTask `
+              -TaskName $state.taskName `
+              -Confirm:$false `
+              -ErrorAction SilentlyContinue
+          }
 
       - name: Build runtime (ReleaseFast)
         working-directory: runtime

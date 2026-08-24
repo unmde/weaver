@@ -98,7 +98,8 @@ for (const required of [
   "./.github/actions/setup-zig",
   "hashFiles(",
   "windows-runtime:",
-  "Ensure Windows media runtime",
+  "Begin Windows media runtime install",
+  "Wait for Windows media runtime",
   "cpu-baseline-native-",
   "zig build -Dcpu=baseline -Doptimize=ReleaseFast -Dweb-layer=exclude -Dtrace=off",
   "zig build test -Dcpu=baseline -Doptimize=ReleaseFast -Dweb-layer=exclude -Dtrace=off",
@@ -110,6 +111,25 @@ for (const required of [
   "cli/test/macos-host-control-smoke.mjs",
   "cli/test/macos-host-smoke.mjs",
 ]) assert.ok(workflow.includes(required), `CI workflow is missing ${required}`);
+const windowsRuntime = workflow.slice(
+  workflow.indexOf("  windows-runtime:"),
+  workflow.indexOf("  macos-headless:"),
+);
+assert.ok(
+  windowsRuntime.indexOf("Begin Windows media runtime install") <
+    windowsRuntime.indexOf("actions/checkout@v6"),
+  "Windows media runtime preparation must overlap checkout and toolchain setup",
+);
+assert.ok(
+  windowsRuntime.indexOf("Wait for Windows media runtime") >
+    windowsRuntime.indexOf("Restore Windows native build cache"),
+  "Windows media runtime wait must overlap checkout, toolchain setup, and cache restoration",
+);
+assert.ok(
+  windowsRuntime.indexOf("Wait for Windows media runtime") <
+    windowsRuntime.indexOf("Build runtime (ReleaseFast)"),
+  "Windows media runtime must be ready before native compilation",
+);
 assert.equal(
   workflow.match(/-Dcpu=baseline/gu)?.length,
   4,
