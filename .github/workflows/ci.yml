@@ -41,6 +41,8 @@ jobs:
   windows-runtime:
     name: Windows native runtime + host
     runs-on: blacksmith-4vcpu-windows-2025
+    # Blacksmith schedules this label across Intel gen-1 and AMD gen-2 hosts.
+    # Pin the CI CPU so Zig cache entries remain reusable across both pools.
     steps:
       - uses: actions/checkout@v6
         with:
@@ -87,19 +89,19 @@ jobs:
             ${{ runner.temp }}/zig-global-cache
             runtime/.zig-cache
             host/.zig-cache
-          key: zig-build-v2-0.16.0-blacksmith-${{ runner.os }}-${{ runner.arch }}-native-${{ hashFiles('runtime/build.zig', 'runtime/build.zig.zon', 'runtime/src/**', 'runtime/vendor/**', 'runtime/native-sdk/build.zig', 'runtime/native-sdk/build.zig.zon', 'runtime/native-sdk/src/**', 'host/build.zig', 'host/build.zig.zon', 'host/src/**', 'host/macos/**', 'host/assets/**') }}
+          key: zig-build-v3-0.16.0-blacksmith-${{ runner.os }}-${{ runner.arch }}-cpu-baseline-native-${{ hashFiles('runtime/build.zig', 'runtime/build.zig.zon', 'runtime/src/**', 'runtime/vendor/**', 'runtime/native-sdk/build.zig', 'runtime/native-sdk/build.zig.zon', 'runtime/native-sdk/src/**', 'host/build.zig', 'host/build.zig.zon', 'host/src/**', 'host/macos/**', 'host/assets/**') }}
           restore-keys: |
-            zig-build-v2-0.16.0-blacksmith-${{ runner.os }}-${{ runner.arch }}-native-
+            zig-build-v3-0.16.0-blacksmith-${{ runner.os }}-${{ runner.arch }}-cpu-baseline-native-
 
       - name: Build runtime (ReleaseFast)
         working-directory: runtime
-        run: zig build -Doptimize=ReleaseFast -Dweb-layer=exclude -Dtrace=off
+        run: zig build -Dcpu=baseline -Doptimize=ReleaseFast -Dweb-layer=exclude -Dtrace=off
 
       - name: Runtime tests
         working-directory: runtime
         shell: pwsh
         run: |
-          zig build test -Doptimize=ReleaseFast -Dweb-layer=exclude -Dtrace=off
+          zig build test -Dcpu=baseline -Doptimize=ReleaseFast -Dweb-layer=exclude -Dtrace=off
           if ($LASTEXITCODE -eq 0) { exit 0 }
           $testExit = $LASTEXITCODE
           $vsRoots = @(
@@ -126,8 +128,8 @@ jobs:
       - name: Build and test Windows host
         working-directory: host
         run: |
-          zig build -Doptimize=ReleaseFast
-          zig build test -Doptimize=ReleaseFast
+          zig build -Dcpu=baseline -Doptimize=ReleaseFast
+          zig build test -Dcpu=baseline -Doptimize=ReleaseFast
 
       - name: Portable install ownership smoke
         shell: pwsh
