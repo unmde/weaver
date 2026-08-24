@@ -22,6 +22,10 @@ pub const max_children: usize = 64;
 // contributes 1 KiB to each occupied Node; unoccupied slots stay untouched.
 // Pinned by cli/src/index.ts nativeWidgetTextByteLimit.
 pub const max_text_bytes: usize = 1024;
+// Actionable controls do not carry authored text of their own, so their
+// explicit accessible name reuses the existing inline text buffer and its
+// measured bound. This adds no bytes to Node and no new independent limit.
+pub const max_accessibility_label_bytes: usize = max_text_bytes;
 // Image-source receipt (2026-07-30): shipped relative asset paths peak at 24
 // UTF-8 bytes and the provider wire admits 259-byte art paths. 1024 leaves
 // almost 4x headroom over that cross-process good case. Sources allocate their
@@ -116,6 +120,8 @@ pub const Node = struct {
     parent: ?NodeId = null,
     children: [max_children]NodeId = undefined,
     child_count: usize = 0,
+    // Text nodes store visible text here; actionable controls store their
+    // explicit accessibility label here. Those kinds are mutually exclusive.
     text: [max_text_bytes]u8 = undefined,
     text_len: usize = 0,
     padding: f32 = 0,
@@ -193,6 +199,10 @@ pub const Node = struct {
         return self.text[0..self.text_len];
     }
 
+    pub fn accessibilityLabelSlice(self: *const Node) []const u8 {
+        return self.text[0..self.text_len];
+    }
+
     pub fn sourceSlice(self: *const Node) []const u8 {
         return self.source;
     }
@@ -212,6 +222,7 @@ pub const Error = error{
     NodeLimit,
     ChildLimit,
     TextTooLong,
+    AccessibilityLabelTooLong,
     IconPathTooLong,
     Cycle,
     InvalidProperty,
@@ -536,6 +547,16 @@ pub const Tree = struct {
         if (value.len > max_text_bytes) return error.TextTooLong;
         const target = try self.node(id);
         if (std.mem.eql(u8, target.textSlice(), value)) return;
+        @memcpy(target.text[0..value.len], value);
+        target.text_len = value.len;
+        self.changed();
+    }
+
+    pub fn setAccessibilityLabel(self: *Tree, id: NodeId, value: []const u8) Error!void {
+        if (value.len > max_accessibility_label_bytes) return error.AccessibilityLabelTooLong;
+        const target = try self.node(id);
+        if (target.kind != .button and target.kind != .slider) return error.InvalidProperty;
+        if (std.mem.eql(u8, target.accessibilityLabelSlice(), value)) return;
         @memcpy(target.text[0..value.len], value);
         target.text_len = value.len;
         self.changed();
@@ -1250,6 +1271,32 @@ test "tree owns a bounded hierarchy" {
     try std.testing.expectError(error.Cycle, tree.appendChild(label, root));
     try tree.removeNode(label);
     try std.testing.expectError(error.InvalidNode, tree.node(label));
+}
+
+test "actionable accessible labels reuse bounded authored text storage and transact" {
+    var tree: Tree = .{ .allocator = std.testing.allocator };
+    defer tree.deinit();
+    const button = try tree.createNode(.button);
+    try tree.setAccessibilityLabel(button, "Seek");
+    try std.testing.expectEqualStrings("Seek", (try tree.nodeConst(button)).accessibilityLabelSlice());
+
+    try tree.beginBatch();
+    try tree.setAccessibilityLabel(button, "Partial label");
+    tree.abortBatch();
+    try std.testing.expectEqualStrings("Seek", (try tree.nodeConst(button)).accessibilityLabelSlice());
+
+    const at_limit = [_]u8{'a'} ** max_accessibility_label_bytes;
+    try tree.setAccessibilityLabel(button, &at_limit);
+    try std.testing.expectEqual(max_accessibility_label_bytes, (try tree.nodeConst(button)).accessibilityLabelSlice().len);
+    const over_limit = [_]u8{'a'} ** (max_accessibility_label_bytes + 1);
+    try std.testing.expectError(error.AccessibilityLabelTooLong, tree.setAccessibilityLabel(button, &over_limit));
+
+    const panel = try tree.createNode(.panel);
+    try std.testing.expectError(error.InvalidProperty, tree.setAccessibilityLabel(panel, "Not actionable"));
+    try tree.removeNode(button);
+    const reused = try tree.createNode(.slider);
+    try std.testing.expectEqual(button, reused);
+    try std.testing.expectEqualStrings("", (try tree.nodeConst(reused)).accessibilityLabelSlice());
 }
 
 test "aborting a render batch restores the exact committed tree" {

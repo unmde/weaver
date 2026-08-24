@@ -128,20 +128,20 @@ Until that exists, capture can verify the Noro player's media-driven pixels and
 button semantics and correctly rejects this action pass, but it cannot verify a
 successful media transport side effect.
 
-## Semantic gap: the seek overlay has no accessible name
+## Solved: the seek overlay has an accessible name
 
-The seek overlay is a transparent button with no text child, so the snapshot
-reports `role=button name=""`. The reconciler currently derives a button name
-only from its first descendant text and the TSX button surface has no explicit
-accessible-label prop. An agent can see an anonymous button but cannot learn
-that it means “seek” from semantics alone.
+The seek overlay is a transparent button with no text child. It now declares
+`accessibilityLabel="Seek"`, and the snapshot reports
+`role=button name="Seek"` so an agent can identify the control without pixels.
 
-Proposed framework fix:
+Implemented framework fix:
 
-- Add an `accessibilityLabel` (or familiar `aria-label`) prop to actionable TSX
-  elements and project it ahead of descendant-text fallback.
-- Make `weaver check` reject an actionable control whose final accessible name
-  is empty. The diagnostic should name the element and say how to label it.
+- `accessibilityLabel` is available on buttons and sliders and projects ahead
+  of descendant-text fallback. It reuses the measured authored-text storage,
+  so the retained `Node` size does not grow.
+- `weaver check` rejects controls it can prove unnamed and gives the concrete
+  visible-text or `accessibilityLabel` fix. Dynamic/component output remains a
+  runtime decision instead of producing a static false positive.
 
 ## Baseline observation
 

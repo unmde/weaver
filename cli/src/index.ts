@@ -2010,10 +2010,63 @@ function validateSource(project: SourceProject): string[] {
     }
     return null;
   };
+  const mayProvideAccessibleText = (child: ts.JsxChild): boolean => {
+    if (ts.isJsxText(child)) return child.getText().trim().length > 0;
+    if (ts.isJsxExpression(child)) {
+      const expression = child.expression;
+      if (!expression || expression.kind === ts.SyntaxKind.FalseKeyword || expression.kind === ts.SyntaxKind.NullKeyword) return false;
+      if (ts.isStringLiteral(expression) || ts.isNoSubstitutionTemplateLiteral(expression)) return expression.text.trim().length > 0;
+      if (ts.isNumericLiteral(expression)) return true;
+      // A dynamic expression may produce visible text. Runtime projection is
+      // authoritative when the name is not statically knowable.
+      return true;
+    }
+    if (ts.isJsxFragment(child)) return child.children.some(mayProvideAccessibleText);
+    if (ts.isJsxSelfClosingElement(child)) return /^[A-Z]/.test(child.tagName.getText(child.getSourceFile()));
+    if (ts.isJsxElement(child)) {
+      if (/^[A-Z]/.test(child.openingElement.tagName.getText(child.getSourceFile()))) return true;
+      return child.children.some(mayProvideAccessibleText);
+    }
+    return false;
+  };
+  const validateAccessibleName = (node: ts.JsxOpeningElement | ts.JsxSelfClosingElement, tag: "button" | "slider"): void => {
+    const sourceFile = node.getSourceFile();
+    const attribute = node.attributes.properties.find((candidate): candidate is ts.JsxAttribute =>
+      ts.isJsxAttribute(candidate) && candidate.name.getText(sourceFile) === "accessibilityLabel");
+    if (attribute) {
+      const label = jsxStringValue(attribute.initializer);
+      if (label === null) return;
+      const bytes = Buffer.byteLength(label, "utf8");
+      if (label.trim().length === 0) {
+        errors.push(locationMessage(
+          sourceFile,
+          attribute,
+          `ActionableAccessibleNameRequired: <${tag}> accessibilityLabel is blank. Fix: use a non-empty label naming the action.`,
+        ));
+      } else if (bytes > nativeWidgetTextByteLimit) {
+        errors.push(locationMessage(
+          sourceFile,
+          attribute,
+          `AccessibilityLabelTooLong: <${tag}> label is ${bytes} UTF-8 bytes; max_accessibility_label_bytes=${nativeWidgetTextByteLimit}, asked for ${bytes}, headroom=${nativeWidgetTextByteLimit - bytes}.`,
+        ));
+      }
+      return;
+    }
+    const hasText = tag === "button" && ts.isJsxOpeningElement(node) &&
+      ts.isJsxElement(node.parent) && node.parent.children.some(mayProvideAccessibleText);
+    if (!hasText) {
+      errors.push(locationMessage(
+        sourceFile,
+        node,
+        `ActionableAccessibleNameRequired: <${tag}> has no accessible name. Fix: ${tag === "button" ? "add visible <text>...</text> or " : "add "}accessibilityLabel=\"...\" naming the action.`,
+      ));
+    }
+  };
   const visit = (node: ts.Node): void => {
     if (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) {
       const sourceFile = node.getSourceFile();
       const tag = node.tagName.getText(sourceFile);
+      if (tag === "button" || tag === "slider") validateAccessibleName(node, tag);
       const classAttribute = node.attributes.properties.find((attribute): attribute is ts.JsxAttribute => ts.isJsxAttribute(attribute) && attribute.name.getText(sourceFile) === "class");
       if (classAttribute) {
         const classText = jsxStringValue(classAttribute.initializer);

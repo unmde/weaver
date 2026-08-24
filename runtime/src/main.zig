@@ -910,9 +910,12 @@ fn buildNode(ui: *WidgetUi, model: *const Model, id: tree_mod.NodeId, is_root: b
     // anonymous group whose text happens to be painted by a child.
     if (retained.kind == .button) {
         options.semantics.role = .button;
-        options.semantics.label = firstDescendantText(&model.tree, id);
+        const explicit_label = retained.accessibilityLabelSlice();
+        options.semantics.label = if (explicit_label.len != 0) explicit_label else firstDescendantText(&model.tree, id);
         options.semantics.focusable = retained.handles_press;
         options.semantics.actions.press = retained.handles_press;
+    } else if (retained.kind == .slider) {
+        options.semantics.label = retained.accessibilityLabelSlice();
     }
     if (retained.kind == .text) {
         options.text_alignment = switch (retained.text_align) {
@@ -2191,7 +2194,7 @@ test "painted retained stack keeps overlay children under rounded inset shadow" 
     try std.testing.expectEqual(native_sdk.canvas.WidgetKind.text, overlay.children[1].kind);
 }
 
-test "styled Weaver button keeps button role and descendant accessible name" {
+test "styled Weaver button prefers its explicit accessible name" {
     var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_state.deinit();
 
@@ -2200,13 +2203,29 @@ test "styled Weaver button keeps button role and descendant accessible name" {
     const label_id = try model.tree.createNode(.text);
     try model.tree.setText(label_id, "Start");
     try model.tree.appendChild(button_id, label_id);
+    try model.tree.setAccessibilityLabel(button_id, "Start timer");
     (try model.tree.node(button_id)).handles_press = true;
 
     var ui = WidgetUi.init(arena_state.allocator());
     const projected = buildNodeForTest(&ui, &model, button_id, false);
     try std.testing.expectEqual(native_sdk.canvas.WidgetRole.button, projected.widget.semantics.role);
-    try std.testing.expectEqualStrings("Start", projected.widget.semantics.label);
+    try std.testing.expectEqualStrings("Start timer", projected.widget.semantics.label);
     try std.testing.expect(projected.widget.semantics.actions.press);
+}
+
+test "retained slider projects its explicit accessible name" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+
+    var model: Model = .{};
+    const slider_id = try model.tree.createNode(.slider);
+    try model.tree.setAccessibilityLabel(slider_id, "Session length");
+    (try model.tree.node(slider_id)).handles_change = true;
+
+    var ui = WidgetUi.init(arena_state.allocator());
+    const projected = buildNodeForTest(&ui, &model, slider_id, false);
+    try std.testing.expectEqual(native_sdk.canvas.WidgetKind.slider, projected.widget.kind);
+    try std.testing.expectEqualStrings("Session length", projected.widget.semantics.label);
 }
 
 test "retained image projects fit tiling and class corner radii" {

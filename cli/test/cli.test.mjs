@@ -566,7 +566,7 @@ test("styling 11 requires descendant state variants to have a pressable ancestor
     }));
     const valid = `import { widget } from "@weaver/sdk";
 export default widget({ name: "State Test", size: [160, 80] }, () =>
-  <button onPress={() => {}} class="pressed:shadow-[0_2px_4px_0_#0000004d] pressed:shadow-inner">
+  <button accessibilityLabel="Play" onPress={() => {}} class="pressed:shadow-[0_2px_4px_0_#0000004d] pressed:shadow-inner">
     <icon name="play" class="pressed:text-[#b6b6b6]" />
   </button>);
 `;
@@ -590,6 +590,50 @@ export default widget({ name: "State Test", size: [160, 80] }, () =>
     const rejected = spawnSync(process.execPath, ["cli/dist/index.js", "check", widget], { encoding: "utf8" });
     assert.equal(rejected.status, 1);
     assert.match(rejected.stderr, /NearestPressableAncestor: state variants on non-pressable <icon> require a nearest <button> or <slider> ancestor/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("check requires statically knowable actionable controls to have accessible names", () => {
+  const root = mkdtempSync(join(tmpdir(), "weaver-accessible-name-"));
+  try {
+    const widget = join(root, "widget");
+    const cli = fileURLToPath(new URL("../dist/index.js", import.meta.url));
+    assert.equal(spawnSync(process.execPath, [cli, "init", "widget"], { cwd: root, encoding: "utf8" }).status, 0);
+    const sourcePath = join(widget, "widget.tsx");
+    const source = (tree) => `import { widget } from "@weaver/sdk";
+export default widget({ name: "Accessible Name", size: [160, 80] }, () => (${tree}));
+`;
+
+    writeFileSync(sourcePath, source(`<column>
+      <button onPress={() => {}}><icon name="play" /></button>
+      <slider value={1} max={10} onChange={() => {}} />
+    </column>`));
+    const unnamed = spawnSync(process.execPath, [cli, "check", widget], { encoding: "utf8" });
+    assert.equal(unnamed.status, 1);
+    assert.match(unnamed.stderr, /ActionableAccessibleNameRequired: <button> has no accessible name/);
+    assert.match(unnamed.stderr, /Fix: add visible <text>\.\.\.<\/text> or accessibilityLabel="\.\.\." naming the action/);
+    assert.match(unnamed.stderr, /ActionableAccessibleNameRequired: <slider> has no accessible name/);
+
+    writeFileSync(sourcePath, source(`<column>
+      <button accessibilityLabel="Play" onPress={() => {}}><icon name="play" /></button>
+      <button onPress={() => {}}><text>Visible name</text></button>
+      <slider accessibilityLabel="Level" value={1} max={10} onChange={() => {}} />
+    </column>`));
+    const named = spawnSync(process.execPath, [cli, "check", widget], { encoding: "utf8" });
+    assert.equal(named.status, 0, named.stderr);
+
+    writeFileSync(sourcePath, source(`<button accessibilityLabel="   " onPress={() => {}} />`));
+    const blank = spawnSync(process.execPath, [cli, "check", widget], { encoding: "utf8" });
+    assert.equal(blank.status, 1);
+    assert.match(blank.stderr, /accessibilityLabel is blank/);
+
+    writeFileSync(sourcePath, source(`<button accessibilityLabel="${"x".repeat(1025)}" onPress={() => {}} />`));
+    const oversized = spawnSync(process.execPath, [cli, "check", widget], { encoding: "utf8" });
+    assert.equal(oversized.status, 1);
+    assert.match(oversized.stderr, /AccessibilityLabelTooLong/);
+    assert.match(oversized.stderr, /max_accessibility_label_bytes=1024, asked for 1025, headroom=-1/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

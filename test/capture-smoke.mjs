@@ -48,12 +48,14 @@ try {
   assert.ok(noro.renderer.images > 0);
   assert.ok(noro.renderer.fonts > 0);
   assert.match(snapshotText(noro), /name="CAPTURE PROOF"/);
+  assert.match(snapshotText(noro), /role=button name="Seek"/);
   assert.match(snapshotText(noro), /name="00:42"/);
 
   const noroSignal = capture("noro-signal", "examples/noro-signal", [
     "--provider-fixture", join(root, "test", "capture", "noro.provider.json"),
   ]);
   assert.match(snapshotText(noroSignal), /name="Capture Proof"/);
+  assert.match(snapshotText(noroSignal), /role=button name="Seek"/);
   assert.match(snapshotText(noroSignal), /role=button name="PAUSE"/);
   assert.match(snapshotText(noroSignal), /name="00:42"/);
 

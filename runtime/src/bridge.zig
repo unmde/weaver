@@ -525,6 +525,20 @@ fn setProp(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c.JSVal
             const shadow = parseBoxShadow(value.bytes) orelse return fail(js, "state shadow must be 'x y blur spread #RRGGBBAA' or none");
             state(js).tree.setInteractionShadow(id, key.bytes, shadow, true) catch |err| return failProp(js, id, key.bytes, err);
         }
+    } else if (std.mem.eql(u8, key.bytes, "accessibilityLabel")) {
+        const value = stringArg(js, argv[2]) catch return fail(js, "accessibilityLabel must be a string");
+        defer c.JS_FreeCString(js, value.raw);
+        if (value.bytes.len != 0 and std.mem.trim(u8, value.bytes, " \t\r\n").len == 0) {
+            return fail(js, "accessibilityLabel must name the action; use a non-blank string");
+        }
+        state(js).tree.setAccessibilityLabel(id, value.bytes) catch |err| return switch (err) {
+            error.AccessibilityLabelTooLong => failFmt(
+                js,
+                "accessibility label capacity exhausted: max_accessibility_label_bytes={d}, asked for {d}",
+                .{ tree_mod.max_accessibility_label_bytes, value.bytes.len },
+            ),
+            else => failProp(js, id, key.bytes, err),
+        };
     } else if (std.mem.eql(u8, key.bytes, "source")) {
         const value = stringArg(js, argv[2]) catch return fail(js, "source must be a string");
         defer c.JS_FreeCString(js, value.raw);

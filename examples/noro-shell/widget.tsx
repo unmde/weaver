@@ -68,6 +68,7 @@ export default widget({
           </column>
           <column class="size-full justify-end">
             <button
+              accessibilityLabel="Seek"
               class="w-full h-[12px] bg-transparent"
               onPress={(event) => {
                 if (media.durationMs <= 0) return;
@@ -84,12 +85,14 @@ export default widget({
 
         <row class="w-full mt-[4px] gap-[6px]">
           <button
+            accessibilityLabel="Previous track"
             onPress={() => { void transport.previous(); }}
             class="w-[100px] h-[100px] items-center justify-center rounded-[8.33px] rounded-bl-[37.5px] bg-[#1a1a1a] border border-[#0a0a0a] shadow-[0_1px_2px_0_#ffffff0d] shadow-inner pressed:bg-[#141414] pressed:shadow-[0_2px_4px_0_#0000004d] pressed:shadow-inner"
           >
             <icon d="M 7 7 L 9.333 7 L 9.333 21 L 7 21 Z M 11.083 14 L 21 21 L 21 7 Z" viewBox="0 0 28 28" class="w-[28px] h-[28px] text-[#d0d0d0] pressed:text-[#b6b6b6]" />
           </button>
           <button
+            accessibilityLabel={playing ? "Pause" : "Play"}
             onPress={() => { void (playing ? transport.pause() : transport.play()); }}
             class="w-[100px] h-[100px] items-center justify-center rounded-[8.33px] bg-[#1a1a1a] border border-[#0a0a0a] shadow-[0_1px_2px_0_#ffffff0d] shadow-inner pressed:bg-[#141414] pressed:shadow-[0_2px_4px_0_#0000004d] pressed:shadow-inner"
           >
@@ -98,6 +101,7 @@ export default widget({
               : <icon d="M 9.333 5.833 L 9.333 22.167 L 22.167 14 Z" viewBox="0 0 28 28" class="w-[28px] h-[28px] text-[#d0d0d0] pressed:text-[#b6b6b6]" />}
           </button>
           <button
+            accessibilityLabel="Next track"
             onPress={() => { void transport.next(); }}
             class="w-[100px] h-[100px] items-center justify-center rounded-[8.33px] rounded-br-[37.5px] bg-[#1a1a1a] border border-[#0a0a0a] shadow-[0_1px_2px_0_#ffffff0d] shadow-inner pressed:bg-[#141414] pressed:shadow-[0_2px_4px_0_#0000004d] pressed:shadow-inner"
           >
