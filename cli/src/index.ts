@@ -653,12 +653,12 @@ function validateCaptureProviderFixture(
     const seekMs = isRecord(command) ? command.seekMs : undefined;
     const ok = isRecord(command) ? command.ok : undefined;
     const seekValueValid = verb === "seek"
-      ? typeof seekMs === "number" && Number.isInteger(seekMs) && seekMs >= 0
+      ? typeof seekMs === "number" && Number.isSafeInteger(seekMs) && seekMs >= 0
       : seekMs === undefined;
     if (!keysValid || typeof verb !== "string" || !knownVerbs.has(verb) || !seekValueValid || (ok !== undefined && typeof ok !== "boolean")) {
       throw new CaptureInputFailure(
         "CaptureProviderFixtureCommandInvalid",
-        `provider fixture command ${index} must name play, pause, next, previous, or seek; only seek requires a non-negative integer seekMs, and ok must be boolean`,
+        `provider fixture command ${index} must name play, pause, next, previous, or seek; only seek requires a non-negative JavaScript-safe integer seekMs, and ok must be boolean`,
         "fix the named command fixture entry and rerun capture",
       );
     }

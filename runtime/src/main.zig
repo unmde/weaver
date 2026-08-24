@@ -1625,13 +1625,7 @@ fn loadCaptureProviderFixture(
         if (std.mem.eql(u8, capability, "media-transport")) break true;
     } else false;
     if (fixture.commands.len > 0 and !media_transport_enabled) return error.CaptureProviderFixtureCapabilityRequired;
-    for (fixture.commands) |command| {
-        const known_verb = std.mem.eql(u8, command.verb, "play") or std.mem.eql(u8, command.verb, "pause") or
-            std.mem.eql(u8, command.verb, "next") or std.mem.eql(u8, command.verb, "previous") or std.mem.eql(u8, command.verb, "seek");
-        if (!known_verb or (std.mem.eql(u8, command.verb, "seek") != (command.seekMs != null))) {
-            return error.CaptureProviderFixtureCommandInvalid;
-        }
-    }
+    for (fixture.commands) |command| if (!captureMediaCommandValid(command)) return error.CaptureProviderFixtureCommandInvalid;
     for (fixture.frames) |frame| {
         const object = switch (frame) {
             .object => |object| object,
@@ -1668,6 +1662,19 @@ fn loadCaptureProviderFixture(
         }
     }
     return fixture;
+}
+
+fn captureMediaCommandValid(command: provider_mod.CaptureMediaCommand) bool {
+    const is_seek = std.mem.eql(u8, command.verb, "seek");
+    const known_verb = is_seek or std.mem.eql(u8, command.verb, "play") or std.mem.eql(u8, command.verb, "pause") or
+        std.mem.eql(u8, command.verb, "next") or std.mem.eql(u8, command.verb, "previous");
+    if (!known_verb or is_seek != (command.seekMs != null)) return false;
+    return command.seekMs == null or command.seekMs.? <= provider_mod.max_safe_integer;
+}
+
+test "capture media command seek must round-trip through JavaScript exactly" {
+    try std.testing.expect(captureMediaCommandValid(.{ .verb = "seek", .seekMs = provider_mod.max_safe_integer }));
+    try std.testing.expect(!captureMediaCommandValid(.{ .verb = "seek", .seekMs = provider_mod.max_safe_integer + 1 }));
 }
 
 fn buildNodeForTest(

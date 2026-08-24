@@ -17,8 +17,9 @@ pub const ack_queue_capacity: usize = media_pending.capacity;
 // fixed stack buffer while a command is sent.
 pub const command_line_capacity: usize = 256;
 // IEEE-754's largest exactly representable integer. This is a JS/wire
-// invariant, not a capacity budget; larger IDs cannot round-trip exactly.
-pub const max_safe_id: u64 = 9_007_199_254_740_991;
+// invariant, not a capacity budget; larger values cannot round-trip exactly.
+pub const max_safe_integer: u64 = 9_007_199_254_740_991;
+pub const max_safe_id = max_safe_integer;
 
 pub const Ack = struct {
     id: u64,

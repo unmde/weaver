@@ -115,6 +115,16 @@ try {
   ]);
   assert.equal(invalidCommand.error?.name, "CaptureProviderFixtureCommandInvalid");
 
+  const unsafeSeekFixture = join(outputRoot, "unsafe-seek-provider.json");
+  writeFileSync(unsafeSeekFixture, JSON.stringify({
+    ...JSON.parse(readFileSync(join(root, "test", "capture", "noro.provider.json"), "utf8")),
+    commands: [{ verb: "seek", seekMs: Number.MAX_SAFE_INTEGER + 1 }],
+  }));
+  const unsafeSeek = captureFailure("unsafe-provider-seek", "examples/noro-shell", [
+    "--provider-fixture", unsafeSeekFixture,
+  ]);
+  assert.equal(unsafeSeek.error?.name, "CaptureProviderFixtureCommandInvalid");
+
   const undeclaredCapabilityFixture = join(outputRoot, "undeclared-capability-provider.json");
   writeFileSync(undeclaredCapabilityFixture, JSON.stringify({
     schema: "weaver.provider-fixture.v1",
