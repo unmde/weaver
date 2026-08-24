@@ -133,6 +133,17 @@ jobs:
 
       - uses: ./.github/actions/setup-zig
 
+      - name: Restore Windows native build cache
+        uses: actions/cache@v5
+        with:
+          path: |
+            ${{ runner.temp }}/zig-global-cache
+            runtime/.zig-cache
+            host/.zig-cache
+          key: zig-build-v3-0.16.0-blacksmith-${{ runner.os }}-${{ runner.arch }}-cpu-baseline-native-${{ hashFiles('runtime/build.zig', 'runtime/build.zig.zon', 'runtime/src/**', 'runtime/vendor/**', 'runtime/native-sdk/build.zig', 'runtime/native-sdk/build.zig.zon', 'runtime/native-sdk/src/**', 'host/build.zig', 'host/build.zig.zon', 'host/src/**', 'host/macos/**', 'host/assets/**') }}
+          restore-keys: |
+            zig-build-v3-0.16.0-blacksmith-${{ runner.os }}-${{ runner.arch }}-cpu-baseline-native-
+
       - name: Wait for Windows media runtime
         shell: pwsh
         run: |
@@ -140,7 +151,7 @@ jobs:
           $statePath = Join-Path $env:RUNNER_TEMP 'weaver-media-install-state.json'
           $state = Get-Content $statePath -Raw | ConvertFrom-Json
           $startedAt = [DateTime]::Parse($state.startedAt).ToUniversalTime()
-          # Receipt: Blacksmith installation took 37-51 seconds on measured runs.
+          # Receipt: Blacksmith installation took 37-56.4 seconds on measured runs.
           # Two minutes is a failure tripwire, not part of the expected path.
           $deadline = $startedAt.AddSeconds(120)
           try {
@@ -177,17 +188,6 @@ jobs:
               -Confirm:$false `
               -ErrorAction SilentlyContinue
           }
-
-      - name: Restore Windows native build cache
-        uses: actions/cache@v5
-        with:
-          path: |
-            ${{ runner.temp }}/zig-global-cache
-            runtime/.zig-cache
-            host/.zig-cache
-          key: zig-build-v3-0.16.0-blacksmith-${{ runner.os }}-${{ runner.arch }}-cpu-baseline-native-${{ hashFiles('runtime/build.zig', 'runtime/build.zig.zon', 'runtime/src/**', 'runtime/vendor/**', 'runtime/native-sdk/build.zig', 'runtime/native-sdk/build.zig.zon', 'runtime/native-sdk/src/**', 'host/build.zig', 'host/build.zig.zon', 'host/src/**', 'host/macos/**', 'host/assets/**') }}
-          restore-keys: |
-            zig-build-v3-0.16.0-blacksmith-${{ runner.os }}-${{ runner.arch }}-cpu-baseline-native-
 
       - name: Build runtime (ReleaseFast)
         working-directory: runtime

@@ -122,13 +122,13 @@ assert.ok(
 );
 assert.ok(
   windowsRuntime.indexOf("Wait for Windows media runtime") >
-    windowsRuntime.indexOf("./.github/actions/setup-zig"),
-  "Windows media runtime wait must happen after toolchain setup",
+    windowsRuntime.indexOf("Restore Windows native build cache"),
+  "Windows media runtime wait must overlap checkout, toolchain setup, and cache restoration",
 );
 assert.ok(
   windowsRuntime.indexOf("Wait for Windows media runtime") <
-    windowsRuntime.indexOf("Restore Windows native build cache"),
-  "Windows media runtime must be ready before native build cache restoration",
+    windowsRuntime.indexOf("Build runtime (ReleaseFast)"),
+  "Windows media runtime must be ready before native compilation",
 );
 assert.equal(
   workflow.match(/-Dcpu=baseline/gu)?.length,
