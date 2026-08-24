@@ -11,7 +11,7 @@ concurrency:
 
 jobs:
   gate:
-    runs-on: windows-latest
+    runs-on: blacksmith-4vcpu-windows-2025
     steps:
       - uses: actions/checkout@v6
         with:
@@ -35,7 +35,7 @@ jobs:
 
   windows-cli:
     name: Windows CLI and portable contracts
-    runs-on: windows-latest
+    runs-on: blacksmith-2vcpu-windows-2025
     steps:
       - uses: actions/checkout@v6
 
@@ -63,7 +63,7 @@ jobs:
 
   windows-runtime:
     name: Windows native runtime + host
-    runs-on: windows-latest
+    runs-on: blacksmith-4vcpu-windows-2025
     steps:
       - uses: actions/checkout@v6
         with:
@@ -113,7 +113,7 @@ jobs:
 
   macos-headless:
     name: macOS headless (apple-silicon)
-    runs-on: macos-15
+    runs-on: blacksmith-6vcpu-macos-15
     steps:
       - uses: actions/checkout@v6
         with:
@@ -168,7 +168,7 @@ jobs:
 
   macos-runtime:
     name: macOS runtime (apple-silicon)
-    runs-on: macos-15
+    runs-on: blacksmith-6vcpu-macos-15
     steps:
       - uses: actions/checkout@v6
         with:
@@ -200,7 +200,7 @@ jobs:
 
   macos-native-sdk:
     name: macOS Native SDK (${{ matrix.profile }})
-    runs-on: macos-15
+    runs-on: blacksmith-6vcpu-macos-15
     strategy:
       fail-fast: false
       matrix:
@@ -232,7 +232,7 @@ jobs:
 
   macos-session:
     name: macOS session (apple-silicon)
-    runs-on: macos-15
+    runs-on: blacksmith-6vcpu-macos-15
     steps:
       - uses: actions/checkout@v6
         with:
