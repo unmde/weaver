@@ -5,9 +5,15 @@ on:
     branches: [master]
   pull_request:
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   gate:
     runs-on: windows-latest
+    env:
+      ZIG_GLOBAL_CACHE_DIR: ${{ runner.temp }}/zig-global-cache
     steps:
       - uses: actions/checkout@v4
         with:
@@ -16,6 +22,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
 
       - name: Install workspaces
         run: npm ci
@@ -34,6 +41,17 @@ jobs:
           Invoke-WebRequest -Uri "https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip" -OutFile zig.zip
           Expand-Archive zig.zip -DestinationPath "$env:RUNNER_TEMP\zig"
           Add-Content $env:GITHUB_PATH "$env:RUNNER_TEMP\zig\zig-x86_64-windows-0.16.0"
+
+      - name: Restore Zig build cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ runner.temp }}/zig-global-cache
+            runtime/.zig-cache
+            host/.zig-cache
+          key: zig-0.16.0-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ github.sha }}
+          restore-keys: |
+            zig-0.16.0-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-
 
       - name: Build runtime (ReleaseFast)
         working-directory: runtime
@@ -71,18 +89,10 @@ jobs:
           if (-not (Test-Path ciclock\dist\widget.json)) { throw "manifest missing" }
 
   macos-headless:
-    name: macOS headless (${{ matrix.arch }})
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: apple-silicon
-            runner: macos-15
-            zig_arch: aarch64
-          - arch: intel
-            runner: macos-15-intel
-            zig_arch: x86_64
-    runs-on: ${{ matrix.runner }}
+    name: macOS headless (apple-silicon)
+    runs-on: macos-15
+    env:
+      ZIG_GLOBAL_CACHE_DIR: ${{ runner.temp }}/zig-global-cache
     steps:
       - uses: actions/checkout@v4
         with:
@@ -91,6 +101,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
 
       - name: Install workspaces
         run: npm ci
@@ -106,10 +117,22 @@ jobs:
       - name: Install Zig 0.16.0
         run: |
           curl --fail --location --retry 3 \
-            "https://ziglang.org/download/0.16.0/zig-${{ matrix.zig_arch }}-macos-0.16.0.tar.xz" \
+            "https://ziglang.org/download/0.16.0/zig-aarch64-macos-0.16.0.tar.xz" \
             --output "$RUNNER_TEMP/zig.tar.xz"
           tar -xf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP"
-          echo "$RUNNER_TEMP/zig-${{ matrix.zig_arch }}-macos-0.16.0" >> "$GITHUB_PATH"
+          echo "$RUNNER_TEMP/zig-aarch64-macos-0.16.0" >> "$GITHUB_PATH"
+
+      - name: Restore Zig build cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ runner.temp }}/zig-global-cache
+            runtime/.zig-cache
+            host/.zig-cache
+            runtime/native-sdk/.zig-cache
+          key: zig-0.16.0-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ github.sha }}
+          restore-keys: |
+            zig-0.16.0-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-
 
       - name: Runtime platform-service seam
         working-directory: runtime
@@ -158,8 +181,9 @@ jobs:
 
   macos-session:
     name: macOS session (apple-silicon)
-    needs: macos-headless
     runs-on: macos-15
+    env:
+      ZIG_GLOBAL_CACHE_DIR: ${{ runner.temp }}/zig-global-cache
     steps:
       - uses: actions/checkout@v4
         with:
@@ -168,6 +192,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
 
       - name: Clean-checkout bootstrap
         run: npm ci
@@ -179,6 +204,17 @@ jobs:
             --output "$RUNNER_TEMP/zig.tar.xz"
           tar -xf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP"
           echo "$RUNNER_TEMP/zig-aarch64-macos-0.16.0" >> "$GITHUB_PATH"
+
+      - name: Restore Zig build cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ runner.temp }}/zig-global-cache
+            runtime/.zig-cache
+            host/.zig-cache
+          key: zig-0.16.0-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ github.sha }}
+          restore-keys: |
+            zig-0.16.0-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-
 
       - name: Clean-checkout Quickstart builds
         run: |

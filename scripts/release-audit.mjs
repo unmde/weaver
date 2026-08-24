@@ -93,10 +93,18 @@ const workflow = readFileSync(join(repoRoot, ".github", "workflows", "ci.yml"), 
 for (const required of [
   "windows-latest",
   "macos-15",
-  "macos-15-intel",
+  "actions/cache@v4",
+  "ZIG_GLOBAL_CACHE_DIR",
+  "cancel-in-progress: true",
   "spikes/macos-media-observation/build.sh",
   "cli/test/macos-host-control-smoke.mjs",
   "cli/test/macos-host-smoke.mjs",
 ]) assert.ok(workflow.includes(required), `CI workflow is missing ${required}`);
+for (const [forbidden, reason] of [
+  ["macos-15-intel", "Intel macOS is outside Weaver's supported targets"],
+  ["needs: macos-headless", "the independent macOS session smoke must start in parallel"],
+]) {
+  assert.equal(workflow.includes(forbidden), false, `CI workflow contains ${forbidden}: ${reason}`);
+}
 
 process.stdout.write(`Release audit passed; Native SDK pinned at ${nativeCommit.slice(0, 8)} and no platform/private API leaked into the SDK.\n`);
