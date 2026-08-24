@@ -63,11 +63,7 @@ jobs:
 
   windows-runtime:
     name: Windows native runtime + host
-    # Blacksmith's slim Windows image can compile the native graph, but its
-    # generated executables terminate with STATUS_DLL_NOT_FOUND (exit 53).
-    # Keep the native job on the full GitHub image; the portable Windows jobs
-    # still use Blacksmith, and the Zig caches keep this path warm.
-    runs-on: windows-latest
+    runs-on: blacksmith-4vcpu-windows-2025
     steps:
       - uses: actions/checkout@v6
         with:
@@ -83,6 +79,30 @@ jobs:
 
       - uses: ./.github/actions/setup-zig
 
+      - name: Ensure Windows media runtime
+        shell: pwsh
+        run: |
+          $mediaDlls = @('mf.dll', 'mfplat.dll')
+          $missing = $mediaDlls | Where-Object {
+            -not (Test-Path (Join-Path $env:WINDIR "System32\$_"))
+          }
+          if ($missing) {
+            Import-Module ServerManager
+            $result = Install-WindowsFeature -Name Server-Media-Foundation
+            if (-not $result.Success) {
+              throw "Could not install Server-Media-Foundation; missing: $($missing -join ', ')"
+            }
+            if ($result.RestartNeeded -eq 'Yes') {
+              throw 'Server-Media-Foundation requires a runner restart'
+            }
+          }
+          $stillMissing = $mediaDlls | Where-Object {
+            -not (Test-Path (Join-Path $env:WINDIR "System32\$_"))
+          }
+          if ($stillMissing) {
+            throw "Windows media runtime is still missing: $($stillMissing -join ', ')"
+          }
+
       - name: Restore Windows native build cache
         uses: actions/cache@v5
         with:
@@ -90,10 +110,9 @@ jobs:
             ${{ runner.temp }}/zig-global-cache
             runtime/.zig-cache
             host/.zig-cache
-          key: zig-build-v2-0.16.0-github-${{ runner.os }}-${{ runner.arch }}-native-${{ hashFiles('runtime/build.zig', 'runtime/build.zig.zon', 'runtime/src/**', 'runtime/vendor/**', 'runtime/native-sdk/build.zig', 'runtime/native-sdk/build.zig.zon', 'runtime/native-sdk/src/**', 'host/build.zig', 'host/build.zig.zon', 'host/src/**', 'host/macos/**', 'host/assets/**') }}
+          key: zig-build-v2-0.16.0-blacksmith-${{ runner.os }}-${{ runner.arch }}-native-${{ hashFiles('runtime/build.zig', 'runtime/build.zig.zon', 'runtime/src/**', 'runtime/vendor/**', 'runtime/native-sdk/build.zig', 'runtime/native-sdk/build.zig.zon', 'runtime/native-sdk/src/**', 'host/build.zig', 'host/build.zig.zon', 'host/src/**', 'host/macos/**', 'host/assets/**') }}
           restore-keys: |
-            zig-build-v2-0.16.0-github-${{ runner.os }}-${{ runner.arch }}-native-
-            zig-build-0.16.0-${{ runner.os }}-${{ runner.arch }}-native-
+            zig-build-v2-0.16.0-blacksmith-${{ runner.os }}-${{ runner.arch }}-native-
 
       - name: Build runtime (ReleaseFast)
         working-directory: runtime
@@ -101,7 +120,31 @@ jobs:
 
       - name: Runtime tests
         working-directory: runtime
-        run: zig build test -Doptimize=ReleaseFast -Dweb-layer=exclude -Dtrace=off
+        shell: pwsh
+        run: |
+          zig build test -Doptimize=ReleaseFast -Dweb-layer=exclude -Dtrace=off
+          if ($LASTEXITCODE -eq 0) { exit 0 }
+          $testExit = $LASTEXITCODE
+          $vsRoots = @(
+            "$env:ProgramFiles\Microsoft Visual Studio",
+            "${env:ProgramFiles(x86)}\Microsoft Visual Studio"
+          ) | Where-Object { Test-Path $_ }
+          $dumpbin = $vsRoots |
+            ForEach-Object {
+              Get-ChildItem $_ -Recurse -File -Filter dumpbin.exe -ErrorAction SilentlyContinue
+            } |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+          if ($dumpbin) {
+            Get-ChildItem .zig-cache -Recurse -File -Filter '*.exe' |
+              Sort-Object LastWriteTime -Descending |
+              Select-Object -First 8 |
+              ForEach-Object {
+                Write-Host "Dependencies for $($_.FullName)"
+                & $dumpbin.FullName /DEPENDENTS $_.FullName
+              }
+          }
+          exit $testExit
 
       - name: Build and test Windows host
         working-directory: host

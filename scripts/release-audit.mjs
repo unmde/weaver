@@ -98,7 +98,7 @@ for (const required of [
   "./.github/actions/setup-zig",
   "hashFiles(",
   "windows-runtime:",
-  "runs-on: windows-latest",
+  "Ensure Windows media runtime",
   "Build and test Windows host",
   "macos-runtime:",
   "macos-native-sdk:",
