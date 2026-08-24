@@ -151,7 +151,7 @@ jobs:
           $statePath = Join-Path $env:RUNNER_TEMP 'weaver-media-install-state.json'
           $state = Get-Content $statePath -Raw | ConvertFrom-Json
           $startedAt = [DateTime]::Parse($state.startedAt).ToUniversalTime()
-          # Receipt: Blacksmith installation took 37-56.4 seconds on measured runs.
+          # Receipt: Blacksmith installation took 37-58.8 seconds on measured runs.
           # Two minutes is a failure tripwire, not part of the expected path.
           $deadline = $startedAt.AddSeconds(120)
           try {
