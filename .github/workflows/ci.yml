@@ -12,8 +12,6 @@ concurrency:
 jobs:
   gate:
     runs-on: windows-latest
-    env:
-      ZIG_GLOBAL_CACHE_DIR: ${{ runner.temp }}/zig-global-cache
     steps:
       - uses: actions/checkout@v4
         with:
@@ -41,6 +39,10 @@ jobs:
           Invoke-WebRequest -Uri "https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip" -OutFile zig.zip
           Expand-Archive zig.zip -DestinationPath "$env:RUNNER_TEMP\zig"
           Add-Content $env:GITHUB_PATH "$env:RUNNER_TEMP\zig\zig-x86_64-windows-0.16.0"
+
+      - name: Configure Zig cache directory
+        shell: pwsh
+        run: Add-Content $env:GITHUB_ENV "ZIG_GLOBAL_CACHE_DIR=$env:RUNNER_TEMP\zig-global-cache"
 
       - name: Restore Zig build cache
         uses: actions/cache@v4
@@ -91,8 +93,6 @@ jobs:
   macos-headless:
     name: macOS headless (apple-silicon)
     runs-on: macos-15
-    env:
-      ZIG_GLOBAL_CACHE_DIR: ${{ runner.temp }}/zig-global-cache
     steps:
       - uses: actions/checkout@v4
         with:
@@ -121,6 +121,9 @@ jobs:
             --output "$RUNNER_TEMP/zig.tar.xz"
           tar -xf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP"
           echo "$RUNNER_TEMP/zig-aarch64-macos-0.16.0" >> "$GITHUB_PATH"
+
+      - name: Configure Zig cache directory
+        run: echo "ZIG_GLOBAL_CACHE_DIR=$RUNNER_TEMP/zig-global-cache" >> "$GITHUB_ENV"
 
       - name: Restore Zig build cache
         uses: actions/cache@v4
@@ -182,8 +185,6 @@ jobs:
   macos-session:
     name: macOS session (apple-silicon)
     runs-on: macos-15
-    env:
-      ZIG_GLOBAL_CACHE_DIR: ${{ runner.temp }}/zig-global-cache
     steps:
       - uses: actions/checkout@v4
         with:
@@ -204,6 +205,9 @@ jobs:
             --output "$RUNNER_TEMP/zig.tar.xz"
           tar -xf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP"
           echo "$RUNNER_TEMP/zig-aarch64-macos-0.16.0" >> "$GITHUB_PATH"
+
+      - name: Configure Zig cache directory
+        run: echo "ZIG_GLOBAL_CACHE_DIR=$RUNNER_TEMP/zig-global-cache" >> "$GITHUB_ENV"
 
       - name: Restore Zig build cache
         uses: actions/cache@v4
