@@ -17,7 +17,7 @@ try {
   const resizedClock = capture("clock-resized", "examples/clock", [
     "--action-file", join(root, "test", "capture", "resize.actions"),
   ]);
-  assert.deepEqual([resizedClock.output.widthPx, resizedClock.output.heightPx], [320, 180]);
+  assert.deepEqual([resizedClock.output.widthPx, resizedClock.output.heightPx], [962, 719]);
 
   const text = capture("styling-text", "examples/styling-text");
   assert.ok(text.renderer.pixelsDifferentFromClear > 0);
