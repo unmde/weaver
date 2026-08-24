@@ -3,9 +3,9 @@
   "actions": [
     {
       "action": "resize",
-      "width": 320,
-      "height": 180,
-      "scale": 1
+      "width": 160,
+      "height": 90,
+      "scale": 2
     }
   ]
 }
