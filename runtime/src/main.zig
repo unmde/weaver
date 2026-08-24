@@ -105,6 +105,11 @@ const ImageState = struct {
     failure_label_len: usize = 0,
 };
 
+const CaptureProviderFixture = struct {
+    schema: []const u8,
+    frames: []const std.json.Value,
+};
+
 pub const Msg = union(enum) {
     timer: native_sdk.EffectTimer,
     press: native_sdk.canvas.WidgetPressEvent,
@@ -899,6 +904,16 @@ fn buildNode(ui: *WidgetUi, model: *const Model, id: tree_mod.NodeId, is_root: b
         .on_right_press_event = if (retained.handles_right_press) WidgetUi.pressMsg(.right_press) else null,
         .on_change = if (retained.handles_change) Msg{ .slider = id } else null,
     };
+    // Weaver buttons use Native's panel primitive so TSX utility styling is
+    // the complete visual contract. Preserve the control semantics explicitly:
+    // automation and assistive clients should still see a named button, not an
+    // anonymous group whose text happens to be painted by a child.
+    if (retained.kind == .button) {
+        options.semantics.role = .button;
+        options.semantics.label = firstDescendantText(&model.tree, id);
+        options.semantics.focusable = retained.handles_press;
+        options.semantics.actions.press = retained.handles_press;
+    }
     if (retained.kind == .text) {
         options.text_alignment = switch (retained.text_align) {
             .start => .start,
@@ -1003,6 +1018,16 @@ fn buildNode(ui: *WidgetUi, model: *const Model, id: tree_mod.NodeId, is_root: b
         .text => unreachable,
     };
     return attachEffects(ui, retained, null, result);
+}
+
+fn firstDescendantText(tree: *const tree_mod.Tree, id: tree_mod.NodeId) []const u8 {
+    const node = tree.nodeConst(id) catch return "";
+    if (node.kind == .text and node.text_len != 0) return node.textSlice();
+    for (node.children[0..node.child_count]) |child_id| {
+        const text = firstDescendantText(tree, child_id);
+        if (text.len != 0) return text;
+    }
+    return "";
 }
 
 fn resolveFontId(node: *const tree_mod.Node, fonts: []const manifest_mod.Font) ?native_sdk.canvas.FontId {
@@ -1243,19 +1268,22 @@ pub fn main(init: std.process.Init) !void {
     // renderer every macOS widget talks to (weaverd spawns and supervises
     // it; docs/macos-memory-handoff.md carries the receipts). It never
     // loads a widget bundle.
-    if (builtin.os.tag == .macos and args.len == 3 and std.mem.eql(u8, args[1], "--render-host")) {
-        const seam = struct {
-            extern fn native_sdk_appkit_render_host_run(name: [*:0]const u8) c_int;
-        };
-        const name_z = try allocator.dupeZ(u8, args[2]);
-        if (seam.native_sdk_appkit_render_host_run(name_z.ptr) != 0) return error.RenderHostStartFailed;
-        return;
+    if (comptime weaver_build_options.render_host_enabled) {
+        if (args.len == 3 and std.mem.eql(u8, args[1], "--render-host")) {
+            const seam = struct {
+                extern fn native_sdk_appkit_render_host_run(name: [*:0]const u8) c_int;
+            };
+            const name_z = try allocator.dupeZ(u8, args[2]);
+            if (seam.native_sdk_appkit_render_host_run(name_z.ptr) != 0) return error.RenderHostStartFailed;
+            return;
+        }
     }
-    const dev = args.len == 3 and std.mem.eql(u8, args[1], "--dev");
+    const capture_state_root = init.environ_map.get("WEAVER_CAPTURE_STATE_ROOT");
+    const dev = capture_state_root == null and args.len == 3 and std.mem.eql(u8, args[1], "--dev");
     if ((!dev and args.len != 2) or (dev and args.len != 3)) {
         // The render-host form is parsed only on macOS; advertise it only
         // where it is accepted.
-        std.debug.print(if (builtin.os.tag == .macos)
+        std.debug.print(if (weaver_build_options.render_host_enabled)
             "usage: weaver-widget [--dev] <widget-directory> | weaver-widget --render-host <bootstrap-name>\n"
         else
             "usage: weaver-widget [--dev] <widget-directory>\n", .{});
@@ -1263,6 +1291,10 @@ pub fn main(init: std.process.Init) !void {
     }
     const directory = args[if (dev) 2 else 1];
     const loaded = try manifest_mod.load(init.io, allocator, directory);
+    const capture_provider_fixture = if (init.environ_map.get("WEAVER_CAPTURE_PROVIDER_FIXTURE")) |path|
+        try loadCaptureProviderFixture(init.io, allocator, path, loaded.manifest.subscribe)
+    else
+        null;
     const force_software = if (init.environ_map.get("WEAVER_FORCE_SOFTWARE")) |value|
         std.mem.eql(u8, value, "1")
     else
@@ -1272,8 +1304,14 @@ pub fn main(init: std.process.Init) !void {
     backend_status_path = init.environ_map.get("WEAVER_BACKEND_FILE");
     const local_app_data = init.environ_map.get("LOCALAPPDATA");
     const home = init.environ_map.get("HOME");
-    const data_root = try platform.dataRoot(allocator, local_app_data, home);
-    const log_directory = try platform.logsRoot(allocator, local_app_data, home);
+    // Capture receives its own empty state root from the CLI. Keeping the
+    // branch here, beside the ordinary bootstrap, makes it impossible for a
+    // headless run to inherit live storage, geometry, or per-widget logs.
+    const data_root = if (capture_state_root) |root| root else try platform.dataRoot(allocator, local_app_data, home);
+    const log_directory = if (capture_state_root) |root|
+        try std.fs.path.join(allocator, &.{ root, "logs" })
+    else
+        try platform.logsRoot(allocator, local_app_data, home);
     try std.Io.Dir.cwd().createDirPath(init.io, log_directory);
     const log_name = try safeLogName(allocator, loaded.manifest.name);
     const log_path = try std.fs.path.join(allocator, &.{ log_directory, log_name });
@@ -1343,7 +1381,7 @@ pub fn main(init: std.process.Init) !void {
         init.io,
         std.heap.page_allocator,
         directory,
-        init.environ_map.get("WEAVER_ART_CACHE"),
+        if (capture_state_root == null) init.environ_map.get("WEAVER_ART_CACHE") else null,
     );
     defer image_resolver.deinit();
 
@@ -1372,10 +1410,17 @@ pub fn main(init: std.process.Init) !void {
     app_state.model.fonts = loaded.manifest.fonts;
     app_state.model.image_resolver = &image_resolver;
     if (dragged) |saved| app_state.model.frame_origin = .{ saved.x, saved.y };
-    try app_state.model.provider.init(init.io, platform.providerEndpoint(
-        init.environ_map.get("WEAVER_HOST_PIPE"),
-        init.environ_map.get("WEAVER_HOST_ENDPOINT"),
-    ));
+    if (capture_provider_fixture != null) {
+        app_state.model.provider.initCaptureFixture(init.io);
+    } else {
+        try app_state.model.provider.init(init.io, if (capture_state_root == null)
+            platform.providerEndpoint(
+                init.environ_map.get("WEAVER_HOST_PIPE"),
+                init.environ_map.get("WEAVER_HOST_ENDPOINT"),
+            )
+        else
+            null);
+    }
     defer app_state.model.provider.deinit();
     if (builtin.os.tag == .macos and weaver_build_options.automation_seam) {
         const automation = init.environ_map.get("WEAVER_AUTOMATION");
@@ -1397,6 +1442,12 @@ pub fn main(init: std.process.Init) !void {
         &app_state.model.provider,
         app_state.model.media_transport_enabled,
     );
+    if (capture_state_root != null) {
+        if (init.environ_map.get("WEAVER_CAPTURE_CLOCK_EPOCH_MS")) |value| {
+            const epoch_ms = std.fmt.parseInt(u64, value, 10) catch return error.CaptureClockInvalid;
+            try engine.setCaptureClock(epoch_ms);
+        }
+    }
     app_state.model.engine = engine;
     defer if (app_state.model.engine) |current| current.destroy(std.heap.page_allocator);
     app_state.model.io = init.io;
@@ -1408,6 +1459,14 @@ pub fn main(init: std.process.Init) !void {
         if (std.mem.eql(u8, provider, "audio")) app_state.model.provider_poll_interval_ms = 33;
     }
     try engine.evaluate(loaded.bundle, "bundle.js");
+    if (capture_provider_fixture) |fixture| {
+        for (fixture.frames) |frame_value| {
+            var frame_writer = try std.Io.Writer.Allocating.initCapacity(std.heap.page_allocator, 256);
+            defer frame_writer.deinit();
+            try frame_writer.writer.print("{f}", .{std.json.fmt(frame_value, .{})});
+            try engine.dispatchProviderFixture(frame_writer.written());
+        }
+    }
     if (init.environ_map.get("WEAVER_MEMORY_RECEIPT")) |value| {
         if (value.len != 0 and !std.mem.eql(u8, value, "0")) {
             const usage = engine.memoryUsage();
@@ -1468,6 +1527,10 @@ pub fn main(init: std.process.Init) !void {
     }
     var app = app_state.app();
     app.start_fn = startRendererDiagnostics;
+    if (capture_state_root != null) {
+        app.capture_clock_advance_fn = advanceCaptureClock;
+        app.capture_pending_fn = capturePendingWork;
+    }
     runner.runWithOptions(app, .{
         .app_name = "weaver-widget",
         .window_title = loaded.manifest.name,
@@ -1488,6 +1551,73 @@ pub fn main(init: std.process.Init) !void {
         std.log.err("widget runtime stopped after platform callback failure: {s}", .{@errorName(err)});
         return err;
     };
+}
+
+fn advanceCaptureClock(context: *anyopaque, milliseconds: u64) !void {
+    const app_state: *WidgetApp = @ptrCast(@alignCast(context));
+    const engine = app_state.model.engine orelse return error.CaptureClockUnavailable;
+    try engine.advanceCaptureClock(milliseconds);
+}
+
+fn capturePendingWork(context: *anyopaque) native_sdk.CapturePendingWork {
+    const app_state: *WidgetApp = @ptrCast(@alignCast(context));
+    var pending_images: usize = 0;
+    for (app_state.model.image_states[0..app_state.model.image_state_count]) |state| {
+        if (!state.registered and state.failure == null) pending_images += 1;
+    }
+    return .{
+        .fetches = if (app_state.model.engine) |engine| engine.activeFetchCount() else 0,
+        .images = pending_images,
+    };
+}
+
+fn loadCaptureProviderFixture(
+    io: std.Io,
+    allocator: std.mem.Allocator,
+    path: []const u8,
+    subscriptions: []const []const u8,
+) !CaptureProviderFixture {
+    const bytes = try std.Io.Dir.cwd().readFileAlloc(io, path, allocator, .unlimited);
+    const fixture = std.json.parseFromSliceLeaky(CaptureProviderFixture, allocator, bytes, .{
+        .ignore_unknown_fields = false,
+    }) catch return error.CaptureProviderFixtureInvalid;
+    if (!std.mem.eql(u8, fixture.schema, "weaver.provider-fixture.v1")) return error.CaptureProviderFixtureSchemaUnsupported;
+    for (fixture.frames) |frame| {
+        const object = switch (frame) {
+            .object => |object| object,
+            else => return error.CaptureProviderFrameInvalid,
+        };
+        const provider_value = object.get("provider") orelse return error.CaptureProviderFrameInvalid;
+        const provider = switch (provider_value) {
+            .string => |value| value,
+            else => return error.CaptureProviderFrameInvalid,
+        };
+        if (object.get("value") == null) return error.CaptureProviderFrameInvalid;
+        const declared = for (subscriptions) |subscription| {
+            if (std.mem.eql(u8, provider, subscription) and !std.mem.eql(u8, provider, "time")) break true;
+        } else false;
+        if (!declared) return error.CaptureProviderFrameUndeclared;
+    }
+    for (subscriptions) |subscription| {
+        if (std.mem.eql(u8, subscription, "time")) continue;
+        const supplied = for (fixture.frames) |frame| {
+            const object = switch (frame) {
+                .object => |object| object,
+                else => continue,
+            };
+            const provider_value = object.get("provider") orelse continue;
+            const provider = switch (provider_value) {
+                .string => |value| value,
+                else => continue,
+            };
+            if (std.mem.eql(u8, subscription, provider)) break true;
+        } else false;
+        if (!supplied) {
+            std.debug.print("capture provider fixture is missing declared provider {s}\n", .{subscription});
+            return error.CaptureProviderFixtureMissingProvider;
+        }
+    }
+    return fixture;
 }
 
 fn buildNodeForTest(
@@ -2029,6 +2159,24 @@ test "retained stack projects overlay kind and rounded content clipping" {
     try std.testing.expectEqual(@as(usize, 2), projected.nodes.len);
     try std.testing.expectEqual(native_sdk.canvas.WidgetKind.panel, projected.nodes[0].widget.kind);
     try std.testing.expectEqual(native_sdk.canvas.WidgetKind.text, projected.nodes[1].widget.kind);
+}
+
+test "styled Weaver button keeps button role and descendant accessible name" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+
+    var model: Model = .{};
+    const button_id = try model.tree.createNode(.button);
+    const label_id = try model.tree.createNode(.text);
+    try model.tree.setText(label_id, "Start");
+    try model.tree.appendChild(button_id, label_id);
+    (try model.tree.node(button_id)).handles_press = true;
+
+    var ui = WidgetUi.init(arena_state.allocator());
+    const projected = buildNodeForTest(&ui, &model, button_id, false);
+    try std.testing.expectEqual(native_sdk.canvas.WidgetRole.button, projected.widget.semantics.role);
+    try std.testing.expectEqualStrings("Start", projected.widget.semantics.label);
+    try std.testing.expect(projected.widget.semantics.actions.press);
 }
 
 test "retained image projects fit tiling and class corner radii" {

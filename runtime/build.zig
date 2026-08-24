@@ -22,6 +22,11 @@ pub fn build(b: *std.Build) void {
     artifacts.tests.stack_size = 16 * 1024 * 1024;
     const weaver_options = b.addOptions();
     weaver_options.addOption(bool, "automation_seam", automation_seam);
+    // The executable target and the selected Native SDK backend are separate
+    // facts: a macOS-targeted `-Dplatform=null` build must not retain the
+    // AppKit render-host symbol. Keep the gate structural so dead-code
+    // elimination is not responsible for making the null build link.
+    weaver_options.addOption(bool, "render_host_enabled", artifacts.backend == .macos);
     artifacts.exe.root_module.addOptions("weaver_build_options", weaver_options);
     if (artifacts.tests.root_module != artifacts.exe.root_module) {
         artifacts.tests.root_module.addOptions("weaver_build_options", weaver_options);

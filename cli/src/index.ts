@@ -3,6 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { closeSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, realpathSync, renameSync, rmSync, statSync, watch, writeFileSync } from "node:fs";
 import type { Dirent } from "node:fs";
 import { basename, dirname, extname, isAbsolute, join, resolve } from "node:path";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import ts from "typescript";
@@ -97,6 +98,68 @@ const FIRST_REGISTERED_FONT_ID = 64;
 
 interface BundleResult { project: SourceProject; manifest: RuntimeManifest }
 
+interface CaptureOptions {
+  out: string;
+  clock?: string;
+  actionFile?: string;
+  providerFixture?: string;
+  sessionJournal?: string;
+}
+
+interface NativeCaptureResult {
+  schema: "native-sdk.capture.v1";
+  status: "ok" | "error";
+  output?: { widthPx: number; heightPx: number; pngBytes: number };
+  renderer?: {
+    pixels: "reference";
+    textMeasurement: "estimator" | "coretext";
+    eventsDriven: string[];
+    framesDriven: number;
+    retainedRevision: number;
+    commands: number;
+    nodes: number;
+    images: number;
+    fonts: number;
+    pixelsDifferentFromClear: number;
+  };
+  pending?: { timers: number; fetches: number; images: number; providers: string[]; frameRequests: number };
+  timingUs?: { startup: number; render: number; encode: number; write: number; total: number };
+  warnings?: string[];
+  error?: { name: string; ask: string; remedy: string; candidates?: CaptureCandidate[] };
+}
+
+interface CaptureCandidate {
+  role: string;
+  name: string;
+  enabled: boolean;
+  selected: boolean;
+  value: number | null;
+}
+
+interface CaptureReceipt {
+  schema: "weaver.capture.v1";
+  status: "ok" | "error";
+  provenance: { weaverCommit: string; nativeSdkCommit: string; bundleSha256: string; platform: string };
+  output: { image: string; snapshot: string; widthPx: number; heightPx: number; scale: number; pngBytes: number };
+  renderer: {
+    pixels: "reference";
+    textMeasurement: "estimator" | "coretext";
+    eventsDriven: string[];
+    framesDriven: number;
+    retainedRevision: number;
+    commands: number;
+    nodes: number;
+    images: number;
+    fonts: number;
+    pixelsDifferentFromClear: number;
+  };
+  pending: { timers: number; fetches: number; images: number; providers: string[]; frameRequests: number };
+  timingUs: { bundle: number; spawn: number; startup: number; render: number; encode: number; write: number; total: number };
+  inputs: { clock: string; storage: string; actionFileSha256?: string; providerFixtureSha256?: string; sessionJournalSha256?: string };
+  warnings: string[];
+  error?: { name: string; ask: string; remedy: string; candidates?: CaptureCandidate[] };
+}
+
 async function main(argv: string[]): Promise<void> {
   const [command, argument, ...rest] = argv;
   const directoryCommands = ["init", "check", "bundle", "dev", "pack"];
@@ -113,8 +176,12 @@ async function main(argv: string[]): Promise<void> {
     if (argument !== "authorize" || rest.length > 0) throw new WeaverFailure(["Usage: weaver audio authorize"]);
     return authorizeAudio();
   }
+  if (command === "capture") {
+    if (!argument) throw new WeaverFailure([captureUsage()]);
+    return captureWidget(resolve(argument), parseCaptureOptions(rest));
+  }
   if (!command || rest.length > 0 || (directoryCommands.includes(command) && !argument) || (noArgumentCommands.includes(command) && argument) || (command === "install" && !argument) || (command === "uninstall" && !argument) || (command === "status" && argument !== undefined && argument !== "--json") || ![...directoryCommands, ...noArgumentCommands, "install", "uninstall", "status"].includes(command)) {
-    throw new WeaverFailure(["Usage: weaver <init|check|bundle|dev|pack> <name-or-directory> | inspect <file.weave> | install <directory-or-file.weave> | uninstall <name> | up | down | status [--json] | logs <name> [--follow] | audio authorize"]);
+    throw new WeaverFailure(["Usage: weaver <init|check|bundle|dev|pack> <name-or-directory> | capture <directory> --out <file.png> [--clock <ISO-8601>] [--action-file <file>] [--provider-fixture <file>] [--session-journal <file>] | inspect <file.weave> | install <directory-or-file.weave> | uninstall <name> | up | down | status [--json] | logs <name> [--follow] | audio authorize"]);
   }
   if (command === "up") return upHost(true);
   if (command === "down") return downHost();
@@ -232,6 +299,409 @@ async function bundleWidget(directory: string): Promise<BundleResult> {
   };
   writeAtomic(join(outputDirectory, "widget.json"), `${JSON.stringify(manifest, null, 2)}\n`);
   return { project, manifest };
+}
+
+function captureUsage(): string {
+  return "Usage: weaver capture <directory> --out <file.png> [--clock <ISO-8601>] [--action-file <file>] [--provider-fixture <file>] [--session-journal <file>]";
+}
+
+function parseCaptureOptions(args: string[]): CaptureOptions {
+  const values = new Map<string, string>();
+  const allowed = new Set(["--out", "--clock", "--action-file", "--provider-fixture", "--session-journal"]);
+  for (let index = 0; index < args.length; index += 2) {
+    const flag = args[index];
+    const value = args[index + 1];
+    if (!flag || !allowed.has(flag) || !value || value.startsWith("--")) throw new WeaverFailure([captureUsage()]);
+    if (values.has(flag)) throw new WeaverFailure([`weaver capture received ${flag} more than once.`, captureUsage()]);
+    values.set(flag, value);
+  }
+  const out = values.get("--out");
+  if (!out || extname(out).toLowerCase() !== ".png") throw new WeaverFailure(["weaver capture --out must name a .png file.", captureUsage()]);
+  if (values.has("--action-file") && values.has("--session-journal")) {
+    throw new WeaverFailure(["weaver capture accepts an action file or a session journal, not both in one run.", captureUsage()]);
+  }
+  return {
+    out: resolve(out),
+    clock: optionalCaptureClock(values.get("--clock")),
+    actionFile: optionalResolvedPath(values.get("--action-file")),
+    providerFixture: optionalResolvedPath(values.get("--provider-fixture")),
+    sessionJournal: optionalResolvedPath(values.get("--session-journal")),
+  };
+}
+
+function optionalCaptureClock(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  const parsed = new Date(value);
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(value) || !Number.isFinite(parsed.valueOf())) {
+    throw new WeaverFailure([`CaptureClockInvalid: ${JSON.stringify(value)} is not an ISO-8601 instant. Use a value such as 2026-08-24T17:30:00.000Z.`]);
+  }
+  return parsed.toISOString();
+}
+
+function optionalResolvedPath(path: string | undefined): string | undefined {
+  return path === undefined ? undefined : resolve(path);
+}
+
+async function captureWidget(directory: string, options: CaptureOptions): Promise<void> {
+  const commandStart = nowMicroseconds();
+  const snapshot = options.out.slice(0, -extname(options.out).length) + ".snapshot.txt";
+  const receiptPath = options.out.slice(0, -extname(options.out).length) + ".receipt.json";
+  const captureRoot = mkdtempSync(join(tmpdir(), "weaver-capture-"));
+  const temporaryImage = join(captureRoot, "capture.png");
+  const temporarySnapshot = join(captureRoot, "capture.snapshot.txt");
+  const nativeResultPath = join(captureRoot, "native-result.json");
+  const chosenClock = options.clock ?? new Date().toISOString();
+  let bundleSha256 = "";
+  let bundleUs = 0;
+  let spawnUs = 0;
+  let nativeResult: NativeCaptureResult | undefined;
+  let unavailableProviders: string[] = [];
+  const warnings: string[] = [];
+  try {
+    if (!existsSync(runtimeExecutable)) {
+      throw new CaptureInputFailure(
+        "CaptureRuntimeNotBuilt",
+        `build the runtime expected at ${runtimeExecutable}`,
+        "run the platform build command in the README Quickstart, then rerun capture",
+      );
+    }
+    for (const [kind, path] of [
+      ["action file", options.actionFile],
+      ["provider fixture", options.providerFixture],
+      ["session journal", options.sessionJournal],
+    ] as const) {
+      if (path !== undefined && (!existsSync(path) || !statSync(path).isFile())) {
+        throw new CaptureInputFailure(
+          "CaptureInputNotFile",
+          `${kind} is not a regular file: ${path}`,
+          `supply an existing ${kind} path and rerun capture`,
+        );
+      }
+    }
+
+    const bundleStart = nowMicroseconds();
+    const bundled = await bundleWidget(directory);
+    bundleUs = nowMicroseconds() - bundleStart;
+    const bundlePath = join(directory, "dist", "bundle.js");
+    bundleSha256 = sha256File(bundlePath);
+    if (gitDirty(repoRoot)) warnings.push("Weaver working tree contains uncommitted changes; provenance names the checkout commit.");
+    if (gitDirty(join(repoRoot, "runtime", "native-sdk"))) warnings.push("Native SDK working tree contains uncommitted changes; provenance names the checkout commit.");
+    unavailableProviders = bundled.manifest.subscribe.filter((provider) => provider !== "time");
+    if (unavailableProviders.length > 0 && options.providerFixture === undefined) {
+      throw new CaptureInputFailure(
+        "CaptureProviderUnavailable",
+        `provide recorded input for: ${unavailableProviders.join(", ")}`,
+        `rerun with --provider-fixture <file> containing those provider frames`,
+      );
+    }
+    if (options.providerFixture) validateCaptureProviderFixture(options.providerFixture, bundled.manifest.subscribe);
+
+    const environment: NodeJS.ProcessEnv = {
+      ...process.env,
+      WEAVER_CAPTURE_STATE_ROOT: captureRoot,
+      NATIVE_SDK_CAPTURE_IMAGE: temporaryImage,
+      NATIVE_SDK_CAPTURE_SNAPSHOT: temporarySnapshot,
+      NATIVE_SDK_CAPTURE_RESULT: nativeResultPath,
+      WEAVER_CAPTURE_CLOCK: chosenClock,
+      WEAVER_CAPTURE_CLOCK_EPOCH_MS: String(Date.parse(chosenClock)),
+    };
+    delete environment.WEAVER_HOST_PIPE;
+    delete environment.WEAVER_HOST_ENDPOINT;
+    delete environment.WEAVER_ART_CACHE;
+    delete environment.WEAVER_BACKEND_FILE;
+    delete environment.WEAVER_CAPTURE_PROVIDER_FIXTURE;
+    delete environment.NATIVE_SDK_CAPTURE_ACTION_FILE;
+    delete environment.NATIVE_SDK_CAPTURE_SESSION_JOURNAL;
+    delete environment.NATIVE_SDK_SESSION_RECORD;
+    delete environment.NATIVE_SDK_SESSION_REPLAY;
+    if (options.actionFile) environment.NATIVE_SDK_CAPTURE_ACTION_FILE = options.actionFile;
+    if (options.providerFixture) environment.WEAVER_CAPTURE_PROVIDER_FIXTURE = options.providerFixture;
+    if (options.sessionJournal) environment.NATIVE_SDK_CAPTURE_SESSION_JOURNAL = options.sessionJournal;
+
+    const spawnStart = nowMicroseconds();
+    const child = spawnSync(runtimeExecutable, [join(directory, "dist")], {
+      cwd: repoRoot,
+      env: environment,
+      stdio: ["ignore", "ignore", "inherit"],
+      windowsHide: true,
+    });
+    spawnUs = nowMicroseconds() - spawnStart;
+    if (existsSync(nativeResultPath)) {
+      nativeResult = JSON.parse(readFileSync(nativeResultPath, "utf8")) as NativeCaptureResult;
+    }
+    if (child.error) throw child.error;
+    if (child.status !== 0 || nativeResult?.status !== "ok") {
+      if (nativeResult?.error) throw new CaptureInputFailure(
+        nativeResult.error.name,
+        nativeResult.error.ask,
+        nativeResult.error.remedy,
+        nativeResult.error.candidates,
+      );
+      throw new CaptureInputFailure(
+        "CaptureRuntimeFailed",
+        `inspect the runtime diagnostic above (exit ${child.status ?? "signal"})`,
+        "fix the named widget or runtime failure, then rerun the same capture command",
+      );
+    }
+    if (!nativeResult.output || !nativeResult.renderer || !nativeResult.pending || !nativeResult.timingUs) {
+      throw new Error("capture runtime returned an incomplete native-sdk.capture.v1 result");
+    }
+    if (!existsSync(temporaryImage) || !existsSync(temporarySnapshot)) {
+      throw new Error("capture runtime reported success without both PNG and semantic snapshot artifacts");
+    }
+
+    warnings.push(...(nativeResult.warnings ?? []));
+    const nativeRenderer = nativeResult.renderer;
+    const nativeOutput = nativeResult.output;
+    const nativePending = nativeResult.pending;
+    const nativeTiming = nativeResult.timingUs;
+    const receipt: CaptureReceipt = {
+      schema: "weaver.capture.v1",
+      status: "ok",
+      provenance: {
+        weaverCommit: gitCommit(repoRoot),
+        nativeSdkCommit: gitCommit(join(repoRoot, "runtime", "native-sdk")),
+        bundleSha256,
+        platform: `${process.platform}-headless-${nativeRenderer.textMeasurement}`,
+      },
+      output: {
+        image: options.out,
+        snapshot,
+        widthPx: nativeOutput.widthPx,
+        heightPx: nativeOutput.heightPx,
+        scale: 1,
+        pngBytes: nativeOutput.pngBytes,
+      },
+      renderer: nativeRenderer,
+      pending: nativePending,
+      timingUs: {
+        bundle: bundleUs,
+        spawn: spawnUs,
+        startup: nativeTiming.startup,
+        render: nativeTiming.render,
+        encode: nativeTiming.encode,
+        write: nativeTiming.write,
+        total: 0,
+      },
+      inputs: {
+        clock: chosenClock,
+        storage: "isolated-empty",
+        ...(options.actionFile ? { actionFileSha256: sha256File(options.actionFile) } : {}),
+        ...(options.providerFixture ? { providerFixtureSha256: sha256File(options.providerFixture) } : {}),
+        ...(options.sessionJournal ? { sessionJournalSha256: sha256File(options.sessionJournal) } : {}),
+      },
+      warnings,
+    };
+    const publishStart = nowMicroseconds();
+    const imageBytes = readFileSync(temporaryImage);
+    const snapshotBytes = readFileSync(temporarySnapshot);
+    receipt.timingUs.write += nowMicroseconds() - publishStart;
+    receipt.timingUs.total = nowMicroseconds() - commandStart;
+    const receiptBytes = Buffer.from(`${JSON.stringify(receipt, null, 2)}\n`, "utf8");
+    publishCaptureArtifacts([
+      { path: options.out, bytes: imageBytes },
+      { path: snapshot, bytes: snapshotBytes },
+      { path: receiptPath, bytes: receiptBytes },
+    ]);
+    process.stdout.write(`${JSON.stringify(receipt)}\n`);
+  } catch (error) {
+    const named = error instanceof CaptureInputFailure
+      ? error
+      : new CaptureInputFailure("CaptureFailed", firstFailureLine(error), "fix the named failure, then rerun the same capture command");
+    const receipt = failedCaptureReceipt({
+      options,
+      snapshot,
+      chosenClock,
+      bundleSha256,
+      bundleUs,
+      spawnUs,
+      commandStart,
+      nativeResult,
+      unavailableProviders,
+      warnings,
+      error: named,
+    });
+    process.stdout.write(`${JSON.stringify(receipt)}\n`);
+    process.stderr.write(`weaver capture failed: ${named.name}: ${named.ask}\nremedy: ${named.remedy}\n`);
+    process.exitCode = 1;
+  } finally {
+    rmSync(captureRoot, { recursive: true, force: true });
+  }
+}
+
+class CaptureInputFailure extends Error {
+  constructor(readonly name: string, readonly ask: string, readonly remedy: string, readonly candidates?: CaptureCandidate[]) {
+    super(ask);
+  }
+}
+
+function failedCaptureReceipt(input: {
+  options: CaptureOptions;
+  snapshot: string;
+  chosenClock: string;
+  bundleSha256: string;
+  bundleUs: number;
+  spawnUs: number;
+  commandStart: number;
+  nativeResult?: NativeCaptureResult;
+  unavailableProviders: string[];
+  warnings: string[];
+  error: CaptureInputFailure;
+}): CaptureReceipt {
+  const renderer = input.nativeResult?.renderer;
+  const output = input.nativeResult?.output;
+  const pending = input.nativeResult?.pending;
+  const timing = input.nativeResult?.timingUs;
+  return {
+    schema: "weaver.capture.v1",
+    status: "error",
+    provenance: {
+      weaverCommit: gitCommit(repoRoot),
+      nativeSdkCommit: gitCommit(join(repoRoot, "runtime", "native-sdk")),
+      bundleSha256: input.bundleSha256,
+      platform: `${process.platform}-headless-${renderer?.textMeasurement ?? captureTextMeasurement()}`,
+    },
+    output: {
+      image: input.options.out,
+      snapshot: input.snapshot,
+      widthPx: output?.widthPx ?? 0,
+      heightPx: output?.heightPx ?? 0,
+      scale: 1,
+      pngBytes: output?.pngBytes ?? 0,
+    },
+    renderer: renderer ?? {
+      pixels: "reference",
+      textMeasurement: captureTextMeasurement(),
+      eventsDriven: [], framesDriven: 0, retainedRevision: 0, commands: 0, nodes: 0, images: 0, fonts: 0, pixelsDifferentFromClear: 0,
+    },
+    pending: pending ?? { timers: 0, fetches: 0, images: 0, providers: input.unavailableProviders, frameRequests: 0 },
+    timingUs: {
+      bundle: input.bundleUs,
+      spawn: input.spawnUs,
+      startup: timing?.startup ?? 0,
+      render: timing?.render ?? 0,
+      encode: timing?.encode ?? 0,
+      write: timing?.write ?? 0,
+      total: nowMicroseconds() - input.commandStart,
+    },
+    inputs: {
+      clock: input.chosenClock,
+      storage: "isolated-empty",
+      ...(input.options.actionFile && existsSync(input.options.actionFile) ? { actionFileSha256: sha256File(input.options.actionFile) } : {}),
+      ...(input.options.providerFixture && existsSync(input.options.providerFixture) ? { providerFixtureSha256: sha256File(input.options.providerFixture) } : {}),
+      ...(input.options.sessionJournal && existsSync(input.options.sessionJournal) ? { sessionJournalSha256: sha256File(input.options.sessionJournal) } : {}),
+    },
+    warnings: [...input.warnings, ...(input.nativeResult?.warnings ?? [])],
+    error: {
+      name: input.error.name,
+      ask: input.error.ask,
+      remedy: input.error.remedy,
+      ...(input.error.candidates ? { candidates: input.error.candidates } : {}),
+    },
+  };
+}
+
+function validateCaptureProviderFixture(path: string, subscriptions: RuntimeManifest["subscribe"]): void {
+  let document: unknown;
+  try {
+    document = JSON.parse(readFileSync(path, "utf8"));
+  } catch {
+    throw new CaptureInputFailure(
+      "CaptureProviderFixtureInvalid",
+      `provider fixture is not valid JSON: ${path}`,
+      "supply a weaver.provider-fixture.v1 JSON object and rerun capture",
+    );
+  }
+  if (!isRecord(document) || document.schema !== "weaver.provider-fixture.v1" || !Array.isArray(document.frames)) {
+    throw new CaptureInputFailure(
+      "CaptureProviderFixtureInvalid",
+      `provider fixture must use schema weaver.provider-fixture.v1 with a frames array: ${path}`,
+      "fix the fixture schema and rerun capture",
+    );
+  }
+  const declared = new Set<string>(subscriptions.filter((provider) => provider !== "time"));
+  const supplied = new Set<string>();
+  for (const [index, frame] of document.frames.entries()) {
+    if (!isRecord(frame) || typeof frame.provider !== "string" || !("value" in frame)) {
+      throw new CaptureInputFailure(
+        "CaptureProviderFixtureInvalid",
+        `provider fixture frame ${index} must contain a string provider and a value`,
+        "fix the named frame and rerun capture",
+      );
+    }
+    if (!declared.has(frame.provider)) {
+      throw new CaptureInputFailure(
+        "CaptureProviderFixtureUndeclared",
+        `provider fixture frame ${index} names undeclared provider ${JSON.stringify(frame.provider)}`,
+        `declare and subscribe to that provider in the widget, or remove the frame`,
+      );
+    }
+    supplied.add(frame.provider);
+  }
+  const missing = [...declared].filter((provider) => !supplied.has(provider));
+  if (missing.length > 0) {
+    throw new CaptureInputFailure(
+      "CaptureProviderFixtureMissingProvider",
+      `provider fixture has no recorded frame for: ${missing.join(", ")}`,
+      "add frames for every subscribed non-time provider and rerun capture",
+    );
+  }
+}
+
+function captureTextMeasurement(): "estimator" | "coretext" {
+  return process.platform === "darwin" ? "coretext" : "estimator";
+}
+
+function publishCaptureArtifacts(artifacts: { path: string; bytes: Uint8Array }[]): void {
+  const staged: { path: string; temporary: string; backup: string; hadPrevious: boolean; published: boolean }[] = [];
+  try {
+    for (const { path, bytes } of artifacts) {
+      mkdirSync(dirname(path), { recursive: true });
+      const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
+      const backup = `${path}.${process.pid}.${randomUUID()}.backup`;
+      staged.push({ path, temporary, backup, hadPrevious: existsSync(path), published: false });
+      writeFileSync(temporary, bytes);
+    }
+    for (const artifact of staged) {
+      if (artifact.hadPrevious) renameSync(artifact.path, artifact.backup);
+      try {
+        renameSync(artifact.temporary, artifact.path);
+        artifact.published = true;
+      } catch (error) {
+        if (artifact.hadPrevious && existsSync(artifact.backup)) renameSync(artifact.backup, artifact.path);
+        throw error;
+      }
+    }
+    for (const artifact of staged) if (artifact.hadPrevious) rmSync(artifact.backup, { force: true });
+  } catch (error) {
+    for (const artifact of [...staged].reverse()) {
+      if (artifact.published) rmSync(artifact.path, { force: true });
+      if (artifact.hadPrevious && existsSync(artifact.backup)) renameSync(artifact.backup, artifact.path);
+    }
+    throw error;
+  } finally {
+    for (const artifact of staged) {
+      rmSync(artifact.temporary, { force: true });
+      rmSync(artifact.backup, { force: true });
+    }
+  }
+}
+
+function sha256File(path: string): string {
+  return createHash("sha256").update(readFileSync(path)).digest("hex");
+}
+
+function gitCommit(directory: string): string {
+  const result = spawnSync("git", ["rev-parse", "HEAD"], { cwd: directory, encoding: "utf8", windowsHide: true });
+  return result.status === 0 ? result.stdout.trim() : "unknown";
+}
+
+function gitDirty(directory: string): boolean {
+  return spawnSync("git", ["status", "--porcelain", "--untracked-files=no"], { cwd: directory, encoding: "utf8", windowsHide: true }).stdout.trim().length > 0;
+}
+
+function nowMicroseconds(): number {
+  return Number(process.hrtime.bigint() / 1000n);
 }
 
 async function compileWidgetBundle(project: SourceProject, outfile: string): Promise<Uint8Array> {

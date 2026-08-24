@@ -888,8 +888,15 @@ fn rejectAndResetFetch(ctx: *c.JSContext, slot: *FetchSlot, message: []const u8)
 }
 
 pub fn hasActiveFetches(bridge_state: *const State) bool {
-    for (&bridge_state.fetches) |*slot| if (slot.active) return true;
-    return false;
+    return activeFetchCount(bridge_state) != 0;
+}
+
+pub fn activeFetchCount(bridge_state: *const State) usize {
+    var count: usize = 0;
+    for (&bridge_state.fetches) |*slot| if (slot.active) {
+        count += 1;
+    };
+    return count;
 }
 
 /// Resolve completed worker slots on the QuickJS/main-loop thread. The SDK's

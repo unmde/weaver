@@ -206,7 +206,7 @@ native.onCanvasResize((id, width, height) => runWidgetCallback("canvas resize ca
   binding.width = width;
   binding.height = height;
   binding.ctx = createCanvasContext(binding);
-  drawCanvasFrame(id, Date.now() / 1000);
+  drawCanvasFrame(id, captureNowMilliseconds() / 1000);
 }));
 
 export function h(type: ElementType, props: Record<string, unknown> | null, ...children: WidgetChild[]): VNode {
@@ -740,18 +740,18 @@ function updateCanvasBinding(id: number, onFrame: (ctx: CanvasCtx, frame: Canvas
   }
   binding.fps = fps;
   if (fps === 0) {
-    if (mounted) drawCanvasFrame(id, Date.now() / 1000);
+    if (mounted) drawCanvasFrame(id, captureNowMilliseconds() / 1000);
     return;
   }
   if (fps === undefined) {
-    drawCanvasFrame(id, Date.now() / 1000);
+    drawCanvasFrame(id, captureNowMilliseconds() / 1000);
     return;
   }
   if (fps >= MAX_CANVAS_FPS) {
     if (!binding.surfaceClock) {
       native.onCanvasFrame(id, (timestampSeconds) => drawCanvasFrame(id, timestampSeconds));
       binding.surfaceClock = true;
-      drawCanvasFrame(id, Date.now() / 1000);
+      drawCanvasFrame(id, captureNowMilliseconds() / 1000);
     }
     return;
   }
@@ -763,8 +763,8 @@ function updateCanvasBinding(id: number, onFrame: (ctx: CanvasCtx, frame: Canvas
     // clock and made a requested 30 Hz canvas contend at ~50 Hz.
     const interval = Math.max(1, Math.round(1000 / fps));
     binding.timerId = native.setInterval(interval);
-    native.onTimer(binding.timerId, (timestampSeconds) => drawCanvasFrame(id, timestampSeconds ?? Date.now() / 1000));
-    drawCanvasFrame(id, Date.now() / 1000);
+    native.onTimer(binding.timerId, (timestampSeconds) => drawCanvasFrame(id, timestampSeconds ?? captureNowMilliseconds() / 1000));
+    drawCanvasFrame(id, captureNowMilliseconds() / 1000);
   }
 }
 
@@ -797,7 +797,7 @@ function drawCanvasFrame(id: number, nativeTimestamp?: number): void {
     }
     const t = typeof nativeTimestamp === "number" && Number.isFinite(nativeTimestamp) && nativeTimestamp > 0
       ? nativeTimestamp
-      : Date.now() / 1000;
+      : captureNowMilliseconds() / 1000;
     const dt = binding.lastT === undefined ? 0 : Math.max(0, t - binding.lastT);
     binding.lastT = t;
     binding.batchLength = 0;
@@ -1126,8 +1126,12 @@ Object.defineProperty(globalThis, "__weaverHotSwapAccepted", { value: hotSwapAcc
 const weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
 const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"] as const;
 function pad2(value: number): string { return String(value).padStart(2, "0"); }
+function captureNowMilliseconds(): number {
+  const captured = (globalThis as typeof globalThis & { __weaverCaptureNowMs?: unknown }).__weaverCaptureNowMs;
+  return typeof captured === "number" && Number.isFinite(captured) ? captured : Date.now();
+}
 function currentTime(): TimeData {
-  const now = new Date();
+  const now = new Date(captureNowMilliseconds());
   return {
     hh: pad2(now.getHours()), mm: pad2(now.getMinutes()), ss: pad2(now.getSeconds()),
     weekday: weekdays[now.getDay()], month: months[now.getMonth()], day: now.getDate(),

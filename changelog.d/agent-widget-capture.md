@@ -1,0 +1,1 @@
+feature: **Agent widget capture**: `weaver capture` now renders a source widget into an atomic PNG, semantic snapshot, and machine-readable receipt without starting Weaver's desktop host; fixed clocks, semantic action files, provider fixtures, and verified Native SDK session journals make interactive captures reproducible in CI.

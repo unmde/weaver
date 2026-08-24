@@ -72,6 +72,26 @@ test("CLI failures are emitted as one actionable block", () => {
   assert.match(result.stderr, /^weaver failed \(1 error\)\n- Usage:/);
 });
 
+test("capture requires one PNG output and rejects competing event sources", () => {
+  const missingOutput = spawnSync(process.execPath, ["cli/dist/index.js", "capture", "examples/clock"], { encoding: "utf8" });
+  assert.equal(missingOutput.status, 1);
+  assert.match(missingOutput.stderr, /weaver capture --out must name a \.png file/);
+  assert.match(missingOutput.stderr, /Usage: weaver capture <directory> --out <file\.png>/);
+
+  const competingSources = spawnSync(process.execPath, [
+    "cli/dist/index.js", "capture", "examples/clock", "--out", "clock.png",
+    "--action-file", "actions.json", "--session-journal", "session.nsjournal",
+  ], { encoding: "utf8" });
+  assert.equal(competingSources.status, 1);
+  assert.match(competingSources.stderr, /accepts an action file or a session journal, not both/);
+
+  const invalidClock = spawnSync(process.execPath, [
+    "cli/dist/index.js", "capture", "examples/clock", "--out", "clock.png", "--clock", "tomorrow-ish",
+  ], { encoding: "utf8" });
+  assert.equal(invalidClock.status, 1);
+  assert.match(invalidClock.stderr, /CaptureClockInvalid: "tomorrow-ish" is not an ISO-8601 instant/);
+});
+
 test("origin matching is HTTPS-only and exact-host", () => {
   assert.equal(origin.originHost("https://api.example.com/v1"), "api.example.com");
   assert.equal(origin.originHost("http://api.example.com/v1"), null);

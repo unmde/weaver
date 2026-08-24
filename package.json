@@ -15,6 +15,7 @@
     "build": "node cli/build.mjs",
     "postinstall": "npm run build",
     "test": "node --test test/all.test.mjs",
+    "test:capture": "node test/capture-smoke.mjs",
     "typecheck": "tsc -p sdk/tsconfig.json --noEmit && tsc -p cli/tsconfig.json --noEmit"
   },
   "devDependencies": {
