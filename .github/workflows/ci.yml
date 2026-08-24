@@ -5,17 +5,22 @@ on:
     branches: [master]
   pull_request:
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   gate:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           submodules: recursive
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
+          cache: npm
 
       - name: Install workspaces
         run: npm ci
@@ -28,33 +33,19 @@ jobs:
       - name: Release contract audit
         run: npm run audit:release
 
-      - name: Install Zig 0.16.0
-        shell: pwsh
-        run: |
-          Invoke-WebRequest -Uri "https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip" -OutFile zig.zip
-          Expand-Archive zig.zip -DestinationPath "$env:RUNNER_TEMP\zig"
-          Add-Content $env:GITHUB_PATH "$env:RUNNER_TEMP\zig\zig-x86_64-windows-0.16.0"
+  windows-cli:
+    name: Windows CLI and portable contracts
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
 
-      - name: Build runtime (ReleaseFast)
-        working-directory: runtime
-        run: zig build -Doptimize=ReleaseFast -Dweb-layer=exclude -Dtrace=off
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
 
-      - name: Runtime tests
-        working-directory: runtime
-        run: zig build test -Doptimize=ReleaseFast -Dweb-layer=exclude -Dtrace=off
-
-      - name: Build and test host
-        working-directory: host
-        run: |
-          zig build -Doptimize=ReleaseFast
-          zig build test -Doptimize=ReleaseFast
-
-      - name: Portable install ownership smoke
-        shell: pwsh
-        run: .\cli\test\install-smoke.ps1
-
-      - name: Cross-platform artifact lifecycle smoke
-        run: node cli/test/install-smoke.mjs
+      - name: Install workspaces
+        run: npm ci
 
       - name: Portable example surface gate
         run: node cli/test/example-surface-smoke.mjs
@@ -70,27 +61,68 @@ jobs:
           if (-not (Test-Path ciclock\dist\bundle.js)) { throw "bundle missing" }
           if (-not (Test-Path ciclock\dist\widget.json)) { throw "manifest missing" }
 
-  macos-headless:
-    name: macOS headless (${{ matrix.arch }})
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: apple-silicon
-            runner: macos-15
-            zig_arch: aarch64
-          - arch: intel
-            runner: macos-15-intel
-            zig_arch: x86_64
-    runs-on: ${{ matrix.runner }}
+  windows-runtime:
+    name: Windows native runtime + host
+    runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           submodules: recursive
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
+          cache: npm
+
+      - name: Install workspaces
+        run: npm ci
+
+      - uses: ./.github/actions/setup-zig
+
+      - name: Restore Windows native build cache
+        uses: actions/cache@v5
+        with:
+          path: |
+            ${{ runner.temp }}/zig-global-cache
+            runtime/.zig-cache
+            host/.zig-cache
+          key: zig-build-0.16.0-${{ runner.os }}-${{ runner.arch }}-native-${{ hashFiles('runtime/build.zig', 'runtime/build.zig.zon', 'runtime/src/**', 'runtime/vendor/**', 'runtime/native-sdk/build.zig', 'runtime/native-sdk/build.zig.zon', 'runtime/native-sdk/src/**', 'host/build.zig', 'host/build.zig.zon', 'host/src/**', 'host/macos/**', 'host/assets/**') }}
+          restore-keys: |
+            zig-build-0.16.0-${{ runner.os }}-${{ runner.arch }}-native-
+
+      - name: Build runtime (ReleaseFast)
+        working-directory: runtime
+        run: zig build -Doptimize=ReleaseFast -Dweb-layer=exclude -Dtrace=off
+
+      - name: Runtime tests
+        working-directory: runtime
+        run: zig build test -Doptimize=ReleaseFast -Dweb-layer=exclude -Dtrace=off
+
+      - name: Build and test Windows host
+        working-directory: host
+        run: |
+          zig build -Doptimize=ReleaseFast
+          zig build test -Doptimize=ReleaseFast
+
+      - name: Portable install ownership smoke
+        shell: pwsh
+        run: .\cli\test\install-smoke.ps1
+
+      - name: Cross-platform artifact lifecycle smoke
+        run: node cli/test/install-smoke.mjs
+
+  macos-headless:
+    name: macOS headless (apple-silicon)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
 
       - name: Install workspaces
         run: npm ci
@@ -103,13 +135,56 @@ jobs:
       - name: Release contract audit
         run: npm run audit:release
 
-      - name: Install Zig 0.16.0
+      - uses: ./.github/actions/setup-zig
+
+      - name: Restore host build cache
+        uses: actions/cache@v5
+        with:
+          path: |
+            ${{ runner.temp }}/zig-global-cache
+            host/.zig-cache
+          key: zig-build-0.16.0-${{ runner.os }}-${{ runner.arch }}-host-${{ hashFiles('host/build.zig', 'host/build.zig.zon', 'host/src/**', 'host/macos/**', 'host/assets/**') }}
+          restore-keys: |
+            zig-build-0.16.0-${{ runner.os }}-${{ runner.arch }}-host-
+
+      - name: Build and test macOS host
+        working-directory: host
         run: |
-          curl --fail --location --retry 3 \
-            "https://ziglang.org/download/0.16.0/zig-${{ matrix.zig_arch }}-macos-0.16.0.tar.xz" \
-            --output "$RUNNER_TEMP/zig.tar.xz"
-          tar -xf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP"
-          echo "$RUNNER_TEMP/zig-${{ matrix.zig_arch }}-macos-0.16.0" >> "$GITHUB_PATH"
+          zig build -Doptimize=ReleaseFast
+          zig build test -Doptimize=ReleaseFast
+          codesign --verify --deep --strict zig-out/Weaverd.app
+          test "$(plutil -extract CFBundleIdentifier raw zig-out/Weaverd.app/Contents/Info.plist)" = "com.sunkenintime.weaver.host"
+          test "$(otool -l zig-out/Weaverd.app/Contents/MacOS/weaverd | awk '/LC_BUILD_VERSION/{found=1} found&&/minos/{print $2; exit}')" = "14.2"
+          ! strings zig-out/Weaverd.app/Contents/MacOS/weaverd | grep -q WEAVER_AUDIO_TEST_CONTROL
+
+      - name: Portable example surface gate
+        run: node cli/test/example-surface-smoke.mjs
+
+      - name: Public media API decision probe
+        run: spikes/macos-media-observation/build.sh
+
+      - name: Vendored MediaRemote adapter static audit
+        run: spikes/macos-mediaremote-adapter/static-audit.sh
+
+  macos-runtime:
+    name: macOS runtime (apple-silicon)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - uses: ./.github/actions/setup-zig
+
+      - name: Restore runtime build cache
+        uses: actions/cache@v5
+        with:
+          path: |
+            ${{ runner.temp }}/zig-global-cache
+            runtime/.zig-cache
+          key: zig-build-0.16.0-${{ runner.os }}-${{ runner.arch }}-runtime-${{ hashFiles('runtime/build.zig', 'runtime/build.zig.zon', 'runtime/src/**', 'runtime/vendor/**', 'runtime/native-sdk/build.zig', 'runtime/native-sdk/build.zig.zon', 'runtime/native-sdk/src/**') }}
+          restore-keys: |
+            zig-build-0.16.0-${{ runner.os }}-${{ runner.arch }}-runtime-
 
       - name: Runtime platform-service seam
         working-directory: runtime
@@ -123,75 +198,80 @@ jobs:
         working-directory: runtime
         run: zig build test
 
-      - name: Build and test macOS host
-        working-directory: host
-        run: |
-          zig build -Doptimize=ReleaseFast
-          zig build test -Doptimize=ReleaseFast
-          codesign --verify --deep --strict zig-out/Weaverd.app
-          test "$(plutil -extract CFBundleIdentifier raw zig-out/Weaverd.app/Contents/Info.plist)" = "com.sunkenintime.weaver.host"
-          test "$(otool -l zig-out/Weaverd.app/Contents/MacOS/weaverd | awk '/LC_BUILD_VERSION/{found=1} found&&/minos/{print $2; exit}')" = "14.2"
-          ! strings zig-out/Weaverd.app/Contents/MacOS/weaverd | grep -q WEAVER_AUDIO_TEST_CONTROL
-
-      - name: Cross-platform artifact lifecycle smoke
-        run: node cli/test/install-smoke.mjs
-
-      - name: Portable example surface gate
-        run: node cli/test/example-surface-smoke.mjs
-
-      - name: macOS daemon non-visual lifecycle smoke
-        run: node cli/test/macos-host-control-smoke.mjs
-
-      - name: Public media API decision probe
-        run: spikes/macos-media-observation/build.sh
-
-      - name: Vendored MediaRemote adapter static audit
-        run: spikes/macos-mediaremote-adapter/static-audit.sh
-
-      - name: Native SDK stock profile
-        working-directory: runtime/native-sdk
-        run: zig build test
-
-      - name: Native SDK Weaver widget profile
-        working-directory: runtime/native-sdk
-        run: zig build test -Dwidget-profile=true
-
-  macos-session:
-    name: macOS session (apple-silicon)
-    needs: macos-headless
+  macos-native-sdk:
+    name: macOS Native SDK (${{ matrix.profile }})
     runs-on: macos-15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - profile: stock
+            arguments: ""
+          - profile: widget
+            arguments: -Dwidget-profile=true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           submodules: recursive
 
-      - uses: actions/setup-node@v4
+      - uses: ./.github/actions/setup-zig
+
+      - name: Restore Native SDK build cache
+        uses: actions/cache@v5
+        with:
+          path: |
+            ${{ runner.temp }}/zig-global-cache
+            runtime/native-sdk/.zig-cache
+          key: zig-build-0.16.0-${{ runner.os }}-${{ runner.arch }}-native-sdk-${{ matrix.profile }}-${{ hashFiles('runtime/native-sdk/build.zig', 'runtime/native-sdk/build.zig.zon', 'runtime/native-sdk/src/**') }}
+          restore-keys: |
+            zig-build-0.16.0-${{ runner.os }}-${{ runner.arch }}-native-sdk-${{ matrix.profile }}-
+
+      - name: Test Native SDK ${{ matrix.profile }} profile
+        working-directory: runtime/native-sdk
+        run: zig build test ${{ matrix.arguments }}
+
+  macos-session:
+    name: macOS session (apple-silicon)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
+          cache: npm
 
       - name: Clean-checkout bootstrap
         run: npm ci
 
-      - name: Install Zig 0.16.0
-        run: |
-          curl --fail --location --retry 3 \
-            "https://ziglang.org/download/0.16.0/zig-aarch64-macos-0.16.0.tar.xz" \
-            --output "$RUNNER_TEMP/zig.tar.xz"
-          tar -xf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP"
-          echo "$RUNNER_TEMP/zig-aarch64-macos-0.16.0" >> "$GITHUB_PATH"
+      - uses: ./.github/actions/setup-zig
 
-      - name: Clean-checkout Quickstart builds
-        run: |
-          (cd runtime && zig build -Doptimize=ReleaseFast)
-          (cd host && zig build -Doptimize=ReleaseFast)
+      - name: Restore session build cache
+        uses: actions/cache@v5
+        with:
+          path: |
+            ${{ runner.temp }}/zig-global-cache
+            runtime/.zig-cache
+            host/.zig-cache
+          key: zig-build-0.16.0-${{ runner.os }}-${{ runner.arch }}-session-${{ hashFiles('runtime/build.zig', 'runtime/build.zig.zon', 'runtime/src/**', 'runtime/vendor/**', 'runtime/native-sdk/build.zig', 'runtime/native-sdk/build.zig.zon', 'runtime/native-sdk/src/**', 'host/build.zig', 'host/build.zig.zon', 'host/src/**', 'host/macos/**', 'host/assets/**') }}
+          restore-keys: |
+            zig-build-0.16.0-${{ runner.os }}-${{ runner.arch }}-session-
 
       - name: Record hosted display capability
         run: system_profiler SPDisplaysDataType
 
-      - name: Rebuild host and runtime with automation seams for the smoke
+      - name: Build host and runtime with automation seams for the smoke
         run: |
           (cd runtime && zig build -Doptimize=ReleaseFast -Dautomation-seam=true)
           (cd host && zig build -Doptimize=ReleaseFast -Dautomation-seam=true)
+
+      - name: macOS daemon non-visual lifecycle smoke
+        run: node cli/test/macos-host-control-smoke.mjs
+
+      - name: Cross-platform artifact lifecycle smoke
+        run: node cli/test/install-smoke.mjs
 
       - name: Conjure, real Widget, provider, crash, and teardown gate
         run: node cli/test/macos-host-smoke.mjs
