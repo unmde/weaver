@@ -624,6 +624,23 @@ export default widget({ name: "Accessible Name", size: [160, 80] }, () => (${tre
     const named = spawnSync(process.execPath, [cli, "check", widget], { encoding: "utf8" });
     assert.equal(named.status, 0, named.stderr);
 
+    writeFileSync(sourcePath, source(`<column>
+      <button {...{ accessibilityLabel: "Play" }} onPress={() => {}}><icon name="play" /></button>
+      <slider {...{ accessibilityLabel: "Level" }} value={1} max={10} onChange={() => {}} />
+    </column>`));
+    const spreadNamed = spawnSync(process.execPath, [cli, "check", widget], { encoding: "utf8" });
+    assert.equal(spreadNamed.status, 0, spreadNamed.stderr);
+
+    writeFileSync(sourcePath, source(`<slider {...{ value: 1 }} max={10} onChange={() => {}} />`));
+    const unrelatedSpread = spawnSync(process.execPath, [cli, "check", widget], { encoding: "utf8" });
+    assert.equal(unrelatedSpread.status, 1);
+    assert.match(unrelatedSpread.stderr, /ActionableAccessibleNameRequired: <slider> has no accessible name/);
+
+    writeFileSync(sourcePath, source(`<button {...{ accessibilityLabel: "   " }} onPress={() => {}} />`));
+    const blankSpread = spawnSync(process.execPath, [cli, "check", widget], { encoding: "utf8" });
+    assert.equal(blankSpread.status, 1);
+    assert.match(blankSpread.stderr, /accessibilityLabel is blank/);
+
     writeFileSync(sourcePath, source(`<button accessibilityLabel="   " onPress={() => {}} />`));
     const blank = spawnSync(process.execPath, [cli, "check", widget], { encoding: "utf8" });
     assert.equal(blank.status, 1);
