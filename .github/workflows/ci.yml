@@ -203,16 +203,8 @@ jobs:
         run: zig build test
 
   macos-native-sdk:
-    name: macOS Native SDK (${{ matrix.profile }})
+    name: macOS Native SDK profiles
     runs-on: blacksmith-6vcpu-macos-15
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - profile: stock
-            arguments: ""
-          - profile: widget
-            arguments: -Dwidget-profile=true
     steps:
       - uses: actions/checkout@v6
         with:
@@ -226,13 +218,18 @@ jobs:
           path: |
             ${{ runner.temp }}/zig-global-cache
             runtime/native-sdk/.zig-cache
-          key: zig-build-0.16.0-${{ runner.os }}-${{ runner.arch }}-native-sdk-${{ matrix.profile }}-${{ hashFiles('runtime/native-sdk/build.zig', 'runtime/native-sdk/build.zig.zon', 'runtime/native-sdk/src/**') }}
+          key: zig-build-0.16.0-${{ runner.os }}-${{ runner.arch }}-native-sdk-profiles-${{ hashFiles('runtime/native-sdk/build.zig', 'runtime/native-sdk/build.zig.zon', 'runtime/native-sdk/src/**') }}
           restore-keys: |
-            zig-build-0.16.0-${{ runner.os }}-${{ runner.arch }}-native-sdk-${{ matrix.profile }}-
+            zig-build-0.16.0-${{ runner.os }}-${{ runner.arch }}-native-sdk-profiles-
+            zig-build-0.16.0-${{ runner.os }}-${{ runner.arch }}-native-sdk-
 
-      - name: Test Native SDK ${{ matrix.profile }} profile
+      - name: Test Native SDK stock profile
         working-directory: runtime/native-sdk
-        run: zig build test ${{ matrix.arguments }}
+        run: zig build test
+
+      - name: Test Native SDK widget profile
+        working-directory: runtime/native-sdk
+        run: zig build test -Dwidget-profile=true
 
   macos-session:
     name: macOS session (apple-silicon)
