@@ -98,6 +98,9 @@ jobs:
           '@
           Set-Content $installerPath $installer
           $startedAt = [DateTime]::UtcNow
+          # The Actions runner terminates child processes that retain this marker
+          # when a step exits. This installer intentionally spans later steps.
+          Remove-Item Env:RUNNER_TRACKING_ID -ErrorAction SilentlyContinue
           $process = Start-Process -FilePath (Get-Command pwsh).Source `
             -ArgumentList @('-NoLogo', '-NoProfile', '-NonInteractive', '-File', $installerPath) `
             -RedirectStandardOutput $stdoutPath `
