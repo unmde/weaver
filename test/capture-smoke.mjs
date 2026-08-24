@@ -14,6 +14,11 @@ try {
   const clock = capture("clock", "examples/clock");
   assert.deepEqual([clock.output.widthPx, clock.output.heightPx], [240, 110]);
 
+  const resizedClock = capture("clock-resized", "examples/clock", [
+    "--action-file", join(root, "test", "capture", "resize.actions"),
+  ]);
+  assert.deepEqual([resizedClock.output.widthPx, resizedClock.output.heightPx], [320, 180]);
+
   const text = capture("styling-text", "examples/styling-text");
   assert.ok(text.renderer.pixelsDifferentFromClear > 0);
 
@@ -74,7 +79,7 @@ try {
   assert.deepEqual(replayed.renderer.eventsDriven, ["session_journal"]);
   assert.ok(replayed.inputs.sessionJournalSha256);
 
-  process.stdout.write("weaver capture smoke passed: pixels, semantics, actions, providers, isolation, and session replay\n");
+  process.stdout.write("weaver capture smoke passed: pixels, resize, semantics, actions, providers, isolation, and session replay\n");
 } finally {
   rmSync(outputRoot, { recursive: true, force: true });
 }
