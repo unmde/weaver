@@ -79,6 +79,24 @@ jobs:
 
       - uses: ./.github/actions/setup-zig
 
+      - name: Expose bundled Visual C++ runtime
+        shell: pwsh
+        run: |
+          $roots = @(
+            "$env:ProgramFiles\Microsoft Visual Studio",
+            "${env:ProgramFiles(x86)}\Microsoft Visual Studio"
+          ) | Where-Object { Test-Path $_ }
+          $crt = $roots |
+            ForEach-Object {
+              Get-ChildItem $_ -Recurse -Directory -Filter 'Microsoft.VC*.CRT' -ErrorAction SilentlyContinue
+            } |
+            Where-Object { $_.Parent.Name -eq 'x64' } |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+          if (-not $crt) { throw 'Blacksmith Windows image is missing the bundled x64 Visual C++ runtime' }
+          Add-Content $env:GITHUB_PATH $crt.FullName
+          Write-Host "Using Visual C++ runtime from $($crt.FullName)"
+
       - name: Restore Windows native build cache
         uses: actions/cache@v5
         with:

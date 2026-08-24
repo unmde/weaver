@@ -98,6 +98,7 @@ for (const required of [
   "./.github/actions/setup-zig",
   "hashFiles(",
   "windows-runtime:",
+  "Expose bundled Visual C++ runtime",
   "Build and test Windows host",
   "macos-runtime:",
   "macos-native-sdk:",
