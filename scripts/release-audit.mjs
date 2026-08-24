@@ -92,12 +92,13 @@ assert.match(plist, /<key>NSAudioCaptureUsageDescription<\/key>\s*<string>[^<]+<
 const workflow = readFileSync(join(repoRoot, ".github", "workflows", "ci.yml"), "utf8");
 const zigSetupAction = readFileSync(join(repoRoot, ".github", "actions", "setup-zig", "action.yml"), "utf8");
 for (const required of [
-  "windows-latest",
-  "macos-15",
+  "blacksmith-4vcpu-windows-2025",
+  "blacksmith-6vcpu-macos-15",
   "actions/cache@v5",
   "./.github/actions/setup-zig",
   "hashFiles(",
   "windows-runtime:",
+  "Ensure Windows media runtime",
   "Build and test Windows host",
   "macos-runtime:",
   "macos-native-sdk:",

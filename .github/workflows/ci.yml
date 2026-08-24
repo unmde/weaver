@@ -10,29 +10,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  gate:
-    runs-on: blacksmith-4vcpu-windows-2025
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          submodules: recursive
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 22
-          cache: npm
-
-      - name: Install workspaces
-        run: npm ci
-
-      - name: Typecheck + unit tests
-        run: |
-          npm run typecheck
-          npm test
-
-      - name: Release contract audit
-        run: npm run audit:release
-
   windows-cli:
     name: Windows CLI and portable contracts
     runs-on: blacksmith-4vcpu-windows-2025
@@ -79,6 +56,30 @@ jobs:
 
       - uses: ./.github/actions/setup-zig
 
+      - name: Ensure Windows media runtime
+        shell: pwsh
+        run: |
+          $mediaDlls = @('mf.dll', 'mfplat.dll')
+          $missing = $mediaDlls | Where-Object {
+            -not (Test-Path (Join-Path $env:WINDIR "System32\$_"))
+          }
+          if ($missing) {
+            Import-Module ServerManager
+            $result = Install-WindowsFeature -Name Server-Media-Foundation
+            if (-not $result.Success) {
+              throw "Could not install Server-Media-Foundation; missing: $($missing -join ', ')"
+            }
+            if ($result.RestartNeeded -eq 'Yes') {
+              throw 'Server-Media-Foundation requires a runner restart'
+            }
+          }
+          $stillMissing = $mediaDlls | Where-Object {
+            -not (Test-Path (Join-Path $env:WINDIR "System32\$_"))
+          }
+          if ($stillMissing) {
+            throw "Windows media runtime is still missing: $($stillMissing -join ', ')"
+          }
+
       - name: Restore Windows native build cache
         uses: actions/cache@v5
         with:
@@ -86,9 +87,9 @@ jobs:
             ${{ runner.temp }}/zig-global-cache
             runtime/.zig-cache
             host/.zig-cache
-          key: zig-build-0.16.0-${{ runner.os }}-${{ runner.arch }}-native-${{ hashFiles('runtime/build.zig', 'runtime/build.zig.zon', 'runtime/src/**', 'runtime/vendor/**', 'runtime/native-sdk/build.zig', 'runtime/native-sdk/build.zig.zon', 'runtime/native-sdk/src/**', 'host/build.zig', 'host/build.zig.zon', 'host/src/**', 'host/macos/**', 'host/assets/**') }}
+          key: zig-build-v2-0.16.0-blacksmith-${{ runner.os }}-${{ runner.arch }}-native-${{ hashFiles('runtime/build.zig', 'runtime/build.zig.zon', 'runtime/src/**', 'runtime/vendor/**', 'runtime/native-sdk/build.zig', 'runtime/native-sdk/build.zig.zon', 'runtime/native-sdk/src/**', 'host/build.zig', 'host/build.zig.zon', 'host/src/**', 'host/macos/**', 'host/assets/**') }}
           restore-keys: |
-            zig-build-0.16.0-${{ runner.os }}-${{ runner.arch }}-native-
+            zig-build-v2-0.16.0-blacksmith-${{ runner.os }}-${{ runner.arch }}-native-
 
       - name: Build runtime (ReleaseFast)
         working-directory: runtime
@@ -96,7 +97,31 @@ jobs:
 
       - name: Runtime tests
         working-directory: runtime
-        run: zig build test -Doptimize=ReleaseFast -Dweb-layer=exclude -Dtrace=off
+        shell: pwsh
+        run: |
+          zig build test -Doptimize=ReleaseFast -Dweb-layer=exclude -Dtrace=off
+          if ($LASTEXITCODE -eq 0) { exit 0 }
+          $testExit = $LASTEXITCODE
+          $vsRoots = @(
+            "$env:ProgramFiles\Microsoft Visual Studio",
+            "${env:ProgramFiles(x86)}\Microsoft Visual Studio"
+          ) | Where-Object { Test-Path $_ }
+          $dumpbin = $vsRoots |
+            ForEach-Object {
+              Get-ChildItem $_ -Recurse -File -Filter dumpbin.exe -ErrorAction SilentlyContinue
+            } |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+          if ($dumpbin) {
+            Get-ChildItem .zig-cache -Recurse -File -Filter '*.exe' |
+              Sort-Object LastWriteTime -Descending |
+              Select-Object -First 8 |
+              ForEach-Object {
+                Write-Host "Dependencies for $($_.FullName)"
+                & $dumpbin.FullName /DEPENDENTS $_.FullName
+              }
+          }
+          exit $testExit
 
       - name: Build and test Windows host
         working-directory: host
@@ -199,16 +224,8 @@ jobs:
         run: zig build test
 
   macos-native-sdk:
-    name: macOS Native SDK (${{ matrix.profile }})
+    name: macOS Native SDK profiles
     runs-on: blacksmith-6vcpu-macos-15
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - profile: stock
-            arguments: ""
-          - profile: widget
-            arguments: -Dwidget-profile=true
     steps:
       - uses: actions/checkout@v6
         with:
@@ -222,13 +239,18 @@ jobs:
           path: |
             ${{ runner.temp }}/zig-global-cache
             runtime/native-sdk/.zig-cache
-          key: zig-build-0.16.0-${{ runner.os }}-${{ runner.arch }}-native-sdk-${{ matrix.profile }}-${{ hashFiles('runtime/native-sdk/build.zig', 'runtime/native-sdk/build.zig.zon', 'runtime/native-sdk/src/**') }}
+          key: zig-build-0.16.0-${{ runner.os }}-${{ runner.arch }}-native-sdk-profiles-${{ hashFiles('runtime/native-sdk/build.zig', 'runtime/native-sdk/build.zig.zon', 'runtime/native-sdk/src/**') }}
           restore-keys: |
-            zig-build-0.16.0-${{ runner.os }}-${{ runner.arch }}-native-sdk-${{ matrix.profile }}-
+            zig-build-0.16.0-${{ runner.os }}-${{ runner.arch }}-native-sdk-profiles-
+            zig-build-0.16.0-${{ runner.os }}-${{ runner.arch }}-native-sdk-
 
-      - name: Test Native SDK ${{ matrix.profile }} profile
+      - name: Test Native SDK stock profile
         working-directory: runtime/native-sdk
-        run: zig build test ${{ matrix.arguments }}
+        run: zig build test
+
+      - name: Test Native SDK widget profile
+        working-directory: runtime/native-sdk
+        run: zig build test -Dwidget-profile=true
 
   macos-session:
     name: macOS session (apple-silicon)
