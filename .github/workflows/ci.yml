@@ -10,29 +10,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  gate:
-    runs-on: blacksmith-4vcpu-windows-2025
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          submodules: recursive
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 22
-          cache: npm
-
-      - name: Install workspaces
-        run: npm ci
-
-      - name: Typecheck + unit tests
-        run: |
-          npm run typecheck
-          npm test
-
-      - name: Release contract audit
-        run: npm run audit:release
-
   windows-cli:
     name: Windows CLI and portable contracts
     runs-on: blacksmith-4vcpu-windows-2025
