@@ -33,6 +33,14 @@ const devReloadBundle = await build({
   write: false,
 });
 const devReload = await import(`data:text/javascript;base64,${Buffer.from(devReloadBundle.outputFiles[0].contents).toString("base64")}`);
+const capturePublishBundle = await build({
+  entryPoints: [fileURLToPath(new URL("../src/capture-publish.ts", import.meta.url))],
+  bundle: true,
+  format: "esm",
+  platform: "node",
+  write: false,
+});
+const capturePublish = await import(`data:text/javascript;base64,${Buffer.from(capturePublishBundle.outputFiles[0].contents).toString("base64")}`);
 test("icon lowering leaves icon-free widget sources byte-exact", () => {
   const transformSource = readFileSync(fileURLToPath(new URL("../src/icon-transform.ts", import.meta.url)), "utf8");
   assert.match(transformSource, /if \(!sourceContainsIcon\(sourceFile\)\) return source;/);
@@ -91,6 +99,81 @@ test("capture requires one PNG output and rejects competing event sources", () =
   assert.equal(invalidClock.status, 1);
   assert.match(invalidClock.stderr, /CaptureClockInvalid: "tomorrow-ish" is not an ISO-8601 instant/);
 });
+
+test("capture artifact rollback restores every prior output without unlinking published replacements", () => {
+  const io = memoryPublishIo(new Map([
+    ["/out/widget.png", "old-image"],
+    ["/out/widget.snapshot.txt", "old-snapshot"],
+    ["/out/widget.receipt.json", "old-receipt"],
+  ]), {
+    failRename: (source, destination) => source.endsWith(".tmp") && destination.endsWith(".receipt.json"),
+    failRemove: (path) => path === "/out/widget.png" || path === "/out/widget.snapshot.txt",
+  });
+
+  assert.throws(() => capturePublish.publishCaptureArtifacts([
+    { path: "/out/widget.png", bytes: Buffer.from("new-image") },
+    { path: "/out/widget.snapshot.txt", bytes: Buffer.from("new-snapshot") },
+    { path: "/out/widget.receipt.json", bytes: Buffer.from("new-receipt") },
+  ], io, sequentialIds()), /injected rename failure/);
+
+  assert.equal(io.text("/out/widget.png"), "old-image");
+  assert.equal(io.text("/out/widget.snapshot.txt"), "old-snapshot");
+  assert.equal(io.text("/out/widget.receipt.json"), "old-receipt");
+  assert.deepEqual(io.paths().filter((path) => path.includes(".backup")), []);
+});
+
+test("capture artifact rollback continues after one restoration fails", () => {
+  const io = memoryPublishIo(new Map([
+    ["/out/widget.png", "old-image"],
+    ["/out/widget.snapshot.txt", "old-snapshot"],
+    ["/out/widget.receipt.json", "old-receipt"],
+  ]), {
+    failRename: (source, destination) =>
+      (source.endsWith(".tmp") && destination.endsWith(".receipt.json")) ||
+      (source.endsWith(".backup") && destination.endsWith(".png")),
+  });
+
+  assert.throws(() => capturePublish.publishCaptureArtifacts([
+    { path: "/out/widget.png", bytes: Buffer.from("new-image") },
+    { path: "/out/widget.snapshot.txt", bytes: Buffer.from("new-snapshot") },
+    { path: "/out/widget.receipt.json", bytes: Buffer.from("new-receipt") },
+  ], io, sequentialIds()), (error) => {
+    assert.equal(error.name, "CaptureArtifactRollbackError");
+    assert.match(error.message, /rollback was incomplete/);
+    return true;
+  });
+
+  assert.equal(io.text("/out/widget.snapshot.txt"), "old-snapshot");
+  assert.equal(io.text("/out/widget.receipt.json"), "old-receipt");
+  assert.equal(io.paths().filter((path) => path.includes(".backup") && path.includes("widget.png")).length, 1);
+});
+
+function sequentialIds() {
+  let id = 0;
+  return () => `id-${++id}`;
+}
+
+function memoryPublishIo(initial, faults = {}) {
+  const files = new Map([...initial].map(([path, value]) => [path, Buffer.from(value)]));
+  return {
+    exists: (path) => files.has(path),
+    mkdir: () => {},
+    write: (path, bytes) => { files.set(path, Buffer.from(bytes)); },
+    rename: (source, destination) => {
+      if (faults.failRename?.(source, destination)) throw new Error(`injected rename failure: ${source} -> ${destination}`);
+      const value = files.get(source);
+      if (value === undefined) throw new Error(`missing source: ${source}`);
+      files.set(destination, value);
+      files.delete(source);
+    },
+    remove: (path) => {
+      if (faults.failRemove?.(path)) throw new Error(`injected remove failure: ${path}`);
+      files.delete(path);
+    },
+    text: (path) => files.get(path)?.toString("utf8"),
+    paths: () => [...files.keys()].sort(),
+  };
+}
 
 test("origin matching is HTTPS-only and exact-host", () => {
   assert.equal(origin.originHost("https://api.example.com/v1"), "api.example.com");

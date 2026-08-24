@@ -76,7 +76,7 @@ A total non-clear-pixel count cannot catch this class of partial blanking, so a
 focused renderer regression is the useful tripwire; raising a global pixel
 minimum is not.
 
-## Break 2: media actions publish a successful error screen
+## Break 2: media actions published a successful error screen
 
 The semantic driver resolves the PAUSE button correctly. The reproduction file
 is [`test/capture/noro-signal.actions`](../test/capture/noro-signal.actions):
@@ -90,35 +90,42 @@ node cli/bin/weaver.js capture examples/noro-signal \
 ```
 
 After the click, the media command rejects with `MediaChannelUnavailable` and
-the widget is replaced by its unhandled-promise error panel:
+the widget is replaced by its unhandled-promise error panel. This screenshot is
+the original false-success artifact retained as the regression receipt:
 
 ![Media action failure](noro-signal-evaluation/action-failure.png)
 
 The provider fixture marks the provider client connected so provider hooks can
 receive recorded frames, but it opens no socket or pipe. A media command then
 reaches `send` in `provider_macos.zig` or `provider_windows.zig`, finds no live
-transport, and rejects. The more dangerous part is the receipt: it still says
-`status: "ok"`, has an empty warnings array, and publishes the error screen as
+transport, and rejects. Before the dogfood fix, the more dangerous part was the
+receipt: it still said
+`status: "ok"`, had an empty warnings array, and published the error screen as
 a valid result. The post-action tree dropped from 63 nodes and 112 commands to
 3 nodes and 6 commands.
 
-Proposed framework fix:
+The capture-health half is fixed in this PR. Apps can now expose degraded
+runtime state through Native's capture seam; Weaver reports the JS engine's
+`renderFailed()` state there. The capture driver checks it after actions and
+session replay, before rendering or publishing artifacts. The same command now
+exits nonzero with `CaptureWidgetFailed`, emits an error receipt, and publishes
+no PNG, snapshot, or on-disk receipt.
+
+Remaining framework proposal:
 
 - Extend the provider fixture with deterministic expected media commands and
   acknowledgements. A capture should be able to assert the verb and seek value,
   resolve the SDK promise, and optionally apply recorded provider frames after
   the acknowledgement.
-- When no command fixture exists, fail the action explicitly with a named error
-  such as `CaptureMediaTransportUnavailable`; do not turn it into an unhandled
-  promise inside the widget.
-- Before publishing artifacts, have the capture driver inspect the runtime's
-  widget-failure state. An error boundary or unhandled rejection must produce
-  an error receipt, not `status: "ok"` with no warning.
+- Refine the current general `CaptureWidgetFailed` result to a transport-specific
+  error when no command fixture exists, without relying on the widget's
+  unhandled-promise boundary.
 - Record driven actions and command outcomes in the receipt so an agent can
   distinguish “the click resolved” from “the side effect succeeded.”
 
 Until that exists, capture can verify the Noro player's media-driven pixels and
-button semantics, but it cannot honestly verify its media transport behavior.
+button semantics and correctly rejects this action pass, but it cannot verify a
+successful media transport side effect.
 
 ## Semantic gap: the seek overlay has no accessible name
 

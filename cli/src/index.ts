@@ -11,6 +11,7 @@ import { compileClass, UtilityError } from "../../sdk/src/class-compiler.js";
 import { signalDevReload } from "./dev-reload.js";
 import { lowerIconSource, resolveIconSpec } from "./icon-transform.js";
 import { originDeclared, originHost, originNotDeclaredMessage, validOriginHost } from "./origin.js";
+import { publishCaptureArtifacts } from "./capture-publish.js";
 import { formatStatus, pathInside, pathsEqual, readRegistry, readStatus, statusPath, weaverLogsPath, widgetsPath, withRegistryLock, writeRegistry, type RegistryDocument } from "./host-tools.js";
 import { extractWeave, isWeaveSourceEntryIncluded, MAX_WEAVE_ARCHIVE_BYTES, openWeave, packWeave, type DeclaredSurface, type OpenedWeave, type WeaveManifest } from "./weave.js";
 
@@ -650,41 +651,6 @@ function validateCaptureProviderFixture(path: string, subscriptions: RuntimeMani
 
 function captureTextMeasurement(): "estimator" | "coretext" {
   return process.platform === "darwin" ? "coretext" : "estimator";
-}
-
-function publishCaptureArtifacts(artifacts: { path: string; bytes: Uint8Array }[]): void {
-  const staged: { path: string; temporary: string; backup: string; hadPrevious: boolean; published: boolean }[] = [];
-  try {
-    for (const { path, bytes } of artifacts) {
-      mkdirSync(dirname(path), { recursive: true });
-      const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
-      const backup = `${path}.${process.pid}.${randomUUID()}.backup`;
-      staged.push({ path, temporary, backup, hadPrevious: existsSync(path), published: false });
-      writeFileSync(temporary, bytes);
-    }
-    for (const artifact of staged) {
-      if (artifact.hadPrevious) renameSync(artifact.path, artifact.backup);
-      try {
-        renameSync(artifact.temporary, artifact.path);
-        artifact.published = true;
-      } catch (error) {
-        if (artifact.hadPrevious && existsSync(artifact.backup)) renameSync(artifact.backup, artifact.path);
-        throw error;
-      }
-    }
-    for (const artifact of staged) if (artifact.hadPrevious) rmSync(artifact.backup, { force: true });
-  } catch (error) {
-    for (const artifact of [...staged].reverse()) {
-      if (artifact.published) rmSync(artifact.path, { force: true });
-      if (artifact.hadPrevious && existsSync(artifact.backup)) renameSync(artifact.backup, artifact.path);
-    }
-    throw error;
-  } finally {
-    for (const artifact of staged) {
-      rmSync(artifact.temporary, { force: true });
-      rmSync(artifact.backup, { force: true });
-    }
-  }
 }
 
 function sha256File(path: string): string {

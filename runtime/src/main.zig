@@ -1530,6 +1530,7 @@ pub fn main(init: std.process.Init) !void {
     if (capture_state_root != null) {
         app.capture_clock_advance_fn = advanceCaptureClock;
         app.capture_pending_fn = capturePendingWork;
+        app.capture_failed_fn = captureFailed;
     }
     runner.runWithOptions(app, .{
         .app_name = "weaver-widget",
@@ -1569,6 +1570,11 @@ fn capturePendingWork(context: *anyopaque) native_sdk.CapturePendingWork {
         .fetches = if (app_state.model.engine) |engine| engine.activeFetchCount() else 0,
         .images = pending_images,
     };
+}
+
+fn captureFailed(context: *anyopaque) bool {
+    const app_state: *WidgetApp = @ptrCast(@alignCast(context));
+    return if (app_state.model.engine) |engine| engine.renderFailed() else false;
 }
 
 fn loadCaptureProviderFixture(

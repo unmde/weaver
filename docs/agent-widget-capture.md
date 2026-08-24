@@ -17,7 +17,10 @@ A successful run publishes three files together:
 
 Standard output is exactly one compact `weaver.capture.v1` receipt. Diagnostics
 go to standard error. A failed run also emits one error receipt, exits nonzero,
-and does not publish a partial artifact set.
+and does not publish a partial artifact set. If widget execution falls back to
+its runtime error surface during an action or replay, capture reports
+`CaptureWidgetFailed` instead of treating those error pixels as a successful
+widget render.
 
 Capture uses a fresh temporary data, storage, geometry, log, and artwork root.
 It neither reads nor changes the live widget state. The clock starts at the ISO

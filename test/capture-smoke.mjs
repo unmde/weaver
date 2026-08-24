@@ -57,6 +57,12 @@ try {
   assert.match(snapshotText(noroSignal), /role=button name="PAUSE"/);
   assert.match(snapshotText(noroSignal), /name="00:42"/);
 
+  const unavailableTransport = captureFailure("noro-signal-action", "examples/noro-signal", [
+    "--provider-fixture", join(root, "test", "capture", "noro.provider.json"),
+    "--action-file", join(root, "test", "capture", "noro-signal.actions"),
+  ]);
+  assert.equal(unavailableTransport.error?.name, "CaptureWidgetFailed");
+
   const missingProvider = captureFailure("missing-provider", "examples/noro-shell");
   assert.equal(missingProvider.error?.name, "CaptureProviderUnavailable");
   assert.deepEqual(missingProvider.pending.providers, ["media"]);
