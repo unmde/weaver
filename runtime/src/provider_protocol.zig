@@ -25,6 +25,26 @@ pub const Ack = struct {
     ok: bool,
 };
 
+pub const CaptureMediaCommand = struct {
+    verb: []const u8,
+    seekMs: ?u64 = null,
+    ok: bool = true,
+};
+
+pub const CaptureCommandValidation = enum {
+    valid,
+    unexpected,
+    mismatch,
+    missing,
+};
+
+const MediaCommandWire = struct {
+    command: []const u8,
+    verb: []const u8,
+    seekMs: ?u64 = null,
+    id: u64,
+};
+
 const AckSlot = struct {
     id: u64 = 0,
     value: ?Ack = null,
@@ -184,6 +204,122 @@ pub const Queues = struct {
     }
 };
 
+/// Capture fixtures keep their expected command sequence outside Client so a
+/// live widget pays only one nullable pointer. The fixture is consumed on the
+/// app loop; acknowledgements re-enter through the ordinary non-lossy queue.
+pub const CaptureCommandFixture = struct {
+    commands: []const CaptureMediaCommand = &.{},
+    index: usize = 0,
+    failure: CaptureCommandValidation = .valid,
+    failure_line: [command_line_capacity]u8 = undefined,
+    failure_line_len: usize = 0,
+
+    pub fn send(self: *CaptureCommandFixture, queues: *Queues, line: []const u8) !void {
+        if (self.failure != .valid) return switch (self.failure) {
+            .unexpected => error.CaptureMediaCommandUnexpected,
+            .mismatch, .missing => error.CaptureMediaCommandMismatch,
+            .valid => unreachable,
+        };
+        const parsed = std.json.parseFromSlice(MediaCommandWire, std.heap.page_allocator, line, .{
+            .ignore_unknown_fields = false,
+        }) catch {
+            self.recordFailure(.mismatch, line);
+            return error.CaptureMediaCommandMismatch;
+        };
+        defer parsed.deinit();
+        const actual = parsed.value;
+        if (!std.mem.eql(u8, actual.command, "media") or actual.id == 0 or actual.id > max_safe_id) {
+            self.recordFailure(.mismatch, line);
+            return error.CaptureMediaCommandMismatch;
+        }
+        if (self.index >= self.commands.len) {
+            self.recordFailure(.unexpected, line);
+            return error.CaptureMediaCommandUnexpected;
+        }
+        const expected = self.commands[self.index];
+        if (!std.mem.eql(u8, expected.verb, actual.verb) or expected.seekMs != actual.seekMs) {
+            self.recordFailure(.mismatch, line);
+            return error.CaptureMediaCommandMismatch;
+        }
+        self.index += 1;
+        var ack_buffer: [64]u8 = undefined;
+        const ack = try std.fmt.bufPrint(&ack_buffer, "{{\"ack\":{d},\"ok\":{}}}", .{ actual.id, expected.ok });
+        queues.routeLine(ack);
+    }
+
+    pub fn validation(self: *const CaptureCommandFixture) CaptureCommandValidation {
+        if (self.failure != .valid) return self.failure;
+        return if (self.index == self.commands.len) .valid else .missing;
+    }
+
+    pub fn logFailure(self: *const CaptureCommandFixture) void {
+        switch (self.validation()) {
+            .valid => {},
+            .missing => {
+                const expected = self.commands[self.index];
+                if (expected.seekMs) |seek_ms| {
+                    std.log.err(
+                        "capture media command {d} is missing: expected verb={s} seekMs={d}; observed {d} of {d} fixture commands",
+                        .{ self.index, expected.verb, seek_ms, self.index, self.commands.len },
+                    );
+                } else {
+                    std.log.err(
+                        "capture media command {d} is missing: expected verb={s}; observed {d} of {d} fixture commands",
+                        .{ self.index, expected.verb, self.index, self.commands.len },
+                    );
+                }
+            },
+            .unexpected, .mismatch => {
+                const line = self.failure_line[0..self.failure_line_len];
+                const parsed = std.json.parseFromSlice(MediaCommandWire, std.heap.page_allocator, line, .{
+                    .ignore_unknown_fields = false,
+                }) catch {
+                    std.log.err("capture media command {d} is malformed: {s}", .{ self.index, line });
+                    return;
+                };
+                defer parsed.deinit();
+                if (self.failure == .unexpected) {
+                    std.log.err("capture media command {d} was unexpected: verb={s}", .{ self.index, parsed.value.verb });
+                } else if (self.index < self.commands.len) {
+                    logMismatch(self.index, self.commands[self.index], parsed.value);
+                }
+            },
+        }
+    }
+
+    fn recordFailure(self: *CaptureCommandFixture, failure: CaptureCommandValidation, line: []const u8) void {
+        self.failure = failure;
+        self.failure_line_len = @min(line.len, self.failure_line.len);
+        @memcpy(self.failure_line[0..self.failure_line_len], line[0..self.failure_line_len]);
+    }
+
+    fn logMismatch(index: usize, expected: CaptureMediaCommand, actual: MediaCommandWire) void {
+        if (expected.seekMs) |expected_seek| {
+            if (actual.seekMs) |actual_seek| {
+                std.log.err(
+                    "capture media command {d} mismatch: expected verb={s} seekMs={d}; received verb={s} seekMs={d}",
+                    .{ index, expected.verb, expected_seek, actual.verb, actual_seek },
+                );
+            } else {
+                std.log.err(
+                    "capture media command {d} mismatch: expected verb={s} seekMs={d}; received verb={s} without seekMs",
+                    .{ index, expected.verb, expected_seek, actual.verb },
+                );
+            }
+        } else if (actual.seekMs) |actual_seek| {
+            std.log.err(
+                "capture media command {d} mismatch: expected verb={s} without seekMs; received verb={s} seekMs={d}",
+                .{ index, expected.verb, actual.verb, actual_seek },
+            );
+        } else {
+            std.log.err(
+                "capture media command {d} mismatch: expected verb={s}; received verb={s}",
+                .{ index, expected.verb, actual.verb },
+            );
+        }
+    }
+};
+
 /// Incremental newline framing for platform readers. A disconnected partial
 /// line is a protocol failure because it could be a truncated acknowledgement.
 pub const Framer = struct {
@@ -302,4 +438,39 @@ test "runtime framing demuxes interleaved lines split across reads" {
     try std.testing.expect(framer.feed(&queues, "{\"ack\":10"));
     framer.finish(&queues);
     try std.testing.expectEqual(@as(u8, 1), queues.ack_protocol_failed.load(.acquire));
+}
+
+test "capture command fixture validates order values and acknowledgement outcomes" {
+    const commands = [_]CaptureMediaCommand{
+        .{ .verb = "pause" },
+        .{ .verb = "seek", .seekMs = 42_000, .ok = false },
+    };
+    var fixture: CaptureCommandFixture = .{ .commands = &commands };
+    var queues: Queues = .{};
+    try std.testing.expect(queues.registerAck(7));
+    try fixture.send(&queues, "{\"command\":\"media\",\"verb\":\"pause\",\"id\":7}");
+    try std.testing.expectEqualDeep(Ack{ .id = 7, .ok = true }, queues.takeAck().?);
+    try std.testing.expectEqual(CaptureCommandValidation.missing, fixture.validation());
+
+    try std.testing.expect(queues.registerAck(8));
+    try fixture.send(&queues, "{\"command\":\"media\",\"verb\":\"seek\",\"seekMs\":42000,\"id\":8}");
+    try std.testing.expectEqualDeep(Ack{ .id = 8, .ok = false }, queues.takeAck().?);
+    try std.testing.expectEqual(CaptureCommandValidation.valid, fixture.validation());
+    try std.testing.expectError(
+        error.CaptureMediaCommandUnexpected,
+        fixture.send(&queues, "{\"command\":\"media\",\"verb\":\"next\",\"id\":9}"),
+    );
+    try std.testing.expectEqual(CaptureCommandValidation.unexpected, fixture.validation());
+}
+
+test "capture command fixture latches an exact mismatch" {
+    const commands = [_]CaptureMediaCommand{.{ .verb = "seek", .seekMs = 50 }};
+    var fixture: CaptureCommandFixture = .{ .commands = &commands };
+    var queues: Queues = .{};
+    try std.testing.expectError(
+        error.CaptureMediaCommandMismatch,
+        fixture.send(&queues, "{\"command\":\"media\",\"verb\":\"seek\",\"seekMs\":51,\"id\":1}"),
+    );
+    try std.testing.expectEqual(CaptureCommandValidation.mismatch, fixture.validation());
+    try std.testing.expect(queues.takeAck() == null);
 }

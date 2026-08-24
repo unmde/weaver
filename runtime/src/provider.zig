@@ -10,6 +10,9 @@ const implementation = switch (builtin.os.tag) {
 
 pub const Client = implementation.Client;
 pub const Ack = provider_protocol.Ack;
+pub const CaptureMediaCommand = provider_protocol.CaptureMediaCommand;
+pub const CaptureCommandFixture = provider_protocol.CaptureCommandFixture;
+pub const CaptureCommandValidation = provider_protocol.CaptureCommandValidation;
 // Framing alias only: the 12,502-byte derived protocol receipt lives in
 // media_protocol.zig, so the client cannot drift to a second line budget.
 pub const max_line_bytes = media_protocol.max_media_frame_bytes;

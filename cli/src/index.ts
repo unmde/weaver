@@ -137,6 +137,16 @@ interface CaptureCandidate {
   value: number | null;
 }
 
+interface CaptureMediaCommandFixture {
+  verb: "play" | "pause" | "next" | "previous" | "seek";
+  seekMs?: number;
+  ok: boolean;
+}
+
+interface ValidatedCaptureProviderFixture {
+  commands: CaptureMediaCommandFixture[];
+}
+
 interface CaptureReceipt {
   schema: "weaver.capture.v1";
   status: "ok" | "error";
@@ -157,6 +167,7 @@ interface CaptureReceipt {
   pending: { timers: number; fetches: number; images: number; providers: string[]; frameRequests: number };
   timingUs: { bundle: number; spawn: number; startup: number; render: number; encode: number; write: number; total: number };
   inputs: { clock: string; storage: string; actionFileSha256?: string; providerFixtureSha256?: string; sessionJournalSha256?: string };
+  interactions?: { actions: string[]; mediaCommands: CaptureMediaCommandFixture[] };
   warnings: string[];
   error?: { name: string; ask: string; remedy: string; candidates?: CaptureCandidate[] };
 }
@@ -356,6 +367,7 @@ async function captureWidget(directory: string, options: CaptureOptions): Promis
   let bundleUs = 0;
   let spawnUs = 0;
   let nativeResult: NativeCaptureResult | undefined;
+  let providerFixture: ValidatedCaptureProviderFixture | undefined;
   let unavailableProviders: string[] = [];
   const warnings: string[] = [];
   try {
@@ -395,7 +407,13 @@ async function captureWidget(directory: string, options: CaptureOptions): Promis
         `rerun with --provider-fixture <file> containing those provider frames`,
       );
     }
-    if (options.providerFixture) validateCaptureProviderFixture(options.providerFixture, bundled.manifest.subscribe);
+    if (options.providerFixture) {
+      providerFixture = validateCaptureProviderFixture(
+        options.providerFixture,
+        bundled.manifest.subscribe,
+        bundled.manifest.capabilities,
+      );
+    }
 
     const environment: NodeJS.ProcessEnv = {
       ...process.env,
@@ -491,6 +509,7 @@ async function captureWidget(directory: string, options: CaptureOptions): Promis
         ...(options.providerFixture ? { providerFixtureSha256: sha256File(options.providerFixture) } : {}),
         ...(options.sessionJournal ? { sessionJournalSha256: sha256File(options.sessionJournal) } : {}),
       },
+      ...captureInteractions(options.actionFile, providerFixture),
       warnings,
     };
     const publishStart = nowMicroseconds();
@@ -602,7 +621,11 @@ function failedCaptureReceipt(input: {
   };
 }
 
-function validateCaptureProviderFixture(path: string, subscriptions: RuntimeManifest["subscribe"]): void {
+function validateCaptureProviderFixture(
+  path: string,
+  subscriptions: RuntimeManifest["subscribe"],
+  capabilities: RuntimeManifest["capabilities"],
+): ValidatedCaptureProviderFixture {
   let document: unknown;
   try {
     document = JSON.parse(readFileSync(path, "utf8"));
@@ -613,11 +636,43 @@ function validateCaptureProviderFixture(path: string, subscriptions: RuntimeMani
       "supply a weaver.provider-fixture.v1 JSON object and rerun capture",
     );
   }
-  if (!isRecord(document) || document.schema !== "weaver.provider-fixture.v1" || !Array.isArray(document.frames)) {
+  if (!isRecord(document) || document.schema !== "weaver.provider-fixture.v1" || !Array.isArray(document.frames) ||
+      (document.commands !== undefined && !Array.isArray(document.commands)) ||
+      Object.keys(document).some((key) => !["schema", "frames", "commands"].includes(key))) {
     throw new CaptureInputFailure(
       "CaptureProviderFixtureInvalid",
       `provider fixture must use schema weaver.provider-fixture.v1 with a frames array: ${path}`,
       "fix the fixture schema and rerun capture",
+    );
+  }
+  const commands: CaptureMediaCommandFixture[] = [];
+  const knownVerbs = new Set(["play", "pause", "next", "previous", "seek"]);
+  for (const [index, command] of (document.commands ?? []).entries()) {
+    const keysValid = isRecord(command) && Object.keys(command).every((key) => ["verb", "seekMs", "ok"].includes(key));
+    const verb = isRecord(command) ? command.verb : undefined;
+    const seekMs = isRecord(command) ? command.seekMs : undefined;
+    const ok = isRecord(command) ? command.ok : undefined;
+    const seekValueValid = verb === "seek"
+      ? typeof seekMs === "number" && Number.isInteger(seekMs) && seekMs >= 0
+      : seekMs === undefined;
+    if (!keysValid || typeof verb !== "string" || !knownVerbs.has(verb) || !seekValueValid || (ok !== undefined && typeof ok !== "boolean")) {
+      throw new CaptureInputFailure(
+        "CaptureProviderFixtureCommandInvalid",
+        `provider fixture command ${index} must name play, pause, next, previous, or seek; only seek requires a non-negative integer seekMs, and ok must be boolean`,
+        "fix the named command fixture entry and rerun capture",
+      );
+    }
+    commands.push({
+      verb: verb as CaptureMediaCommandFixture["verb"],
+      ...(seekMs === undefined ? {} : { seekMs: seekMs as number }),
+      ok: ok === undefined ? true : ok as boolean,
+    });
+  }
+  if (commands.length > 0 && !capabilities.includes("media-transport")) {
+    throw new CaptureInputFailure(
+      "CaptureProviderFixtureCapabilityRequired",
+      "provider fixture commands require the widget's media-transport capability",
+      'add capabilities: ["media-transport"] to the widget config, or remove the command expectations',
     );
   }
   const declared = new Set<string>(subscriptions.filter((provider) => provider !== "time"));
@@ -647,6 +702,20 @@ function validateCaptureProviderFixture(path: string, subscriptions: RuntimeMani
       "add frames for every subscribed non-time provider and rerun capture",
     );
   }
+  return { commands };
+}
+
+function captureInteractions(
+  actionPath: string | undefined,
+  fixture: ValidatedCaptureProviderFixture | undefined,
+): { interactions?: CaptureReceipt["interactions"] } {
+  const actions = actionPath === undefined
+    ? []
+    : (JSON.parse(readFileSync(actionPath, "utf8")) as { actions: { action: string }[] }).actions.map((action) => action.action);
+  const mediaCommands = fixture?.commands ?? [];
+  return actions.length === 0 && mediaCommands.length === 0 ? {} : {
+    interactions: { actions, mediaCommands },
+  };
 }
 
 function captureTextMeasurement(): "estimator" | "coretext" {

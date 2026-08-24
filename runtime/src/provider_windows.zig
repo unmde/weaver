@@ -42,6 +42,7 @@ pub const Client = struct {
     wake: ?*const fn () void = null,
     test_before_read: win.HANDLE = null,
     test_resume_read: win.HANDLE = null,
+    capture_fixture: ?*protocol.CaptureCommandFixture = null,
 
     pub fn init(self: *Client, io: std.Io, pipe_name: ?[]const u8) !void {
         self.io = io;
@@ -82,8 +83,9 @@ pub const Client = struct {
     /// Explicit fixture mode for a short-lived capture. It makes provider
     /// hooks available without opening the live host pipe; frames still enter
     /// JavaScript through the ordinary bridge dispatcher.
-    pub fn initCaptureFixture(self: *Client, io: std.Io) void {
+    pub fn initCaptureFixture(self: *Client, io: std.Io, fixture: *protocol.CaptureCommandFixture) void {
         self.io = io;
+        self.capture_fixture = fixture;
         self.connected.store(1, .release);
         self.disconnected.store(0, .release);
         self.stopping.store(0, .release);
@@ -105,6 +107,7 @@ pub const Client = struct {
         self.write_event = null;
         if (self.shutdown_event) |event| _ = win.CloseHandle(event);
         self.shutdown_event = null;
+        self.capture_fixture = null;
         self.connected.store(0, .release);
         self.disconnected.store(1, .release);
     }
@@ -153,6 +156,11 @@ pub const Client = struct {
         if (line.len == 0 or line.len > protocol.command_line_capacity or std.mem.indexOfScalar(u8, line, '\n') != null) return error.InvalidCommandFrame;
         self.send_mutex.lock();
         defer self.send_mutex.unlock();
+        if (self.capture_fixture) |fixture| {
+            try fixture.send(&self.queues, line);
+            if (self.wake) |wake| wake();
+            return;
+        }
         if (!self.isAvailable() or self.handle == win.INVALID_HANDLE_VALUE) return error.HostPipeUnavailable;
         const event = self.write_event orelse return error.HostPipeUnavailable;
         var framed: [protocol.command_line_capacity + 1]u8 = undefined;
@@ -187,6 +195,14 @@ pub const Client = struct {
             self.disconnected.store(1, .release);
             return error.HostPipeWriteFailed;
         }
+    }
+
+    pub fn captureCommandValidation(self: *const Client) protocol.CaptureCommandValidation {
+        return if (self.capture_fixture) |fixture| fixture.validation() else .valid;
+    }
+
+    pub fn logCaptureCommandFailure(self: *const Client) void {
+        if (self.capture_fixture) |fixture| fixture.logFailure();
     }
 
     pub fn nextCommandId(self: *Client) !u64 {

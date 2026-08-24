@@ -59,11 +59,37 @@ try {
   assert.match(snapshotText(noroSignal), /role=button name="PAUSE"/);
   assert.match(snapshotText(noroSignal), /name="00:42"/);
 
-  const unavailableTransport = captureFailure("noro-signal-action", "examples/noro-signal", [
+  const noroSignalAction = capture("noro-signal-action", "examples/noro-signal", [
+    "--provider-fixture", join(root, "test", "capture", "noro-action.provider.json"),
+    "--action-file", join(root, "test", "capture", "noro-signal.actions"),
+  ]);
+  assert.match(snapshotText(noroSignalAction), /role=button name="Seek"/);
+  assert.deepEqual(noroSignalAction.interactions, {
+    actions: ["click"],
+    mediaCommands: [{ verb: "pause", ok: true }],
+  });
+
+  const unexpectedTransport = captureFailure("noro-signal-action-unexpected", "examples/noro-signal", [
     "--provider-fixture", join(root, "test", "capture", "noro.provider.json"),
     "--action-file", join(root, "test", "capture", "noro-signal.actions"),
   ]);
-  assert.equal(unavailableTransport.error?.name, "CaptureWidgetFailed");
+  assert.equal(unexpectedTransport.error?.name, "CaptureMediaCommandUnexpected");
+
+  const mismatchProviderFixture = join(outputRoot, "mismatch-provider.json");
+  writeFileSync(mismatchProviderFixture, JSON.stringify({
+    ...JSON.parse(readFileSync(join(root, "test", "capture", "noro.provider.json"), "utf8")),
+    commands: [{ verb: "play" }],
+  }));
+  const mismatchedTransport = captureFailure("noro-signal-action-mismatch", "examples/noro-signal", [
+    "--provider-fixture", mismatchProviderFixture,
+    "--action-file", join(root, "test", "capture", "noro-signal.actions"),
+  ]);
+  assert.equal(mismatchedTransport.error?.name, "CaptureMediaCommandMismatch");
+
+  const missingTransport = captureFailure("noro-signal-action-missing", "examples/noro-signal", [
+    "--provider-fixture", join(root, "test", "capture", "noro-action.provider.json"),
+  ]);
+  assert.equal(missingTransport.error?.name, "CaptureMediaCommandMissing");
 
   const missingProvider = captureFailure("missing-provider", "examples/noro-shell");
   assert.equal(missingProvider.error?.name, "CaptureProviderUnavailable");
@@ -78,6 +104,27 @@ try {
     "--provider-fixture", invalidProviderFixture,
   ]);
   assert.equal(invalidProvider.error?.name, "CaptureProviderFixtureUndeclared");
+
+  const invalidCommandFixture = join(outputRoot, "invalid-command-provider.json");
+  writeFileSync(invalidCommandFixture, JSON.stringify({
+    ...JSON.parse(readFileSync(join(root, "test", "capture", "noro.provider.json"), "utf8")),
+    commands: [{ verb: "seek" }],
+  }));
+  const invalidCommand = captureFailure("invalid-provider-command", "examples/noro-shell", [
+    "--provider-fixture", invalidCommandFixture,
+  ]);
+  assert.equal(invalidCommand.error?.name, "CaptureProviderFixtureCommandInvalid");
+
+  const undeclaredCapabilityFixture = join(outputRoot, "undeclared-capability-provider.json");
+  writeFileSync(undeclaredCapabilityFixture, JSON.stringify({
+    schema: "weaver.provider-fixture.v1",
+    frames: [],
+    commands: [{ verb: "play" }],
+  }));
+  const undeclaredCapability = captureFailure("invalid-provider-capability", "examples/clock", [
+    "--provider-fixture", undeclaredCapabilityFixture,
+  ]);
+  assert.equal(undeclaredCapability.error?.name, "CaptureProviderFixtureCapabilityRequired");
 
   const ambiguous = captureFailure("ambiguous", "examples/pomodoro", [
     "--action-file", join(root, "test", "capture", "ambiguous-button.actions"),
