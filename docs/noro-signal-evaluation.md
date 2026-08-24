@@ -1,0 +1,145 @@
+# Noro Signal capture evaluation
+
+This is a dogfood pass for `weaver capture`: build a materially different
+version of the Noro media player, inspect its fixed-input pixels and semantic
+tree, and then drive its controls through the capture action protocol. The
+original [`examples/noro-shell`](../examples/noro-shell) is unchanged. The
+alternative lives in [`examples/noro-signal`](../examples/noro-signal).
+
+## Outcome
+
+The alternative design works for deterministic visual and semantic capture.
+It is a 430 x 248 signal-console layout using the same `time`, `media`, and
+`media-transport` contracts as Noro. With the fixed clock and the recorded
+media provider frame, `weaver check` passes and capture publishes the expected
+track, time, progress, state, and PREV / PAUSE / NEXT controls.
+
+![Working Noro Signal capture](noro-signal-evaluation/noro-signal.png)
+
+The working receipt reported:
+
+- status `ok`, 430 x 248 pixels, and no warnings;
+- 112 draw commands and 63 semantic nodes;
+- 105,976 pixels different from the transparent clear color;
+- no pending providers or images.
+
+Reproduce it with:
+
+```sh
+node cli/bin/weaver.js check examples/noro-signal
+node cli/bin/weaver.js capture examples/noro-signal \
+  --clock 2026-08-24T17:30:00.000Z \
+  --provider-fixture test/capture/noro.provider.json \
+  --out /tmp/noro-signal.png
+```
+
+The pass found two framework breaks and one semantic authoring gap.
+
+## Break 1: a shadow turns a content stack into a leaf
+
+The first design put `shadow-inner` on the 150 x 150 artwork `<stack>`. Capture
+still returned `status: "ok"`, 87 draw commands, 63 semantic nodes, no warning,
+and the same total non-clear pixel count, but the entire artwork subtree was
+missing from the image:
+
+![Stack shadow failure](noro-signal-evaluation/shadow-failure.png)
+
+The semantic snapshot retained the artwork stack and all its children with
+correct bounds. Removing only `shadow-inner` restored every child. This is not
+a clipping or reference-rasterizer problem:
+
+1. [`sdk/src/class-compiler.ts`](../sdk/src/class-compiler.ts) compiles
+   `shadow-inner` into an inset box-shadow.
+2. `attachEffects` in [`runtime/src/main.zig`](../runtime/src/main.zig) places
+   that shadow in `Widget.immediate_commands`.
+3. Both stack branches in
+   [`widget_render.zig`](../runtime/native-sdk/src/primitives/canvas/widget_render.zig)
+   call `emitImmediateCanvas` and then skip or return before emitting children
+   whenever a stack has any immediate command.
+
+That means every `shadow-*` utility can erase the children of a TSX `<stack>`;
+`overflow-hidden` only made the initial symptom look like bad compositing.
+
+Proposed framework fix:
+
+- Project a styled TSX stack as a painted panel containing an unstyled stack,
+  matching the existing styled row and column projection in `buildNode`. The
+  panel owns background, border, radius, and shadow; the inner stack keeps
+  overlay layout. This also gives inset shadows an explicit paint order.
+- Add retained-tree and layout-tree regressions in which a shadowed stack has
+  overlapping children. Assert that the shadow, fill, border, and every child
+  command are present, including the `shadow-inner` plus rounded clip case.
+- Keep the current short-term author workaround: do not put shadows on a
+  content-bearing stack. Put the effect on a panel wrapper instead.
+
+A total non-clear-pixel count cannot catch this class of partial blanking, so a
+focused renderer regression is the useful tripwire; raising a global pixel
+minimum is not.
+
+## Break 2: media actions publish a successful error screen
+
+The semantic driver resolves the PAUSE button correctly. The reproduction file
+is [`test/capture/noro-signal.actions`](../test/capture/noro-signal.actions):
+
+```sh
+node cli/bin/weaver.js capture examples/noro-signal \
+  --clock 2026-08-24T17:30:00.000Z \
+  --provider-fixture test/capture/noro.provider.json \
+  --action-file test/capture/noro-signal.actions \
+  --out /tmp/noro-signal-action.png
+```
+
+After the click, the media command rejects with `MediaChannelUnavailable` and
+the widget is replaced by its unhandled-promise error panel:
+
+![Media action failure](noro-signal-evaluation/action-failure.png)
+
+The provider fixture marks the provider client connected so provider hooks can
+receive recorded frames, but it opens no socket or pipe. A media command then
+reaches `send` in `provider_macos.zig` or `provider_windows.zig`, finds no live
+transport, and rejects. The more dangerous part is the receipt: it still says
+`status: "ok"`, has an empty warnings array, and publishes the error screen as
+a valid result. The post-action tree dropped from 63 nodes and 112 commands to
+3 nodes and 6 commands.
+
+Proposed framework fix:
+
+- Extend the provider fixture with deterministic expected media commands and
+  acknowledgements. A capture should be able to assert the verb and seek value,
+  resolve the SDK promise, and optionally apply recorded provider frames after
+  the acknowledgement.
+- When no command fixture exists, fail the action explicitly with a named error
+  such as `CaptureMediaTransportUnavailable`; do not turn it into an unhandled
+  promise inside the widget.
+- Before publishing artifacts, have the capture driver inspect the runtime's
+  widget-failure state. An error boundary or unhandled rejection must produce
+  an error receipt, not `status: "ok"` with no warning.
+- Record driven actions and command outcomes in the receipt so an agent can
+  distinguish “the click resolved” from “the side effect succeeded.”
+
+Until that exists, capture can verify the Noro player's media-driven pixels and
+button semantics, but it cannot honestly verify its media transport behavior.
+
+## Semantic gap: the seek overlay has no accessible name
+
+The seek overlay is a transparent button with no text child, so the snapshot
+reports `role=button name=""`. The reconciler currently derives a button name
+only from its first descendant text and the TSX button surface has no explicit
+accessible-label prop. An agent can see an anonymous button but cannot learn
+that it means “seek” from semantics alone.
+
+Proposed framework fix:
+
+- Add an `accessibilityLabel` (or familiar `aria-label`) prop to actionable TSX
+  elements and project it ahead of descendant-text fallback.
+- Make `weaver check` reject an actionable control whose final accessible name
+  is empty. The diagnostic should name the element and say how to label it.
+
+## Baseline observation
+
+The static Noro Signal capture reports one queued frame request. A capture of
+the original Noro shell under the same fixture reports the same value, while
+the action pass drains it to zero. It is therefore existing capture scheduling
+behavior, not a regression introduced by this alternative style. The receipt
+surfaces it honestly, so this evaluation does not turn it into a new limit or
+silence it.
