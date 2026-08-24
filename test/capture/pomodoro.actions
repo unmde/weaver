@@ -7,7 +7,11 @@
     },
     {
       "action": "advance-clock",
-      "milliseconds": 1000
+      "milliseconds": 500
+    },
+    {
+      "action": "advance-clock",
+      "milliseconds": 500
     }
   ]
 }
