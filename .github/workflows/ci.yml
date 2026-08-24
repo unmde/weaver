@@ -63,7 +63,11 @@ jobs:
 
   windows-runtime:
     name: Windows native runtime + host
-    runs-on: blacksmith-4vcpu-windows-2025
+    # Blacksmith's slim Windows image can compile the native graph, but its
+    # generated executables terminate with STATUS_DLL_NOT_FOUND (exit 53).
+    # Keep the native job on the full GitHub image; the portable Windows jobs
+    # still use Blacksmith, and the Zig caches keep this path warm.
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v6
         with:
@@ -78,24 +82,6 @@ jobs:
         run: npm ci
 
       - uses: ./.github/actions/setup-zig
-
-      - name: Expose bundled Visual C++ runtime
-        shell: pwsh
-        run: |
-          $roots = @(
-            "$env:ProgramFiles\Microsoft Visual Studio",
-            "${env:ProgramFiles(x86)}\Microsoft Visual Studio"
-          ) | Where-Object { Test-Path $_ }
-          $crt = $roots |
-            ForEach-Object {
-              Get-ChildItem $_ -Recurse -Directory -Filter 'Microsoft.VC*.CRT' -ErrorAction SilentlyContinue
-            } |
-            Where-Object { $_.Parent.Name -eq 'x64' } |
-            Sort-Object FullName -Descending |
-            Select-Object -First 1
-          if (-not $crt) { throw 'Blacksmith Windows image is missing the bundled x64 Visual C++ runtime' }
-          Add-Content $env:GITHUB_PATH $crt.FullName
-          Write-Host "Using Visual C++ runtime from $($crt.FullName)"
 
       - name: Restore Windows native build cache
         uses: actions/cache@v5
