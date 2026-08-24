@@ -90,8 +90,9 @@ jobs:
             ${{ runner.temp }}/zig-global-cache
             runtime/.zig-cache
             host/.zig-cache
-          key: zig-build-0.16.0-${{ runner.os }}-${{ runner.arch }}-native-${{ hashFiles('runtime/build.zig', 'runtime/build.zig.zon', 'runtime/src/**', 'runtime/vendor/**', 'runtime/native-sdk/build.zig', 'runtime/native-sdk/build.zig.zon', 'runtime/native-sdk/src/**', 'host/build.zig', 'host/build.zig.zon', 'host/src/**', 'host/macos/**', 'host/assets/**') }}
+          key: zig-build-v2-0.16.0-github-${{ runner.os }}-${{ runner.arch }}-native-${{ hashFiles('runtime/build.zig', 'runtime/build.zig.zon', 'runtime/src/**', 'runtime/vendor/**', 'runtime/native-sdk/build.zig', 'runtime/native-sdk/build.zig.zon', 'runtime/native-sdk/src/**', 'host/build.zig', 'host/build.zig.zon', 'host/src/**', 'host/macos/**', 'host/assets/**') }}
           restore-keys: |
+            zig-build-v2-0.16.0-github-${{ runner.os }}-${{ runner.arch }}-native-
             zig-build-0.16.0-${{ runner.os }}-${{ runner.arch }}-native-
 
       - name: Build runtime (ReleaseFast)
