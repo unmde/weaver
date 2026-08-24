@@ -50,11 +50,8 @@ jobs:
           $installerPath = Join-Path $env:RUNNER_TEMP 'weaver-install-media.ps1'
           $resultPath = Join-Path $env:RUNNER_TEMP 'weaver-media-install.json'
           $statePath = Join-Path $env:RUNNER_TEMP 'weaver-media-install-state.json'
-          $stdoutPath = Join-Path $env:RUNNER_TEMP 'weaver-media-install.stdout.log'
-          $stderrPath = Join-Path $env:RUNNER_TEMP 'weaver-media-install.stderr.log'
-          $installer = @'
+          $installerBody = @'
           $ErrorActionPreference = 'Stop'
-          $resultPath = Join-Path $env:RUNNER_TEMP 'weaver-media-install.json'
           $temporaryResultPath = "$resultPath.tmp"
           try {
             $mediaDlls = @('mf.dll', 'mfplat.dll')
@@ -96,22 +93,31 @@ jobs:
             }
           }
           '@
+          $escapedResultPath = $resultPath.Replace("'", "''")
+          $installer = "`$resultPath = '$escapedResultPath'`r`n$installerBody"
           Set-Content $installerPath $installer
           $startedAt = [DateTime]::UtcNow
-          # The Actions runner terminates child processes that retain this marker
-          # when a step exits. This installer intentionally spans later steps.
-          Remove-Item Env:RUNNER_TRACKING_ID -ErrorAction SilentlyContinue
-          $process = Start-Process -FilePath (Get-Command pwsh).Source `
-            -ArgumentList @('-NoLogo', '-NoProfile', '-NonInteractive', '-File', $installerPath) `
-            -RedirectStandardOutput $stdoutPath `
-            -RedirectStandardError $stderrPath `
-            -WindowStyle Hidden `
-            -PassThru
+          # Task Scheduler launches outside the Actions runner's Windows job,
+          # so the installer can intentionally span checkout and setup steps.
+          $taskName = "weaver-media-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          $action = New-ScheduledTaskAction `
+            -Execute (Get-Command pwsh).Source `
+            -Argument "-NoLogo -NoProfile -NonInteractive -File `"$installerPath`""
+          $principal = New-ScheduledTaskPrincipal `
+            -UserId 'SYSTEM' `
+            -LogonType ServiceAccount `
+            -RunLevel Highest
+          Register-ScheduledTask `
+            -TaskName $taskName `
+            -Action $action `
+            -Principal $principal `
+            -Force | Out-Null
+          Start-ScheduledTask -TaskName $taskName
           @{
-            pid = $process.Id
+            taskName = $taskName
             startedAt = $startedAt.ToString('O')
           } | ConvertTo-Json -Compress | Set-Content $statePath
-          Write-Host "Started Windows media runtime preparation as process $($process.Id)"
+          Write-Host "Started Windows media runtime preparation as scheduled task $taskName"
 
       - uses: actions/checkout@v6
         with:
@@ -132,39 +138,45 @@ jobs:
         run: |
           $resultPath = Join-Path $env:RUNNER_TEMP 'weaver-media-install.json'
           $statePath = Join-Path $env:RUNNER_TEMP 'weaver-media-install-state.json'
-          $stdoutPath = Join-Path $env:RUNNER_TEMP 'weaver-media-install.stdout.log'
-          $stderrPath = Join-Path $env:RUNNER_TEMP 'weaver-media-install.stderr.log'
           $state = Get-Content $statePath -Raw | ConvertFrom-Json
           $startedAt = [DateTime]::Parse($state.startedAt).ToUniversalTime()
           # Receipt: Blacksmith installation took 37-51 seconds on measured runs.
           # Two minutes is a failure tripwire, not part of the expected path.
           $deadline = $startedAt.AddSeconds(120)
-          while (-not (Test-Path $resultPath)) {
-            if ([DateTime]::UtcNow -ge $deadline) {
-              Stop-Process -Id $state.pid -Force -ErrorAction SilentlyContinue
-              throw 'Server-Media-Foundation preparation exceeded the 120-second tripwire'
+          try {
+            while (-not (Test-Path $resultPath)) {
+              if ([DateTime]::UtcNow -ge $deadline) {
+                Stop-ScheduledTask -TaskName $state.taskName -ErrorAction SilentlyContinue
+                throw 'Server-Media-Foundation preparation exceeded the 120-second tripwire'
+              }
+              $task = Get-ScheduledTask -TaskName $state.taskName -ErrorAction SilentlyContinue
+              if (-not $task) {
+                throw 'Server-Media-Foundation preparation task disappeared before producing a result'
+              }
+              if ($task.State -ne 'Running') {
+                $taskInfo = Get-ScheduledTaskInfo -TaskName $state.taskName
+                throw "Server-Media-Foundation preparation exited without a result (task result $($taskInfo.LastTaskResult))"
+              }
+              Start-Sleep -Seconds 1
             }
-            if (-not (Get-Process -Id $state.pid -ErrorAction SilentlyContinue)) {
-              if (Test-Path $stdoutPath) { Get-Content $stdoutPath }
-              if (Test-Path $stderrPath) { Get-Content $stderrPath }
-              throw 'Server-Media-Foundation preparation exited without a result'
+            $result = Get-Content $resultPath -Raw | ConvertFrom-Json
+            if ($result.status -ne 'success') {
+              throw "Server-Media-Foundation preparation failed: $($result.error)"
             }
-            Start-Sleep -Seconds 1
+            $missing = @('mf.dll', 'mfplat.dll') | Where-Object {
+              -not (Test-Path (Join-Path $env:WINDIR "System32\$_"))
+            }
+            if ($missing) {
+              throw "Windows media runtime is still missing: $($missing -join ', ')"
+            }
+            $elapsed = [DateTime]::UtcNow - $startedAt
+            Write-Host "Windows media runtime ready after $([Math]::Round($elapsed.TotalSeconds, 1)) seconds (installed=$($result.installed))"
+          } finally {
+            Unregister-ScheduledTask `
+              -TaskName $state.taskName `
+              -Confirm:$false `
+              -ErrorAction SilentlyContinue
           }
-          if (Test-Path $stdoutPath) { Get-Content $stdoutPath }
-          if (Test-Path $stderrPath) { Get-Content $stderrPath }
-          $result = Get-Content $resultPath -Raw | ConvertFrom-Json
-          if ($result.status -ne 'success') {
-            throw "Server-Media-Foundation preparation failed: $($result.error)"
-          }
-          $missing = @('mf.dll', 'mfplat.dll') | Where-Object {
-            -not (Test-Path (Join-Path $env:WINDIR "System32\$_"))
-          }
-          if ($missing) {
-            throw "Windows media runtime is still missing: $($missing -join ', ')"
-          }
-          $elapsed = [DateTime]::UtcNow - $startedAt
-          Write-Host "Windows media runtime ready after $([Math]::Round($elapsed.TotalSeconds, 1)) seconds (installed=$($result.installed))"
 
       - name: Restore Windows native build cache
         uses: actions/cache@v5
