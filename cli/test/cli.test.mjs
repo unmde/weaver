@@ -617,6 +617,15 @@ export default widget({ name: "Accessible Name", size: [160, 80] }, () => (${tre
     assert.match(unnamed.stderr, /ActionableAccessibleNameRequired: <slider> has no accessible name/);
 
     writeFileSync(sourcePath, source(`<column>
+      <button onPress={() => {}}>{undefined}</button>
+      <button onPress={() => {}}>{void 0}</button>
+      <button onPress={() => {}}>{[null, false, ""]}</button>
+    </column>`));
+    const nonRenderingChildren = spawnSync(process.execPath, [cli, "check", widget], { encoding: "utf8" });
+    assert.equal(nonRenderingChildren.status, 1);
+    assert.equal((nonRenderingChildren.stderr.match(/ActionableAccessibleNameRequired: <button> has no accessible name/g) ?? []).length, 3);
+
+    writeFileSync(sourcePath, source(`<column>
       <button accessibilityLabel="Play" onPress={() => {}}><icon name="play" /></button>
       <button onPress={() => {}}><text>Visible name</text></button>
       <slider accessibilityLabel="Level" value={1} max={10} onChange={() => {}} />

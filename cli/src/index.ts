@@ -2010,16 +2010,34 @@ function validateSource(project: SourceProject): string[] {
     }
     return null;
   };
+  const expressionMayProvideAccessibleText = (expression: ts.Expression): boolean => {
+    if (expression.kind === ts.SyntaxKind.FalseKeyword || expression.kind === ts.SyntaxKind.TrueKeyword ||
+        expression.kind === ts.SyntaxKind.NullKeyword || ts.isVoidExpression(expression) ||
+        (ts.isIdentifier(expression) && expression.text === "undefined")) return false;
+    if (ts.isStringLiteral(expression) || ts.isNoSubstitutionTemplateLiteral(expression)) return expression.text.trim().length > 0;
+    if (ts.isNumericLiteral(expression)) return true;
+    if (ts.isParenthesizedExpression(expression) || ts.isAsExpression(expression) || ts.isTypeAssertionExpression(expression) || ts.isNonNullExpression(expression)) {
+      return expressionMayProvideAccessibleText(expression.expression);
+    }
+    if (ts.isConditionalExpression(expression)) {
+      return expressionMayProvideAccessibleText(expression.whenTrue) || expressionMayProvideAccessibleText(expression.whenFalse);
+    }
+    if (ts.isArrayLiteralExpression(expression)) {
+      return expression.elements.some((element) => {
+        if (ts.isOmittedExpression(element)) return false;
+        if (ts.isSpreadElement(element)) return expressionMayProvideAccessibleText(element.expression);
+        return expressionMayProvideAccessibleText(element);
+      });
+    }
+    // A dynamic expression may produce visible text. Runtime projection is
+    // authoritative when the child is not statically knowable.
+    return true;
+  };
   const mayProvideAccessibleText = (child: ts.JsxChild): boolean => {
     if (ts.isJsxText(child)) return child.getText().trim().length > 0;
     if (ts.isJsxExpression(child)) {
       const expression = child.expression;
-      if (!expression || expression.kind === ts.SyntaxKind.FalseKeyword || expression.kind === ts.SyntaxKind.NullKeyword) return false;
-      if (ts.isStringLiteral(expression) || ts.isNoSubstitutionTemplateLiteral(expression)) return expression.text.trim().length > 0;
-      if (ts.isNumericLiteral(expression)) return true;
-      // A dynamic expression may produce visible text. Runtime projection is
-      // authoritative when the name is not statically knowable.
-      return true;
+      return expression ? expressionMayProvideAccessibleText(expression) : false;
     }
     if (ts.isJsxFragment(child)) return child.children.some(mayProvideAccessibleText);
     if (ts.isJsxSelfClosingElement(child)) return /^[A-Z]/.test(child.tagName.getText(child.getSourceFile()));
