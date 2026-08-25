@@ -2010,10 +2010,149 @@ function validateSource(project: SourceProject): string[] {
     }
     return null;
   };
+  const expressionMayProvideAccessibleText = (expression: ts.Expression): boolean => {
+    if (expression.kind === ts.SyntaxKind.FalseKeyword || expression.kind === ts.SyntaxKind.TrueKeyword ||
+        expression.kind === ts.SyntaxKind.NullKeyword || ts.isVoidExpression(expression) ||
+        (ts.isIdentifier(expression) && expression.text === "undefined")) return false;
+    if (ts.isStringLiteral(expression) || ts.isNoSubstitutionTemplateLiteral(expression)) return expression.text.trim().length > 0;
+    if (ts.isNumericLiteral(expression)) return true;
+    if (ts.isParenthesizedExpression(expression) || ts.isAsExpression(expression) || ts.isTypeAssertionExpression(expression) || ts.isNonNullExpression(expression)) {
+      return expressionMayProvideAccessibleText(expression.expression);
+    }
+    if (ts.isConditionalExpression(expression)) {
+      return expressionMayProvideAccessibleText(expression.whenTrue) || expressionMayProvideAccessibleText(expression.whenFalse);
+    }
+    if (ts.isArrayLiteralExpression(expression)) {
+      return expression.elements.some((element) => {
+        if (ts.isOmittedExpression(element)) return false;
+        if (ts.isSpreadElement(element)) return expressionMayProvideAccessibleText(element.expression);
+        return expressionMayProvideAccessibleText(element);
+      });
+    }
+    // A dynamic expression may produce visible text. Runtime projection is
+    // authoritative when the child is not statically knowable.
+    return true;
+  };
+  const mayProvideAccessibleText = (child: ts.JsxChild): boolean => {
+    if (ts.isJsxText(child)) return child.getText().trim().length > 0;
+    if (ts.isJsxExpression(child)) {
+      const expression = child.expression;
+      return expression ? expressionMayProvideAccessibleText(expression) : false;
+    }
+    if (ts.isJsxFragment(child)) return child.children.some(mayProvideAccessibleText);
+    if (ts.isJsxSelfClosingElement(child)) return /^[A-Z]/.test(child.tagName.getText(child.getSourceFile()));
+    if (ts.isJsxElement(child)) {
+      if (/^[A-Z]/.test(child.openingElement.tagName.getText(child.getSourceFile()))) return true;
+      return child.children.some(mayProvideAccessibleText);
+    }
+    return false;
+  };
+  type AccessibleLabelResolution =
+    | { kind: "absent" }
+    | { kind: "unknown" }
+    | { kind: "known"; value: string; node: ts.Node };
+  const expressionStringValue = (expression: ts.Expression): string | null =>
+    ts.isStringLiteral(expression) || ts.isNoSubstitutionTemplateLiteral(expression) ? expression.text : null;
+  const expressionIsDefinitelyUndefined = (expression: ts.Expression): boolean => {
+    if (ts.isVoidExpression(expression) || (ts.isIdentifier(expression) && expression.text === "undefined")) return true;
+    if (ts.isParenthesizedExpression(expression) || ts.isAsExpression(expression) || ts.isTypeAssertionExpression(expression) || ts.isNonNullExpression(expression)) {
+      return expressionIsDefinitelyUndefined(expression.expression);
+    }
+    return ts.isConditionalExpression(expression) &&
+      expressionIsDefinitelyUndefined(expression.whenTrue) && expressionIsDefinitelyUndefined(expression.whenFalse);
+  };
+  const resolveAccessibleLabelValue = (expression: ts.Expression, node: ts.Node): AccessibleLabelResolution => {
+    const value = expressionStringValue(expression);
+    if (value !== null) return { kind: "known", value, node };
+    return expressionIsDefinitelyUndefined(expression) ? { kind: "absent" } : { kind: "unknown" };
+  };
+  const propertyNameText = (name: ts.PropertyName | undefined): string | null => {
+    if (!name) return null;
+    if (ts.isIdentifier(name) || ts.isStringLiteral(name) || ts.isNumericLiteral(name)) return name.text;
+    if (ts.isComputedPropertyName(name)) return expressionStringValue(name.expression);
+    return null;
+  };
+  const resolveSpreadAccessibleLabel = (
+    expression: ts.Expression,
+    initial: AccessibleLabelResolution,
+  ): AccessibleLabelResolution => {
+    if (!ts.isObjectLiteralExpression(expression)) return { kind: "unknown" };
+    let resolution = initial;
+    for (const property of expression.properties) {
+      if (ts.isSpreadAssignment(property)) {
+        resolution = resolveSpreadAccessibleLabel(property.expression, resolution);
+        continue;
+      }
+      const name = propertyNameText(property.name);
+      if (name === null) {
+        // A computed property may overwrite accessibilityLabel at runtime.
+        resolution = { kind: "unknown" };
+        continue;
+      }
+      if (name !== "accessibilityLabel") continue;
+      if (ts.isPropertyAssignment(property)) {
+        resolution = resolveAccessibleLabelValue(property.initializer, property);
+      } else {
+        resolution = { kind: "unknown" };
+      }
+    }
+    return resolution;
+  };
+  const resolveAccessibleLabel = (node: ts.JsxOpeningElement | ts.JsxSelfClosingElement): AccessibleLabelResolution => {
+    const sourceFile = node.getSourceFile();
+    let resolution: AccessibleLabelResolution = { kind: "absent" };
+    for (const property of node.attributes.properties) {
+      if (ts.isJsxSpreadAttribute(property)) {
+        resolution = resolveSpreadAccessibleLabel(property.expression, resolution);
+        continue;
+      }
+      if (property.name.getText(sourceFile) !== "accessibilityLabel") continue;
+      if (property.initializer && ts.isJsxExpression(property.initializer) && property.initializer.expression) {
+        resolution = resolveAccessibleLabelValue(property.initializer.expression, property);
+      } else {
+        const value = jsxStringValue(property.initializer);
+        resolution = value === null ? { kind: "unknown" } : { kind: "known", value, node: property };
+      }
+    }
+    return resolution;
+  };
+  const validateAccessibleName = (node: ts.JsxOpeningElement | ts.JsxSelfClosingElement, tag: "button" | "slider"): void => {
+    const sourceFile = node.getSourceFile();
+    const labelResolution = resolveAccessibleLabel(node);
+    if (labelResolution.kind === "unknown") return;
+    if (labelResolution.kind === "known") {
+      const label = labelResolution.value;
+      const bytes = Buffer.byteLength(label, "utf8");
+      if (label.trim().length === 0) {
+        errors.push(locationMessage(
+          sourceFile,
+          labelResolution.node,
+          `ActionableAccessibleNameRequired: <${tag}> accessibilityLabel is blank. Fix: use a non-empty label naming the action.`,
+        ));
+      } else if (bytes > nativeWidgetTextByteLimit) {
+        errors.push(locationMessage(
+          sourceFile,
+          labelResolution.node,
+          `AccessibilityLabelTooLong: <${tag}> label is ${bytes} UTF-8 bytes; max_accessibility_label_bytes=${nativeWidgetTextByteLimit}, asked for ${bytes}, headroom=${nativeWidgetTextByteLimit - bytes}.`,
+        ));
+      }
+      return;
+    }
+    const hasText = tag === "button" && ts.isJsxOpeningElement(node) &&
+      ts.isJsxElement(node.parent) && node.parent.children.some(mayProvideAccessibleText);
+    if (!hasText) {
+      errors.push(locationMessage(
+        sourceFile,
+        node,
+        `ActionableAccessibleNameRequired: <${tag}> has no accessible name. Fix: ${tag === "button" ? "add visible <text>...</text> or " : "add "}accessibilityLabel=\"...\" naming the action.`,
+      ));
+    }
+  };
   const visit = (node: ts.Node): void => {
     if (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) {
       const sourceFile = node.getSourceFile();
       const tag = node.tagName.getText(sourceFile);
+      if (tag === "button" || tag === "slider") validateAccessibleName(node, tag);
       const classAttribute = node.attributes.properties.find((attribute): attribute is ts.JsxAttribute => ts.isJsxAttribute(attribute) && attribute.name.getText(sourceFile) === "class");
       if (classAttribute) {
         const classText = jsxStringValue(classAttribute.initializer);

@@ -72,6 +72,7 @@ export default widget({
                 ))}
               </row>
               <button
+                accessibilityLabel="Seek"
                 class="size-full bg-transparent"
                 onPress={(event) => {
                   if (media.durationMs <= 0) return;

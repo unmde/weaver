@@ -33,6 +33,7 @@ export default widget({
           <text class="text-sm tabular-nums text-white">{level}%</text>
         </row>
         <slider
+          accessibilityLabel="Level"
           value={level}
           max={100}
           onChange={setLevel}

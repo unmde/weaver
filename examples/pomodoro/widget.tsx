@@ -44,6 +44,7 @@ export default widget({
           <text class="text-xs text-[#e2e8f0]">{timer.minutes} min</text>
         </row>
         <slider
+          accessibilityLabel="Session length"
           class="w-[288px] h-[24px]"
           value={timer.minutes}
           max={60}

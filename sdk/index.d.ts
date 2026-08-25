@@ -142,11 +142,12 @@ declare global {
       icon: IconProps;
       image: BoxProps & { src: string; fit?: "cover" | "contain" | "stretch"; tile?: boolean };
       button: BoxProps & {
+        accessibilityLabel?: string;
         onPress: (event?: PressEvent) => void;
         onDoublePress?: (event: PressEvent) => void;
         onRightPress?: (event: PressEvent) => void;
       };
-      slider: BoxProps & { value: number; max: number; onChange: (value: number) => void };
+      slider: BoxProps & { accessibilityLabel?: string; value: number; max: number; onChange: (value: number) => void };
       canvas: BoxProps & { fps?: number; onFrame: (ctx: CanvasCtx, frame: CanvasFrame) => void };
     }
   }

@@ -120,6 +120,7 @@ interface HostInstance {
 }
 
 interface HostElementProps {
+  accessibilityLabel?: string;
   onPress?: (event?: PressEvent) => void;
   onDoublePress?: (event: PressEvent) => void;
   onRightPress?: (event: PressEvent) => void;
@@ -231,6 +232,10 @@ export function h(type: ElementType, props: Record<string, unknown> | null, ...c
     if (typeof source.onPress !== "function") throw new Error("<button> requires onPress={() => ...}");
     if (source.onDoublePress !== undefined && typeof source.onDoublePress !== "function") throw new Error("<button> onDoublePress must be a function");
     if (source.onRightPress !== undefined && typeof source.onRightPress !== "function") throw new Error("<button> onRightPress must be a function");
+  }
+  if ((type === "button" || type === "slider") && source.accessibilityLabel !== undefined &&
+      (typeof source.accessibilityLabel !== "string" || source.accessibilityLabel.trim().length === 0)) {
+    throw new Error(`<${type}> accessibilityLabel must be a non-empty string naming the action`);
   }
   return {
     __weaverElement: true,
@@ -642,6 +647,12 @@ function applyElementProps(instance: HostInstance, props: Record<string, unknown
   if (Boolean(previous.onDoublePress) !== Boolean(next.onDoublePress)) native.setHandler(instance.id, "doublepress", Boolean(next.onDoublePress));
   if (Boolean(previous.onRightPress) !== Boolean(next.onRightPress)) native.setHandler(instance.id, "rightpress", Boolean(next.onRightPress));
   if (Boolean(previous.onChange) !== Boolean(next.onChange)) native.setHandler(instance.id, "change", Boolean(next.onChange));
+  if (instance.type === "button" || instance.type === "slider") {
+    next.accessibilityLabel = props.accessibilityLabel as string | undefined;
+    if (!Object.is(previous.accessibilityLabel ?? "", next.accessibilityLabel ?? "")) {
+      native.setProp(instance.id, "accessibilityLabel", next.accessibilityLabel ?? "");
+    }
+  }
   if (!Object.is(previous.value, next.value) && next.value !== undefined) native.setProp(instance.id, "value", next.value);
   if (!Object.is(previous.max, next.max) && next.max !== undefined) native.setProp(instance.id, "max", next.max);
   if (!Object.is(previous.src, next.src) && next.src !== undefined) native.setProp(instance.id, "source", next.src);
