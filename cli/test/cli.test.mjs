@@ -6,7 +6,7 @@ import { build } from "esbuild";
 import { fileURLToPath } from "node:url";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { createServer } from "node:net";
 
 const originBundle = await build({
@@ -81,19 +81,30 @@ test("CLI failures are emitted as one actionable block", () => {
 });
 
 test("init accepts a path target and derives the widget name from its final segment", () => {
-  const root = mkdtempSync(join(tmpdir(), "weaver-init-path-"));
+  const root = mkdtempSync(join(tmpdir(), "weaver init path-"));
   const target = join("examples", "tideglass");
   const directory = join(realpathSync(root), target);
   const cli = fileURLToPath(new URL("../dist/index.js", import.meta.url));
+  const workspaceBin = fileURLToPath(new URL("../../node_modules/.bin/", import.meta.url));
   try {
     const initialized = spawnSync(process.execPath, [cli, "init", target], { cwd: root, encoding: "utf8" });
     assert.equal(initialized.status, 0, initialized.stderr);
-    assert.equal(initialized.stdout, `Initialized ${directory}\nNext: weaver check ${directory}\n`);
+    const quotedDirectory = process.platform === "win32"
+      ? `"${directory}"`
+      : `'${directory.replace(/'/g, "'\\''")}'`;
+    assert.equal(initialized.stdout, `Initialized ${directory}\nNext: weaver check ${quotedDirectory}\n`);
     assert.match(readFileSync(join(directory, "widget.tsx"), "utf8"), /name: "Tideglass"/);
     assert.ok(existsSync(join(directory, "tsconfig.json")));
 
-    const checked = spawnSync(process.execPath, [cli, "check", directory], { cwd: root, encoding: "utf8" });
+    const followUp = initialized.stdout.trimEnd().split("\n").at(-1).replace(/^Next: /, "");
+    const checked = spawnSync(followUp, {
+      cwd: root,
+      encoding: "utf8",
+      shell: true,
+      env: { ...process.env, PATH: `${workspaceBin}${delimiter}${process.env.PATH ?? ""}` },
+    });
     assert.equal(checked.status, 0, checked.stderr);
+    assert.equal(checked.stdout, `weaver check passed: ${directory}\n`);
 
     const invalid = spawnSync(process.execPath, [cli, "init", join("examples", "2-fast")], { cwd: root, encoding: "utf8" });
     assert.equal(invalid.status, 1);

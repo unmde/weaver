@@ -228,7 +228,12 @@ function initWidget(target: string): void {
   const displayName = name.replace(/[-_]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
   writeFileSync(join(directory, "widget.tsx"), starterSource(displayName), "utf8");
   writeAuthoringTsconfig(directory);
-  process.stdout.write(`Initialized ${directory}\nNext: weaver check ${directory}\n`);
+  process.stdout.write(`Initialized ${directory}\nNext: weaver check ${shellCommandArgument(directory)}\n`);
+}
+
+function shellCommandArgument(value: string): string {
+  if (process.platform === "win32") return `"${value.replace(/"/g, '""')}"`;
+  return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
 function writeAuthoringTsconfig(directory: string): void {
