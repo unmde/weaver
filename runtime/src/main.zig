@@ -680,6 +680,19 @@ fn viewRevision(model: *const Model) u64 {
     return model.tree.generation *% 2 +% @intFromBool(widget_log.failed());
 }
 
+/// Native surface requests are one-shot. A registered canvas callback owns
+/// the next request even when its retained commands are byte-for-byte
+/// unchanged; clearing the callback after dispatch leaves the surface idle.
+fn rearmCanvasFrameIfRegistered(
+    runtime: *native_sdk.Runtime,
+    window_id: native_sdk.platform.WindowId,
+    canvas_label: []const u8,
+    registered: bool,
+) anyerror!void {
+    if (!registered) return;
+    _ = try runtime.requestCanvasFrame(window_id, canvas_label);
+}
+
 /// Canvas callbacks mutate fixed command storage in `Tree.canvases`; the
 /// retained Native layout already owns the corresponding widget geometry.
 /// Re-point the retained slices (their lengths may change), emit once for all
@@ -695,6 +708,17 @@ fn projectSameViewUpdate(
         .canvas_frame => {},
         else => return true,
     }
+
+    // `fireCanvasFrames` has already run by the time projection starts, so
+    // this observes an fps=0/unmounted callback immediately. Paint diffing
+    // cannot own animation lifetime: an honest animation may draw identical
+    // commands on successive display ticks.
+    try rearmCanvasFrameIfRegistered(
+        runtime,
+        window_id,
+        canvas_label,
+        (model.engine orelse return true).hasCanvasFrames(),
+    );
 
     var updates: [tree_mod.max_canvases]native_sdk.runtime.CanvasWidgetImmediateUpdate = undefined;
     var update_count: usize = 0;
@@ -1949,6 +1973,37 @@ test "renderer backend status uses the portable public spelling" {
     try std.testing.expectEqualStrings("gpu", backendStatusLabel(.metal));
     try std.testing.expectEqualStrings("software", backendStatusLabel(.software));
     try std.testing.expectEqualStrings("-", backendStatusLabel(.none));
+}
+
+test "registered canvas callbacks rearm identical frames while paused callbacks stay stopped" {
+    const TestApp = struct {
+        fn app(self: *@This()) native_sdk.App {
+            return .{
+                .context = self,
+                .name = "weaver-canvas-frame-rearm",
+                .source = native_sdk.platform.WebViewSource.html("<p>idle</p>"),
+            };
+        }
+    };
+
+    const harness = try native_sdk.TestHarness().create(std.testing.allocator, .{});
+    defer harness.destroy(std.testing.allocator);
+    harness.null_platform.gpu_surfaces = true;
+    var app_state: TestApp = .{};
+    try harness.start(app_state.app());
+    _ = try harness.runtime.createView(.{
+        .window_id = 1,
+        .label = "canvas",
+        .kind = .gpu_surface,
+        .frame = native_sdk.geometry.RectF.init(0, 0, 100, 50),
+    });
+
+    harness.null_platform.gpu_surface_frame_request_count = 0;
+    try rearmCanvasFrameIfRegistered(&harness.runtime, 1, "canvas", false);
+    try std.testing.expectEqual(@as(usize, 0), harness.null_platform.gpu_surface_frame_request_count);
+    try rearmCanvasFrameIfRegistered(&harness.runtime, 1, "canvas", true);
+    try rearmCanvasFrameIfRegistered(&harness.runtime, 1, "canvas", true);
+    try std.testing.expectEqual(@as(usize, 2), harness.null_platform.gpu_surface_frame_request_count);
 }
 
 test "dev reload crosses requestFrame into the frame-requested hook exactly once" {
