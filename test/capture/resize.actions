@@ -1,0 +1,11 @@
+{
+  "schema": "weaver.capture.actions.v1",
+  "actions": [
+    {
+      "action": "resize",
+      "width": 641,
+      "height": 479,
+      "scale": 1.5
+    }
+  ]
+}

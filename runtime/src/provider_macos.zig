@@ -86,6 +86,15 @@ pub const Client = struct {
         self.thread = try std.Thread.spawn(.{ .stack_size = reader_stack_bytes }, readerMain, .{self});
     }
 
+    /// Explicit fixture mode for a short-lived capture. It makes provider
+    /// hooks available without opening the live host socket; frames still
+    /// enter JavaScript through the ordinary bridge dispatcher.
+    pub fn initCaptureFixture(self: *Client, io: std.Io) void {
+        self.io = io;
+        self.connected.store(1, .release);
+        self.disconnected.store(0, .release);
+    }
+
     pub fn deinit(self: *Client) void {
         if (self.stream) |stream| _ = c.shutdown(stream.socket.handle, c.SHUT_RDWR);
         if (self.thread) |thread| thread.join();

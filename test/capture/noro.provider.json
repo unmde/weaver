@@ -1,0 +1,18 @@
+{
+  "schema": "weaver.provider-fixture.v1",
+  "frames": [
+    {
+      "provider": "media",
+      "value": {
+        "title": "Capture Proof",
+        "artist": "Weaver",
+        "album": "Headless",
+        "status": "playing",
+        "playing": true,
+        "sourceApp": "fixture",
+        "positionMs": 42000,
+        "durationMs": 180000
+      }
+    }
+  ]
+}

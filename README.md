@@ -149,6 +149,19 @@ node cli/bin/weaver.js install myclock.weave
 node cli/bin/weaver.js uninstall Myclock
 ```
 
+For deterministic, windowless inspection, capture the widget directly:
+
+```sh
+node cli/bin/weaver.js capture myclock --out /tmp/myclock.png
+```
+
+This writes a PNG, a semantic `.snapshot.txt`, and a machine-readable
+`.receipt.json`, then prints the same receipt as one compact JSON line. Capture
+uses isolated empty state and does not start the host, registry, provider
+daemon, or development loop. Semantic action files, explicit provider
+fixtures, session-journal replay, receipt fields, and failure behavior are
+documented in [`docs/agent-widget-capture.md`](docs/agent-widget-capture.md).
+
 On Windows, use backslashes in the CLI path. Before running an audio-reactive
 Widget on macOS, authorize the signed host identity in the foreground:
 
@@ -212,7 +225,7 @@ for the widget you actually want.
 |---|---|
 | `runtime/` | `weaver-widget[.exe]` — Zig, embeds QuickJS-NG, renders via the Native SDK fork (submodule `runtime/native-sdk`) |
 | `sdk/` | `@weaver/sdk` — the authoring API: reconciler, hooks, class compiler. Contract frozen in [`sdk/CONTRACT.md`](sdk/CONTRACT.md) |
-| `cli/` | `weaver` — init / check / bundle / dev / pack / inspect / install / uninstall / logs |
+| `cli/` | `weaver` — init / check / bundle / capture / dev / pack / inspect / install / uninstall / logs |
 | `skills/` | agent skills (conjuring is the primary authoring path) |
 | `docs/adr/` | why things are the way they are — start here to understand the project |
 | `CONTEXT.md` | the domain glossary |

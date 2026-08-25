@@ -1,0 +1,11 @@
+{
+  "schema": "weaver.capture.actions.v1",
+  "actions": [
+    {
+      "action": "drag",
+      "target": { "role": "slider" },
+      "from": 0.1,
+      "to": 0.9
+    }
+  ]
+}

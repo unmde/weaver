@@ -1,0 +1,17 @@
+{
+  "schema": "weaver.capture.actions.v1",
+  "actions": [
+    {
+      "action": "click",
+      "target": { "role": "button", "name": "Start" }
+    },
+    {
+      "action": "advance-clock",
+      "milliseconds": 500
+    },
+    {
+      "action": "advance-clock",
+      "milliseconds": 500
+    }
+  ]
+}

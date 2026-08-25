@@ -1,14 +1,15 @@
 ---
 name: conjure-widget
-description: Create or remix a Weaver desktop widget from a natural-language request and take it through scaffold, TSX editing, static checking, and live desktop preview. Use for "make me a widget", "build a desktop widget", "conjure a clock/status surface", or requests to change an existing Weaver widget.
+description: Create or remix a Weaver desktop widget from a natural-language request and take it through scaffold, TSX editing, static checking, deterministic capture, and optional live desktop preview. Use for "make me a widget", "build a desktop widget", "conjure a clock/status surface", or requests to change an existing Weaver widget.
 ---
 
 # Conjure a Weaver widget
 
-Turn a natural-language request into one checked `widget.tsx`, then launch the
-real desktop surface. Preserve visual intent and keep unsupported requests
-loud. Read `sdk/CONTRACT.md` when exact props, provider shapes, security rules,
-or the complete utility table matter; it is authoritative.
+Turn a natural-language request into one checked `widget.tsx`, capture its
+pixels and semantic tree, then launch the real desktop surface only when live
+OS behavior needs inspection. Preserve visual intent and keep unsupported
+requests loud. Read `sdk/CONTRACT.md` when exact props, provider shapes,
+security rules, or the complete utility table matter; it is authoritative.
 
 ## Workflow
 
@@ -20,9 +21,18 @@ or the complete utility table matter; it is authoritative.
    images with relative paths and fonts as `font-[file-stem]`.
 4. Run `npx --no-install weaver check <name>` and fix every error. Never
    suppress an unknown utility, undeclared provider/origin, or asset failure.
-5. Run `npx --no-install weaver dev <name>`. Leave it running for inspection;
-   saving `widget.tsx` validates and hot-swaps when window config is unchanged.
-6. Report the visible result, interaction behavior, and any explicit boundary.
+5. Run `npx --no-install weaver capture <name> --out <name>.png`. Inspect the
+   PNG, `<name>.snapshot.txt`, and `<name>.receipt.json`; a successful receipt
+   must describe nonblank pixels, the semantic tree, and any pending work.
+   Use semantic `--action-file` steps for interaction and an explicit
+   `--provider-fixture` for every subscribed provider except `time`. See
+   `docs/agent-widget-capture.md` for both schemas.
+6. Run `npx --no-install weaver dev <name>` only when the request needs live
+   desktop placement, OS integration, or interactive visual inspection. Leave
+   it running for inspection; saving `widget.tsx` validates and hot-swaps when
+   window config is unchanged.
+7. Report the captured result, interaction behavior, receipt evidence, and any
+   explicit boundary.
 
 ## Elements and events
 

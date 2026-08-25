@@ -52,6 +52,7 @@ pub const Engine = struct {
     provider: *provider_mod.Client,
     deadline_ms: u64 = 0,
     executing: bool = false,
+    capture_clock_ms: ?u64 = null,
     pending_rejections: [max_pending_rejections]PendingRejection = [_]PendingRejection{.{}} ** max_pending_rejections,
 
     pub fn create(
@@ -114,6 +115,46 @@ pub const Engine = struct {
         defer c.JS_FreeValue(self.context, result);
         if (c.JS_IsException(result)) return self.reportException();
         try self.pumpJobs();
+    }
+
+    /// Feed an explicit capture fixture through the same provider callback
+    /// installed by `native.onProvider`. The capture bootstrap owns when this
+    /// is called; ordinary desktop provider frames still arrive from Client.
+    pub fn dispatchProviderFixture(self: *Engine, line: []const u8) Error!void {
+        self.beginTurn();
+        defer self.endTurn();
+        if (!bridge.dispatchProvider(self.context, &self.bridge_state, line)) return self.reportException();
+        try self.pumpJobs();
+    }
+
+    pub fn setCaptureClock(self: *Engine, epoch_ms: u64) !void {
+        // JavaScript numbers preserve every integer only through 2^53 - 1;
+        // the capture clock must remain byte-exact when it crosses into JS.
+        const max_safe_integer: u64 = 9_007_199_254_740_991;
+        if (epoch_ms > max_safe_integer) return error.CaptureClockOutOfRange;
+        const script = try std.fmt.allocPrint(
+            std.heap.page_allocator,
+            "Object.defineProperty(globalThis, '__weaverCaptureNowMs', {{ value: {d}, writable: true, configurable: false }});",
+            .{epoch_ms},
+        );
+        defer std.heap.page_allocator.free(script);
+        try self.evaluate(script, "weaver-capture-clock.js");
+        self.capture_clock_ms = epoch_ms;
+    }
+
+    pub fn advanceCaptureClock(self: *Engine, milliseconds: u64) !void {
+        const current = self.capture_clock_ms orelse return;
+        const max_safe_integer: u64 = 9_007_199_254_740_991;
+        if (milliseconds > max_safe_integer - current) return error.CaptureClockOutOfRange;
+        const next = current + milliseconds;
+        const script = try std.fmt.allocPrint(
+            std.heap.page_allocator,
+            "globalThis.__weaverCaptureNowMs = {d};",
+            .{next},
+        );
+        defer std.heap.page_allocator.free(script);
+        try self.evaluate(script, "weaver-capture-clock-advance.js");
+        self.capture_clock_ms = next;
     }
 
     pub fn timers(self: *const Engine) []const bridge.TimerSlot {
@@ -208,6 +249,10 @@ pub const Engine = struct {
 
     pub fn hasActiveFetches(self: *const Engine) bool {
         return bridge.hasActiveFetches(&self.bridge_state);
+    }
+
+    pub fn activeFetchCount(self: *const Engine) usize {
+        return bridge.activeFetchCount(&self.bridge_state);
     }
 
     pub fn renderFailed(self: *const Engine) bool {
