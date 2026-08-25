@@ -1275,10 +1275,15 @@ fn synchronizeImages(model: *Model, effects: *Effects) !void {
     model.image_tree_generation = synchronized_generation;
 }
 
-fn nativeWindowLayer(manifest_layer: []const u8) native_sdk.WindowLayer {
-    if (std.mem.eql(u8, manifest_layer, "desktop")) return .bottom;
-    if (std.mem.eql(u8, manifest_layer, "topmost")) return .topmost;
-    return .normal;
+const NativeWindowLayers = struct {
+    shell: native_sdk.app_manifest.WindowLayer,
+    startup: native_sdk.WindowLayer,
+};
+
+fn nativeWindowLayers(manifest_layer: []const u8) NativeWindowLayers {
+    if (std.mem.eql(u8, manifest_layer, "desktop")) return .{ .shell = .bottom, .startup = .bottom };
+    if (std.mem.eql(u8, manifest_layer, "topmost")) return .{ .shell = .topmost, .startup = .topmost };
+    return .{ .shell = .normal, .startup = .normal };
 }
 
 pub fn main(init: std.process.Init) !void {
@@ -1380,7 +1385,7 @@ pub fn main(init: std.process.Init) !void {
         .gpu_color_space = .srgb,
         .gpu_vsync = true,
     }};
-    const window_layer = nativeWindowLayer(loaded.manifest.layer);
+    const window_layers = nativeWindowLayers(loaded.manifest.layer);
     const shell_windows = [_]native_sdk.ShellWindow{.{
         .label = "main",
         .title = loaded.manifest.name,
@@ -1392,7 +1397,7 @@ pub fn main(init: std.process.Init) !void {
         .restore_state = false,
         .titlebar = .chromeless,
         .transparent = true,
-        .layer = window_layer,
+        .layer = window_layers.shell,
         .click_through = loaded.manifest.clickThrough,
         .no_activate = true,
         .views = &shell_views,
@@ -1571,7 +1576,7 @@ pub fn main(init: std.process.Init) !void {
         // move tick.
         .persist_window_state = false,
         .primary_display_anchor = if (builtin.os.tag == .macos and dragged == null) manifest_mod.primaryDisplayAnchor(loaded.manifest) else null,
-        .startup_window_layer = window_layer,
+        .startup_window_layer = window_layers.startup,
         .startup_click_through = loaded.manifest.clickThrough,
         .js_window_api = false,
     }, init) catch |err| {
@@ -1684,9 +1689,15 @@ fn captureMediaCommandValid(command: provider_mod.CaptureMediaCommand) bool {
 }
 
 test "runtime startup window layer mirrors the dynamic manifest" {
-    try std.testing.expectEqual(native_sdk.WindowLayer.bottom, nativeWindowLayer("desktop"));
-    try std.testing.expectEqual(native_sdk.WindowLayer.normal, nativeWindowLayer("normal"));
-    try std.testing.expectEqual(native_sdk.WindowLayer.topmost, nativeWindowLayer("topmost"));
+    const desktop = nativeWindowLayers("desktop");
+    try std.testing.expectEqual(native_sdk.app_manifest.WindowLayer.bottom, desktop.shell);
+    try std.testing.expectEqual(native_sdk.WindowLayer.bottom, desktop.startup);
+    const normal = nativeWindowLayers("normal");
+    try std.testing.expectEqual(native_sdk.app_manifest.WindowLayer.normal, normal.shell);
+    try std.testing.expectEqual(native_sdk.WindowLayer.normal, normal.startup);
+    const topmost = nativeWindowLayers("topmost");
+    try std.testing.expectEqual(native_sdk.app_manifest.WindowLayer.topmost, topmost.shell);
+    try std.testing.expectEqual(native_sdk.WindowLayer.topmost, topmost.startup);
 }
 
 test "capture media command seek must round-trip through JavaScript exactly" {
