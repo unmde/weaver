@@ -218,6 +218,7 @@ test("widget renders one native generation and providers use native timers", asy
   const storageTimer = operations.filter(([name, ms]) => name === "setInterval" && ms === 200).at(-1)[2];
   callbacks.get(storageTimer)();
   assert.equal(JSON.parse(storageDocument).minutes, 30);
+  assert.ok(operations.some(([name, id]) => name === "clearInterval" && id === storageTimer));
   assert.equal(typeof providerCallback, "function");
   providerCallback('{"provider":"cpu","value":{"percent":37.5,"perCore":[30,45]}}');
   providerCallback('{"provider":"audio","value":{"rms":0.25,"bands":[0.75]}}');
@@ -248,6 +249,39 @@ test("widget renders one native generation and providers use native timers", asy
   assert.equal(submit[2][2], 1);
   assert.ok(operations.some((operation) => operation[0] === "onCanvasFrame" && operation[1] === canvasNode));
   assert.throws(() => retainedCanvasContext.clear(), /only be called inside onFrame/);
+});
+
+test("deterministic capture persists useStorage without a framework timer", async () => {
+  const source = `
+    import { h, useStorage, widget } from "./src/index.ts";
+    widget({ name: "Storage capture", size: [100, 50] }, () => {
+      const [value, setValue] = useStorage("value", 1);
+      globalThis.setCapturedValue = setValue;
+      return h("text", null, value);
+    });
+  `;
+  const output = await build({
+    stdin: { contents: source, resolveDir: fileURLToPath(new URL("..", import.meta.url)), sourcefile: "storage-capture-fixture.ts" },
+    bundle: true, format: "iife", platform: "neutral", write: false,
+  });
+  const fixtureOperations = [];
+  let document = null;
+  const native = {
+    ...isolatedNative(),
+    setInterval(milliseconds) { fixtureOperations.push(["setInterval", milliseconds]); return 1; },
+    clearInterval(id) { fixtureOperations.push(["clearInterval", id]); },
+    storageRead() { return document; },
+    storageWrite(json) { fixtureOperations.push(["storageWrite", json]); document = json; },
+  };
+  const context = { native, __weaverCaptureNowMs: Date.parse("2026-08-24T17:30:00.000Z") };
+  vm.runInNewContext(output.outputFiles[0].text, context);
+
+  context.setCapturedValue(2);
+  await Promise.resolve();
+
+  assert.equal(JSON.parse(document).value, 2);
+  assert.deepEqual(fixtureOperations.filter(([name]) => name === "setInterval"), []);
+  assert.equal(fixtureOperations.filter(([name]) => name === "storageWrite").length, 1);
 });
 
 test("styling 08 runtime accepts only bundle-lowered path icons and rejects children before native mutation", () => {

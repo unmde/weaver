@@ -1,0 +1,13 @@
+{
+  "schema": "weaver.capture.actions.v1",
+  "actions": [
+    {
+      "action": "click",
+      "target": { "role": "button", "name": "Log one glass" }
+    },
+    {
+      "action": "click",
+      "target": { "role": "button", "name": "Log one glass" }
+    }
+  ]
+}
