@@ -704,21 +704,23 @@ fn projectSameViewUpdate(
     model: *const Model,
     msg: Msg,
 ) anyerror!bool {
-    switch (msg) {
-        .canvas_frame => {},
-        else => return true,
-    }
-
-    // `fireCanvasFrames` has already run by the time projection starts, so
-    // this observes an fps=0/unmounted callback immediately. Paint diffing
-    // cannot own animation lifetime: an honest animation may draw identical
-    // commands on successive display ticks.
+    // The update has already run by the time projection starts. Observe the
+    // current callback state before specializing by message: a provider wake
+    // can register fps="display" from idle and must start the one-shot native
+    // frame chain, while a canvas callback can clear itself and must not
+    // request another tick. Paint diffing cannot own animation lifetime: an
+    // honest animation may draw identical commands on successive ticks.
     try rearmCanvasFrameIfRegistered(
         runtime,
         window_id,
         canvas_label,
         (model.engine orelse return true).hasCanvasFrames(),
     );
+
+    switch (msg) {
+        .canvas_frame => {},
+        else => return true,
+    }
 
     var updates: [tree_mod.max_canvases]native_sdk.runtime.CanvasWidgetImmediateUpdate = undefined;
     var update_count: usize = 0;
@@ -2004,6 +2006,71 @@ test "registered canvas callbacks rearm identical frames while paused callbacks 
     try rearmCanvasFrameIfRegistered(&harness.runtime, 1, "canvas", true);
     try rearmCanvasFrameIfRegistered(&harness.runtime, 1, "canvas", true);
     try std.testing.expectEqual(@as(usize, 2), harness.null_platform.gpu_surface_frame_request_count);
+}
+
+test "registering a display callback from an idle provider update starts its frame chain" {
+    const TestApp = struct {
+        fn app(self: *@This()) native_sdk.App {
+            return .{
+                .context = self,
+                .name = "weaver-canvas-frame-resume",
+                .source = native_sdk.platform.WebViewSource.html("<p>idle</p>"),
+            };
+        }
+    };
+
+    const harness = try native_sdk.TestHarness().create(std.testing.allocator, .{});
+    defer harness.destroy(std.testing.allocator);
+    harness.null_platform.gpu_surfaces = true;
+    var app_state: TestApp = .{};
+    try harness.start(app_state.app());
+    _ = try harness.runtime.createView(.{
+        .window_id = 1,
+        .label = "canvas",
+        .kind = .gpu_surface,
+        .frame = native_sdk.geometry.RectF.init(0, 0, 100, 50),
+    });
+
+    const model = try std.testing.allocator.create(Model);
+    defer std.testing.allocator.destroy(model);
+    model.* = .{};
+    model.tree.allocator = std.testing.allocator;
+    defer model.tree.deinit();
+    try model.provider.init(std.testing.io, null);
+    defer model.provider.deinit();
+    var store: storage_mod.Store = .{
+        .io = std.testing.io,
+        .allocator = std.testing.allocator,
+        .directory = ".",
+        .path = "weaver-canvas-frame-resume-storage.json",
+        .temporary_path = "weaver-canvas-frame-resume-storage.tmp",
+    };
+    const engine = try js_engine.Engine.create(
+        std.testing.allocator,
+        &model.tree,
+        &store,
+        &.{},
+        &model.provider,
+        false,
+        false,
+    );
+    defer engine.destroy(std.testing.allocator);
+    model.engine = engine;
+
+    const canvas_id = try model.tree.createNode(.canvas);
+    try std.testing.expectEqual(@as(tree_mod.NodeId, 1), canvas_id);
+    try engine.evaluate("native.onCanvasFrame(1, () => {});", "canvas-frame-resume-test.js");
+    try std.testing.expect(engine.hasCanvasFrames());
+
+    harness.null_platform.gpu_surface_frame_request_count = 0;
+    try std.testing.expect(try projectSameViewUpdate(
+        &harness.runtime,
+        1,
+        "canvas",
+        model,
+        .{ .external_wake = .{ .provider = true, .dev_reload = false } },
+    ));
+    try std.testing.expectEqual(@as(usize, 1), harness.null_platform.gpu_surface_frame_request_count);
 }
 
 test "dev reload crosses requestFrame into the frame-requested hook exactly once" {
