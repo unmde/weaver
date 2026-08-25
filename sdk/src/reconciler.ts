@@ -380,8 +380,14 @@ const mediaTransport: MediaTransport = {
   next: () => sendMediaCommand("next"),
   previous: () => sendMediaCommand("previous"),
   seek: (ms) => {
+    if (typeof ms !== "number" || !Number.isFinite(ms) || ms < 0) {
+      const received = typeof ms === "number" ? String(ms) : typeof ms;
+      return Promise.reject(new Error(
+        `seekMs must be a finite non-negative number that rounds to a JavaScript-safe integer; received ${received}`,
+      ));
+    }
     const seekMs = Math.round(ms);
-    return Number.isFinite(ms) && ms >= 0 && Number.isSafeInteger(seekMs)
+    return Number.isSafeInteger(seekMs)
       ? sendMediaCommand("seek", seekMs)
       : Promise.reject(new Error(
         `seekMs must be a finite non-negative number that rounds to a JavaScript-safe integer; received ${String(ms)}`,
