@@ -1984,7 +1984,7 @@ function validateLoweredTree(project: SourceProject, errors: string[]): void {
         return true;
       }
     }
-    if (tag !== "stack") return false;
+    if (tag !== "stack" && tag !== "row" && tag !== "column") return false;
     const uniformPadding = typeof compiled.padding === "number" ? compiled.padding : 0;
     const padding = {
       left: typeof compiled.paddingLeft === "number" && compiled.paddingLeft >= 0 ? compiled.paddingLeft : uniformPadding,
@@ -1999,7 +1999,13 @@ function validateLoweredTree(project: SourceProject, errors: string[]): void {
       height: rect.height - padding.top - padding.bottom,
     };
     if (content.width < 0 || content.height < 0) return false;
-    for (const child of visualChildren(node)) {
+    const children = visualChildren(node);
+    // Stack children overlay independently, so every full-size child has the
+    // content rect. A row or column passes that same rect only when it has one
+    // visual child; multiple flex children require layout to determine their
+    // main-axis sizes and are left to runtime rendering.
+    const candidates = tag === "stack" || children.length === 1 ? children : [];
+    for (const child of candidates) {
       const childCompiled = compiledClass(child);
       if (!childCompiled) continue;
       const fillsContent = (childCompiled.widthPercent === 100 && childCompiled.heightPercent === 100) ||

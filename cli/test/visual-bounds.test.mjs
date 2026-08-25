@@ -77,6 +77,27 @@ export default widget({ name: "Nested Clipped Shadow", size: [100, 100] }, () =>
   }
 });
 
+for (const container of ["row", "column"]) {
+  test(`check follows a lone full-size child through a ${container} root`, () => {
+    const source = `import { widget } from "@weaver/sdk";
+export default widget({ name: "Nested ${container} Shadow", size: [100, 100] }, () => (
+  <${container} class="size-full">
+    <panel class="size-full rounded-[24px] shadow-[0_16px_28px_0_#00000066]" />
+  </${container}>
+));
+`;
+    const { root, widget } = fixture(source);
+    try {
+      const checked = runCli(root, "check", widget);
+      assert.equal(checked.status, 1);
+      assert.match(checked.stderr, /RootOutsetShadowClipped: root-surface <panel>/);
+      assert.match(checked.stderr, /missing: left=28px, top=12px, right=28px, bottom=44px/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+}
+
 test("check accepts an inset shadow on a full-size root", () => {
   const source = `import { widget } from "@weaver/sdk";
 export default widget({ name: "Inset Shadow", size: [100, 100] }, () => (
