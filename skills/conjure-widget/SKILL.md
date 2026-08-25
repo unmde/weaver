@@ -20,15 +20,17 @@ security rules, or the complete utility table matter; it is authoritative.
    `export default widget({ ... }, () => <... />);`. Do not compute config.
 3. Keep local images/fonts/licenses inside the widget source root. Reference
    images with relative paths and fonts as `font-[file-stem]`.
-4. Run `npx --no-install weaver check <name>` and fix every error. Never
+4. Run `npx --no-install weaver check <path>` and fix every error. Never
    suppress an unknown utility, undeclared provider/origin, or asset failure.
-5. Run `npx --no-install weaver capture <name> --out <name>.png`. Inspect the
-   PNG, `<name>.snapshot.txt`, and `<name>.receipt.json`; a successful receipt
-   must describe nonblank pixels, the semantic tree, and any pending work.
+5. Choose any convenient `<capture-name>`, then run
+   `npx --no-install weaver capture <path> --out <capture-name>.png`. Inspect
+   the PNG, `<capture-name>.snapshot.txt`, and `<capture-name>.receipt.json`;
+   a successful receipt must describe nonblank pixels, the semantic tree, and
+   any pending work.
    Use semantic `--action-file` steps for interaction and an explicit
    `--provider-fixture` for every subscribed provider except `time`. See
    `docs/agent-widget-capture.md` for both schemas.
-6. Run `npx --no-install weaver dev <name>` only when the request needs live
+6. Run `npx --no-install weaver dev <path>` only when the request needs live
    desktop placement, OS integration, or interactive visual inspection. Leave
    it running for inspection; saving `widget.tsx` validates and hot-swaps when
    window config is unchanged.
