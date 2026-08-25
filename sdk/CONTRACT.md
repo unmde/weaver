@@ -686,9 +686,10 @@ interface MediaTransport {
 const transport = useMediaTransport();
 ```
 
-`seek` is absolute and accepts only finite, non-negative integer
-milliseconds. The host clamps it to a known session duration. A promise
-resolves `true` only when the OS media API reports success. It resolves
+`seek` is absolute and accepts any finite, non-negative millisecond value. The
+SDK rounds it to the nearest whole millisecond and rejects when that result is
+not a JavaScript-safe integer. The host clamps it to a known session duration.
+A promise resolves `true` only when the OS media API reports success. It resolves
 `false` when a valid request reaches weaverd but the capability is refused,
 there is no session, or the OS declines the operation. Channel
 unavailability, malformed protocol, a three-second timeout, disconnect, and
@@ -762,6 +763,6 @@ this amendment. It subscribes to `media` and `time`, declares
 widget-local fallback, and derives the play/pause glyph from `status`.
 
 Click-to-seek uses the event's normalized local `u` coordinate. The handler
-clamps `event.u` to `[0, 1]`, multiplies by `durationMs`, rounds to an integer,
-and passes that absolute value to `seek(ms)`. Click-only seek is the contracted
-example behavior; dragging is not implied.
+clamps `event.u` to `[0, 1]`, multiplies by `durationMs`, and passes that
+absolute value to `seek(ms)`. The SDK owns whole-millisecond normalization.
+Click-only seek is the contracted example behavior; dragging is not implied.

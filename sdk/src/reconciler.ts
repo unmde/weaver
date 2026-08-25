@@ -80,6 +80,7 @@ export interface MediaTransport {
   pause(): Promise<boolean>;
   next(): Promise<boolean>;
   previous(): Promise<boolean>;
+  /** Seeks to the nearest whole millisecond. */
   seek(ms: number): Promise<boolean>;
 }
 type ProviderValue = TimeData | CpuData | MemoryData | AudioData | MediaData;
@@ -378,9 +379,20 @@ const mediaTransport: MediaTransport = {
   pause: () => sendMediaCommand("pause"),
   next: () => sendMediaCommand("next"),
   previous: () => sendMediaCommand("previous"),
-  seek: (ms) => Number.isFinite(ms) && Number.isInteger(ms) && ms >= 0
-    ? sendMediaCommand("seek", ms)
-    : Promise.reject(new Error("seekMs must be a finite non-negative integer")),
+  seek: (ms) => {
+    if (typeof ms !== "number" || !Number.isFinite(ms) || ms < 0) {
+      const received = typeof ms === "number" ? String(ms) : typeof ms;
+      return Promise.reject(new Error(
+        `seekMs must be a finite non-negative number that rounds to a JavaScript-safe integer; received ${received}`,
+      ));
+    }
+    const seekMs = Math.round(ms);
+    return Number.isSafeInteger(seekMs)
+      ? sendMediaCommand("seek", seekMs)
+      : Promise.reject(new Error(
+        `seekMs must be a finite non-negative number that rounds to a JavaScript-safe integer; received ${String(ms)}`,
+      ));
+  },
 };
 
 export function useMediaTransport(): MediaTransport {

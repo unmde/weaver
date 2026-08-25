@@ -235,7 +235,16 @@ test("widget renders one native generation and providers use native timers", asy
     JSON.parse(operations.findLast((operation) => operation[0] === "mediaCommand")[1]),
     { command: "media", verb: "play", id: 1 },
   );
-  await assert.rejects(transport.seek(1.5), /finite non-negative integer/);
+  assert.equal(await transport.seek(1.5), true);
+  assert.deepEqual(
+    JSON.parse(operations.findLast((operation) => operation[0] === "mediaCommand")[1]),
+    { command: "media", verb: "seek", seekMs: 2, id: 2 },
+  );
+  await assert.rejects(transport.seek(-0.1), /received -0.1/);
+  await assert.rejects(transport.seek(Number.NaN), /received NaN/);
+  await assert.rejects(transport.seek(Number.MAX_VALUE), /JavaScript-safe integer/);
+  await assert.rejects(transport.seek(Symbol("invalid")), /received symbol/);
+  await assert.rejects(transport.seek(1n), /received bigint/);
   const canvasNodes = operations.filter((operation) => operation[0] === "createNode" && operation[1] === "canvas");
   const pausedCanvasNode = canvasNodes[0][2];
   const canvasNode = canvasNodes[1][2];
