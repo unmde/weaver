@@ -8,14 +8,15 @@ function verificationClock(tick: number): string {
 
 export default widget({
   name: "Styling Text",
-  size: [440, 220],
+  size: [500, 280],
   anchor: { corner: "top-right", offset: [24, 24] },
 }, () => {
   const [tick, setTick] = useState(0);
   useInterval(() => setTick((value) => value + 1), 1000);
 
   return (
-    <column class="size-full p-5 gap-4 bg-zinc-950 rounded-2xl border border-zinc-700 shadow-xl">
+    <stack class="size-full pl-[30px] pt-[10px] pr-[30px] pb-[50px]">
+    <column class="w-[440px] h-[220px] p-5 gap-4 bg-zinc-950 rounded-2xl border border-zinc-700 shadow-xl">
       <column class="gap-1">
         <text class="text-lg font-semibold tracking-wide text-white">CoreText verification</text>
         <text class="text-xs text-zinc-400">The live row changes once per second; every digit column must stay fixed.</text>
@@ -38,5 +39,6 @@ export default widget({
         </column>
       </row>
     </column>
+    </stack>
   );
 });

@@ -363,10 +363,9 @@ pub const Tree = struct {
         return index < max_nodes and self.occupied.isSet(index);
     }
 
-    pub const CanvasAncestorViolation = struct {
+    pub const CanvasOpacityAncestorViolation = struct {
         canvas_id: NodeId,
         ancestor_id: NodeId,
-        reason: enum { clip, opacity },
     };
 
     pub const ActionableNameViolation = struct {
@@ -398,15 +397,14 @@ pub const Tree = struct {
         return false;
     }
 
-    pub fn canvasAncestorViolation(self: *const Tree) ?CanvasAncestorViolation {
+    pub fn canvasOpacityAncestorViolation(self: *const Tree) ?CanvasOpacityAncestorViolation {
         for (&self.nodes, 0..) |*node_value, index| {
             if (!self.occupied.isSet(index) or node_value.kind != .canvas) continue;
             const canvas_id: NodeId = @intCast(index + 1);
             var ancestor_id = node_value.parent;
             while (ancestor_id) |id| {
                 const ancestor = self.nodeConst(id) catch break;
-                if (ancestor.overflow_hidden) return .{ .canvas_id = canvas_id, .ancestor_id = id, .reason = .clip };
-                if (ancestor.opacity < 1) return .{ .canvas_id = canvas_id, .ancestor_id = id, .reason = .opacity };
+                if (ancestor.opacity < 1) return .{ .canvas_id = canvas_id, .ancestor_id = id };
                 ancestor_id = ancestor.parent;
             }
         }
@@ -1422,7 +1420,7 @@ test "render transactions reuse snapshot storage and validate only the outer clo
     try std.testing.expect(!tree.prepareEndBatch());
     try tree.setOverflowHidden(root, false);
     try std.testing.expect(tree.prepareEndBatch());
-    try std.testing.expect(tree.canvasAncestorViolation() == null);
+    try std.testing.expect(tree.canvasOpacityAncestorViolation() == null);
     tree.commitBatch();
 
     const storage = tree.snapshot_storage.?;
@@ -1447,7 +1445,7 @@ test "error surface is deterministic and replaces authored content" {
     );
 }
 
-test "canvas ancestor violations name clipping and opacity separately" {
+test "canvas opacity validation permits rounded clipping" {
     var tree: Tree = .{};
     const root = try tree.createNode(.column);
     const opacity = try tree.createNode(.panel);
@@ -1455,15 +1453,11 @@ test "canvas ancestor violations name clipping and opacity separately" {
     try tree.setOverflowHidden(root, true);
     try tree.appendChild(root, opacity);
     try tree.appendChild(opacity, canvas);
-    const clipped = tree.canvasAncestorViolation().?;
-    try std.testing.expectEqual(canvas, clipped.canvas_id);
-    try std.testing.expectEqual(root, clipped.ancestor_id);
-    try std.testing.expectEqual(.clip, clipped.reason);
-    try tree.setOverflowHidden(root, false);
+    try std.testing.expect(tree.canvasOpacityAncestorViolation() == null);
     try tree.setNumberProp(opacity, "opacity", 0.5);
-    const faded = tree.canvasAncestorViolation().?;
+    const faded = tree.canvasOpacityAncestorViolation().?;
+    try std.testing.expectEqual(canvas, faded.canvas_id);
     try std.testing.expectEqual(opacity, faded.ancestor_id);
-    try std.testing.expectEqual(.opacity, faded.reason);
 }
 
 test "interaction style storage stays fixed per occupied node" {

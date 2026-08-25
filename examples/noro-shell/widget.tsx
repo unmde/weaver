@@ -41,10 +41,9 @@ export default widget({
                 the art can be any color — a white cover leaves white text on
                 white. This is a baked ramp: 36px of flat 78% scrim under the row
                 so it always reads, easing to nothing over the 56px above so the
-                shadow rises into the art with no visible edge. Baked, not drawn:
-                a <canvas> gets no host GPU surface under a clipping ancestor
-                (this well is overflow-hidden), and a stack of translucent panels
-                silently blanks the widget past the retained-tree node budget. */}
+                shadow rises into the art with no visible edge. Baked, not drawn,
+                because this static ramp needs no frame clock and a stack of
+                translucent panels would waste the retained-tree node budget. */}
             <image src="./assets/ArtShadow.png" fit="stretch" class="w-full h-[92px]" />
           </column>
           <column class="size-full pt-[22px] pr-[24px] items-end">

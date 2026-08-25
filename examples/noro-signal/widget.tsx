@@ -9,7 +9,7 @@ function timestamp(ms: number): string {
 
 export default widget({
   name: "Noro Signal",
-  size: [430, 248],
+  size: [510, 328],
   anchor: { corner: "top-right", offset: [24, 32] },
   subscribe: ["time", "media"],
   capabilities: ["media-transport"],
@@ -22,8 +22,8 @@ export default widget({
   const filledSegments = Math.round(progress * progressSegments);
 
   return (
-    <stack class="size-full rounded-[28px] overflow-hidden">
-      <column class="size-full p-[16px] gap-[12px] rounded-[28px] bg-[#080c12]/96 border border-[#223044] shadow-[0_16px_40px_0_#00000080]">
+    <stack class="size-full pl-[40px] pt-[24px] pr-[40px] pb-[56px]">
+      <column class="w-[430px] h-[248px] p-[16px] gap-[12px] rounded-[28px] bg-[#080c12]/96 border border-[#223044] shadow-[0_16px_40px_0_#00000080]">
         <row class="w-full grow gap-[16px]">
           <stack class="w-[150px] h-[150px] shrink-0 rounded-[18px] overflow-hidden bg-[#101923] border border-[#2a3c52] shadow-inner">
             {media.artPath

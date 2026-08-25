@@ -4,10 +4,11 @@ const noop = () => {};
 
 export default widget({
   name: "Retro Player Shell",
-  size: [760, 520],
+  size: [820, 580],
   anchor: { corner: "top-right", offset: [32, 32] },
 }, () => (
-  <column class="size-full p-5 gap-4 bg-stone-900 rounded-tl-3xl rounded-tr-lg rounded-br-3xl rounded-bl-xl border-2 border-stone-600 shadow-xl">
+  <stack class="size-full pl-[30px] pt-[10px] pr-[30px] pb-[50px]">
+  <column class="w-[760px] h-[520px] p-5 gap-4 bg-stone-900 rounded-tl-3xl rounded-tr-lg rounded-br-3xl rounded-bl-xl border-2 border-stone-600 shadow-xl">
     <row class="justify-between items-center">
       <column class="gap-1">
         <text class="text-xs tracking-widest text-amber-300 font-[GeistPixel-Square] text-shadow-sm">WEAVER HI-FI SYSTEM</text>
@@ -64,4 +65,5 @@ export default widget({
       </button>
     </row>
   </column>
+  </stack>
 ));

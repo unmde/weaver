@@ -2,10 +2,11 @@ import { widget } from "@weaver/sdk";
 
 export default widget({
   name: "Styling Stack",
-  size: [360, 220],
+  size: [420, 280],
   anchor: { corner: "top-right", offset: [24, 24] },
 }, () => (
-  <column class="size-full p-5 gap-3 bg-slate-950 rounded-2xl border border-slate-700 shadow-xl">
+  <stack class="size-full pl-[30px] pt-[10px] pr-[30px] pb-[50px]">
+  <column class="w-[360px] h-[220px] p-5 gap-3 bg-slate-950 rounded-2xl border border-slate-700 shadow-xl">
     <text class="text-xl font-semibold text-white">Overlay stack</text>
     <stack class="w-full grow overflow-hidden rounded-tl-3xl rounded-tr-lg rounded-br-2xl rounded-bl-md">
       <panel class="size-full bg-indigo-700 border border-indigo-400" />
@@ -19,4 +20,5 @@ export default widget({
       </column>
     </stack>
   </column>
+  </stack>
 ));
