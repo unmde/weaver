@@ -3,8 +3,9 @@
 This is a dogfood pass for `weaver capture`: build a materially different
 version of the Noro media player, inspect its fixed-input pixels and semantic
 tree, and then drive its controls through the capture action protocol. The
-original [`examples/noro-shell`](../examples/noro-shell) is unchanged. The
-alternative lives in [`examples/noro-signal`](../examples/noro-signal).
+original [`examples/noro-shell`](../examples/noro-shell) remains visually
+unchanged. The alternative lives in
+[`examples/noro-signal`](../examples/noro-signal).
 
 ## Outcome
 
@@ -21,7 +22,7 @@ The working receipt reported:
 - status `ok`, 430 x 248 pixels, and no warnings;
 - 118 draw commands and 65 semantic nodes;
 - 106,200 pixels different from the transparent clear color;
-- no pending providers or images.
+- no pending providers, images, or frame requests.
 
 Reproduce it with:
 
@@ -33,9 +34,9 @@ node cli/bin/weaver.js capture examples/noro-signal \
   --out /tmp/noro-signal.png
 ```
 
-The pass found two framework breaks and one semantic authoring gap.
+The pass found and closed two framework breaks and one semantic authoring gap.
 
-## Break 1: a shadow turns a content stack into a leaf
+## Solved: a shadow turned a content stack into a leaf
 
 The first design put `shadow-inner` on the 150 x 150 artwork `<stack>`. Capture
 still returned `status: "ok"`, 87 draw commands, 63 semantic nodes, no warning,
@@ -77,7 +78,7 @@ A total non-clear-pixel count cannot catch this class of partial blanking, so a
 focused renderer regression is the useful tripwire; raising a global pixel
 minimum is not.
 
-## Break 2: media actions published a successful error screen
+## Solved: media actions published a successful error screen
 
 The semantic driver resolves the PAUSE button correctly. The reproduction file
 is [`test/capture/noro-signal.actions`](../test/capture/noro-signal.actions):
@@ -85,7 +86,7 @@ is [`test/capture/noro-signal.actions`](../test/capture/noro-signal.actions):
 ```sh
 node cli/bin/weaver.js capture examples/noro-signal \
   --clock 2026-08-24T17:30:00.000Z \
-  --provider-fixture test/capture/noro.provider.json \
+  --provider-fixture test/capture/noro-action.provider.json \
   --action-file test/capture/noro-signal.actions \
   --out /tmp/noro-signal-action.png
 ```
@@ -96,37 +97,31 @@ the original false-success artifact retained as the regression receipt:
 
 ![Media action failure](noro-signal-evaluation/action-failure.png)
 
-The provider fixture marks the provider client connected so provider hooks can
-receive recorded frames, but it opens no socket or pipe. A media command then
-reaches `send` in `provider_macos.zig` or `provider_windows.zig`, finds no live
-transport, and rejects. Before the dogfood fix, the more dangerous part was the
-receipt: it still said
-`status: "ok"`, had an empty warnings array, and published the error screen as
-a valid result. The post-action tree dropped from 63 nodes and 112 commands to
-3 nodes and 6 commands.
+The original provider fixture marked the provider client connected so hooks
+could receive recorded frames, but it opened no socket or pipe. A media command
+then reached `send`, found no live transport, and rejected. Before capture
+health validation landed, the receipt still said `status: "ok"` and published
+the error screen as a valid result; the post-action tree had dropped from 63
+nodes and 112 commands to 3 nodes and 6 commands.
 
-The capture-health half is fixed in this PR. Apps can now expose degraded
-runtime state through Native's capture seam; Weaver reports the JS engine's
-`renderFailed()` state there. The capture driver checks it after actions and
-session replay, before rendering or publishing artifacts. The same command now
-exits nonzero with `CaptureWidgetFailed`, emits an error receipt, and publishes
-no PNG, snapshot, or on-disk receipt.
+The fixture now has an ordered `commands` array. Each entry names the expected
+verb, the exact `seekMs` for seek, and the acknowledgement `ok` outcome. A
+match queues the acknowledgement through the ordinary provider lane, wakes the
+app loop, and resolves the SDK promise before capture validation. The successful
+Noro action receipt reports:
 
-Remaining framework proposal:
+- `interactions.actions: ["click"]`;
+- `interactions.mediaCommands: [{ verb: "pause", ok: true }]`;
+- two driven frames and zero pending frame requests;
+- the intact 65-node, 118-command Noro surface rather than an error panel.
 
-- Extend the provider fixture with deterministic expected media commands and
-  acknowledgements. A capture should be able to assert the verb and seek value,
-  resolve the SDK promise, and optionally apply recorded provider frames after
-  the acknowledgement.
-- Refine the current general `CaptureWidgetFailed` result to a transport-specific
-  error when no command fixture exists, without relying on the widget's
-  unhandled-promise boundary.
-- Record driven actions and command outcomes in the receipt so an agent can
-  distinguish “the click resolved” from “the side effect succeeded.”
-
-Until that exists, capture can verify the Noro player's media-driven pixels and
-button semantics and correctly rejects this action pass, but it cannot verify a
-successful media transport side effect.
+Unexpected, mismatched, and missing command expectations fail as
+`CaptureMediaCommandUnexpected`, `CaptureMediaCommandMismatch`, and
+`CaptureMediaCommandMissing`, respectively. Each produces only an error receipt
+and no publishable image or snapshot. Capture drains the app-level frame
+requests present at each action boundary before the coalesced GPU frame, while
+requests created during that turn remain visible instead of permitting an
+animated widget to spin capture forever.
 
 ## Solved: the seek overlay has an accessible name
 
@@ -143,11 +138,9 @@ Implemented framework fix:
   visible-text or `accessibilityLabel` fix. Dynamic/component output remains a
   runtime decision instead of producing a static false positive.
 
-## Baseline observation
+## Solved: queued frame request at capture completion
 
-The static Noro Signal capture reports one queued frame request. A capture of
-the original Noro shell under the same fixture reports the same value, while
-the action pass drains it to zero. It is therefore existing capture scheduling
-behavior, not a regression introduced by this alternative style. The receipt
-surfaces it honestly, so this evaluation does not turn it into a new limit or
-silence it.
+The initial dogfood receipt exposed one queued app-level frame request after a
+static capture. Native capture now settles the requests already present at the
+startup and action boundaries. Both static and action-driven Noro Signal
+captures finish with `pending.frameRequests: 0` without an arbitrary loop cap.

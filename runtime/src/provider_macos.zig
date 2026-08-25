@@ -68,6 +68,7 @@ pub const Client = struct {
     send_context: ?*anyopaque = null,
     send_deadline_ns: i128 = command_write_deadline_ns,
     automation_send_failure_path: ?[]const u8 = null,
+    capture_fixture: ?*protocol.CaptureCommandFixture = null,
 
     pub fn init(self: *Client, io: std.Io, endpoint: ?[]const u8) !void {
         // Inert clients still provide the monotonic clock used by transport
@@ -89,8 +90,9 @@ pub const Client = struct {
     /// Explicit fixture mode for a short-lived capture. It makes provider
     /// hooks available without opening the live host socket; frames still
     /// enter JavaScript through the ordinary bridge dispatcher.
-    pub fn initCaptureFixture(self: *Client, io: std.Io) void {
+    pub fn initCaptureFixture(self: *Client, io: std.Io, fixture: *protocol.CaptureCommandFixture) void {
         self.io = io;
+        self.capture_fixture = fixture;
         self.connected.store(1, .release);
         self.disconnected.store(0, .release);
     }
@@ -101,6 +103,7 @@ pub const Client = struct {
         self.thread = null;
         if (self.stream) |stream| stream.close(self.io);
         self.stream = null;
+        self.capture_fixture = null;
         self.connected.store(0, .release);
         self.disconnected.store(1, .release);
     }
@@ -156,6 +159,11 @@ pub const Client = struct {
         if (line.len == 0 or line.len > protocol.command_line_capacity or std.mem.indexOfScalar(u8, line, '\n') != null) return error.InvalidCommandFrame;
         self.send_mutex.lock();
         defer self.send_mutex.unlock();
+        if (self.capture_fixture) |fixture| {
+            try fixture.send(&self.queues, line);
+            if (self.wake) |wake| wake();
+            return;
+        }
         const stream = self.stream orelse return error.HostEndpointUnavailable;
         if (!self.isAvailable()) return error.HostEndpointUnavailable;
         if (self.consumeAutomationSendFailure()) {
@@ -188,6 +196,14 @@ pub const Client = struct {
                 return self.failWrite();
             };
         }
+    }
+
+    pub fn captureCommandValidation(self: *const Client) protocol.CaptureCommandValidation {
+        return if (self.capture_fixture) |fixture| fixture.validation() else .valid;
+    }
+
+    pub fn logCaptureCommandFailure(self: *const Client) void {
+        if (self.capture_fixture) |fixture| fixture.logFailure();
     }
 
     fn failWrite(self: *Client) error{HostEndpointWriteFailed} {

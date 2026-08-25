@@ -108,6 +108,7 @@ const ImageState = struct {
 const CaptureProviderFixture = struct {
     schema: []const u8,
     frames: []const std.json.Value,
+    commands: []const provider_mod.CaptureMediaCommand = &.{},
 };
 
 pub const Msg = union(enum) {
@@ -1304,9 +1305,10 @@ pub fn main(init: std.process.Init) !void {
     const directory = args[if (dev) 2 else 1];
     const loaded = try manifest_mod.load(init.io, allocator, directory);
     const capture_provider_fixture = if (init.environ_map.get("WEAVER_CAPTURE_PROVIDER_FIXTURE")) |path|
-        try loadCaptureProviderFixture(init.io, allocator, path, loaded.manifest.subscribe)
+        try loadCaptureProviderFixture(init.io, allocator, path, loaded.manifest.subscribe, loaded.manifest.capabilities)
     else
         null;
+    var capture_command_fixture: provider_mod.CaptureCommandFixture = .{};
     const force_software = if (init.environ_map.get("WEAVER_FORCE_SOFTWARE")) |value|
         std.mem.eql(u8, value, "1")
     else
@@ -1422,8 +1424,9 @@ pub fn main(init: std.process.Init) !void {
     app_state.model.fonts = loaded.manifest.fonts;
     app_state.model.image_resolver = &image_resolver;
     if (dragged) |saved| app_state.model.frame_origin = .{ saved.x, saved.y };
-    if (capture_provider_fixture != null) {
-        app_state.model.provider.initCaptureFixture(init.io);
+    if (capture_provider_fixture) |fixture| {
+        capture_command_fixture.commands = fixture.commands;
+        app_state.model.provider.initCaptureFixture(init.io, &capture_command_fixture);
     } else {
         try app_state.model.provider.init(init.io, if (capture_state_root == null)
             platform.providerEndpoint(
@@ -1542,7 +1545,7 @@ pub fn main(init: std.process.Init) !void {
     if (capture_state_root != null) {
         app.capture_clock_advance_fn = advanceCaptureClock;
         app.capture_pending_fn = capturePendingWork;
-        app.capture_failed_fn = captureFailed;
+        app.capture_validate_fn = validateCapture;
     }
     runner.runWithOptions(app, .{
         .app_name = "weaver-widget",
@@ -1584,9 +1587,26 @@ fn capturePendingWork(context: *anyopaque) native_sdk.CapturePendingWork {
     };
 }
 
-fn captureFailed(context: *anyopaque) bool {
+fn validateCapture(context: *anyopaque) !void {
     const app_state: *WidgetApp = @ptrCast(@alignCast(context));
-    return if (app_state.model.engine) |engine| engine.renderFailed() else false;
+    switch (app_state.model.provider.captureCommandValidation()) {
+        .valid => {},
+        .unexpected => {
+            app_state.model.provider.logCaptureCommandFailure();
+            return error.CaptureMediaCommandUnexpected;
+        },
+        .mismatch => {
+            app_state.model.provider.logCaptureCommandFailure();
+            return error.CaptureMediaCommandMismatch;
+        },
+        .missing => {
+            app_state.model.provider.logCaptureCommandFailure();
+            return error.CaptureMediaCommandMissing;
+        },
+    }
+    if (app_state.model.engine) |engine| {
+        if (engine.renderFailed()) return error.CaptureWidgetFailed;
+    }
 }
 
 fn loadCaptureProviderFixture(
@@ -1594,12 +1614,18 @@ fn loadCaptureProviderFixture(
     allocator: std.mem.Allocator,
     path: []const u8,
     subscriptions: []const []const u8,
+    capabilities: []const []const u8,
 ) !CaptureProviderFixture {
     const bytes = try std.Io.Dir.cwd().readFileAlloc(io, path, allocator, .unlimited);
     const fixture = std.json.parseFromSliceLeaky(CaptureProviderFixture, allocator, bytes, .{
         .ignore_unknown_fields = false,
     }) catch return error.CaptureProviderFixtureInvalid;
     if (!std.mem.eql(u8, fixture.schema, "weaver.provider-fixture.v1")) return error.CaptureProviderFixtureSchemaUnsupported;
+    const media_transport_enabled = for (capabilities) |capability| {
+        if (std.mem.eql(u8, capability, "media-transport")) break true;
+    } else false;
+    if (fixture.commands.len > 0 and !media_transport_enabled) return error.CaptureProviderFixtureCapabilityRequired;
+    for (fixture.commands) |command| if (!captureMediaCommandValid(command)) return error.CaptureProviderFixtureCommandInvalid;
     for (fixture.frames) |frame| {
         const object = switch (frame) {
             .object => |object| object,
@@ -1636,6 +1662,19 @@ fn loadCaptureProviderFixture(
         }
     }
     return fixture;
+}
+
+fn captureMediaCommandValid(command: provider_mod.CaptureMediaCommand) bool {
+    const is_seek = std.mem.eql(u8, command.verb, "seek");
+    const known_verb = is_seek or std.mem.eql(u8, command.verb, "play") or std.mem.eql(u8, command.verb, "pause") or
+        std.mem.eql(u8, command.verb, "next") or std.mem.eql(u8, command.verb, "previous");
+    if (!known_verb or is_seek != (command.seekMs != null)) return false;
+    return command.seekMs == null or command.seekMs.? <= provider_mod.max_safe_integer;
+}
+
+test "capture media command seek must round-trip through JavaScript exactly" {
+    try std.testing.expect(captureMediaCommandValid(.{ .verb = "seek", .seekMs = provider_mod.max_safe_integer }));
+    try std.testing.expect(!captureMediaCommandValid(.{ .verb = "seek", .seekMs = provider_mod.max_safe_integer + 1 }));
 }
 
 fn buildNodeForTest(
