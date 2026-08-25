@@ -295,6 +295,14 @@ fn endBatch(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, _: [*c]c.JSValue
     if (argc != 0) return fail(js, "endBatch expects no arguments");
     const authored_tree = state(js).tree;
     if (!authored_tree.prepareEndBatch()) return qjs.undefinedValue();
+    if (authored_tree.actionableNameViolation()) |violation| {
+        const tag = @tagName(violation.kind);
+        return failFmt(
+            js,
+            "ActionableAccessibleNameRequired: <{s}> node {d} has no accessible name; add a non-blank accessibilityLabel{s}",
+            .{ tag, violation.node_id, if (violation.kind == .button) " or visible descendant text" else "" },
+        );
+    }
     if (authored_tree.canvasAncestorViolation()) |violation| {
         return switch (violation.reason) {
             .clip => failFmt(

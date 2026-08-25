@@ -369,6 +369,35 @@ pub const Tree = struct {
         reason: enum { clip, opacity },
     };
 
+    pub const ActionableNameViolation = struct {
+        node_id: NodeId,
+        kind: Kind,
+    };
+
+    /// Validate names only after the authored transaction is complete: an
+    /// empty label is also the protocol operation that restores a button's
+    /// descendant-text fallback, so rejecting that intermediate mutation
+    /// would make legitimate dynamic updates impossible.
+    pub fn actionableNameViolation(self: *const Tree) ?ActionableNameViolation {
+        for (&self.nodes, 0..) |*node_value, index| {
+            if (!self.occupied.isSet(index) or (node_value.kind != .button and node_value.kind != .slider)) continue;
+            if (std.mem.trim(u8, node_value.accessibilityLabelSlice(), " \t\r\n").len != 0) continue;
+            const node_id: NodeId = @intCast(index + 1);
+            if (node_value.kind == .button and self.hasDescendantAccessibleText(node_id)) continue;
+            return .{ .node_id = node_id, .kind = node_value.kind };
+        }
+        return null;
+    }
+
+    fn hasDescendantAccessibleText(self: *const Tree, id: NodeId) bool {
+        const target = self.nodeConst(id) catch return false;
+        if (target.kind == .text and std.mem.trim(u8, target.textSlice(), " \t\r\n").len != 0) return true;
+        for (target.children[0..target.child_count]) |child_id| {
+            if (self.hasDescendantAccessibleText(child_id)) return true;
+        }
+        return false;
+    }
+
     pub fn canvasAncestorViolation(self: *const Tree) ?CanvasAncestorViolation {
         for (&self.nodes, 0..) |*node_value, index| {
             if (!self.occupied.isSet(index) or node_value.kind != .canvas) continue;
@@ -1297,6 +1326,33 @@ test "actionable accessible labels reuse bounded authored text storage and trans
     const reused = try tree.createNode(.slider);
     try std.testing.expectEqual(button, reused);
     try std.testing.expectEqualStrings("", (try tree.nodeConst(reused)).accessibilityLabelSlice());
+}
+
+test "complete retained generations reject unnamed actionable controls" {
+    var tree: Tree = .{};
+    const root = try tree.createNode(.column);
+    const button = try tree.createNode(.button);
+    const label = try tree.createNode(.text);
+    const slider = try tree.createNode(.slider);
+    try tree.appendChild(root, button);
+    try tree.appendChild(button, label);
+    try tree.appendChild(root, slider);
+    try tree.setRoot(root);
+
+    var violation = tree.actionableNameViolation().?;
+    try std.testing.expectEqual(button, violation.node_id);
+    try std.testing.expectEqual(Kind.button, violation.kind);
+
+    try tree.setText(label, "Visible action");
+    violation = tree.actionableNameViolation().?;
+    try std.testing.expectEqual(slider, violation.node_id);
+    try std.testing.expectEqual(Kind.slider, violation.kind);
+
+    try tree.setAccessibilityLabel(slider, "Session length");
+    try std.testing.expect(tree.actionableNameViolation() == null);
+    try tree.setText(label, " \t");
+    violation = tree.actionableNameViolation().?;
+    try std.testing.expectEqual(button, violation.node_id);
 }
 
 test "aborting a render batch restores the exact committed tree" {

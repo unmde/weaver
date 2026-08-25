@@ -2053,6 +2053,19 @@ function validateSource(project: SourceProject): string[] {
     | { kind: "known"; value: string; node: ts.Node };
   const expressionStringValue = (expression: ts.Expression): string | null =>
     ts.isStringLiteral(expression) || ts.isNoSubstitutionTemplateLiteral(expression) ? expression.text : null;
+  const expressionIsDefinitelyUndefined = (expression: ts.Expression): boolean => {
+    if (ts.isVoidExpression(expression) || (ts.isIdentifier(expression) && expression.text === "undefined")) return true;
+    if (ts.isParenthesizedExpression(expression) || ts.isAsExpression(expression) || ts.isTypeAssertionExpression(expression) || ts.isNonNullExpression(expression)) {
+      return expressionIsDefinitelyUndefined(expression.expression);
+    }
+    return ts.isConditionalExpression(expression) &&
+      expressionIsDefinitelyUndefined(expression.whenTrue) && expressionIsDefinitelyUndefined(expression.whenFalse);
+  };
+  const resolveAccessibleLabelValue = (expression: ts.Expression, node: ts.Node): AccessibleLabelResolution => {
+    const value = expressionStringValue(expression);
+    if (value !== null) return { kind: "known", value, node };
+    return expressionIsDefinitelyUndefined(expression) ? { kind: "absent" } : { kind: "unknown" };
+  };
   const propertyNameText = (name: ts.PropertyName | undefined): string | null => {
     if (!name) return null;
     if (ts.isIdentifier(name) || ts.isStringLiteral(name) || ts.isNumericLiteral(name)) return name.text;
@@ -2078,8 +2091,7 @@ function validateSource(project: SourceProject): string[] {
       }
       if (name !== "accessibilityLabel") continue;
       if (ts.isPropertyAssignment(property)) {
-        const value = expressionStringValue(property.initializer);
-        resolution = value === null ? { kind: "unknown" } : { kind: "known", value, node: property };
+        resolution = resolveAccessibleLabelValue(property.initializer, property);
       } else {
         resolution = { kind: "unknown" };
       }
@@ -2095,8 +2107,12 @@ function validateSource(project: SourceProject): string[] {
         continue;
       }
       if (property.name.getText(sourceFile) !== "accessibilityLabel") continue;
-      const value = jsxStringValue(property.initializer);
-      resolution = value === null ? { kind: "unknown" } : { kind: "known", value, node: property };
+      if (property.initializer && ts.isJsxExpression(property.initializer) && property.initializer.expression) {
+        resolution = resolveAccessibleLabelValue(property.initializer.expression, property);
+      } else {
+        const value = jsxStringValue(property.initializer);
+        resolution = value === null ? { kind: "unknown" } : { kind: "known", value, node: property };
+      }
     }
     return resolution;
   };
