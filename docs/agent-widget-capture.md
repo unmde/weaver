@@ -61,9 +61,11 @@ the match must be unique. `drag` takes normalized `from` and `to` values.
 platform, then renders any frame the widget actually requests.
 
 `useStorage` keeps its production 200 ms write coalescing, but capture uses an
-isolated storage root and persists those writes immediately. An interaction
-that only changes stored state therefore needs no artificial `advance-clock`;
-`pending.timers` continues to report timers created by widget behavior.
+isolated storage root and a runtime-owned capture-mode capability to persist
+those writes immediately. A writable widget clock cannot enable that path. An
+interaction that only changes stored state therefore needs no artificial
+`advance-clock`; `pending.timers` continues to report timers created by widget
+behavior.
 
 Examples live in [`test/capture`](../test/capture):
 

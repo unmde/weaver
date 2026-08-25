@@ -431,6 +431,7 @@ fn evaluateCandidate(model: *Model, tree: *tree_mod.Tree, source: []const u8, se
         model.origins,
         &model.provider,
         model.media_transport_enabled,
+        false,
     );
     errdefer candidate.destroy(std.heap.page_allocator);
     if (seed) |value| try candidate.setHotSwapSeed(value);
@@ -1456,6 +1457,7 @@ pub fn main(init: std.process.Init) !void {
         loaded.manifest.origins,
         &app_state.model.provider,
         app_state.model.media_transport_enabled,
+        capture_state_root != null,
     );
     if (capture_state_root != null) {
         if (init.environ_map.get("WEAVER_CAPTURE_CLOCK_EPOCH_MS")) |value| {

@@ -29,6 +29,7 @@ globalThis.native = {
   setHandler(...args) { operations.push(["setHandler", ...args]); },
   onEvent(callback) { eventCallback = callback; },
   hostAvailable() { return hostAvailable; },
+  captureMode: false,
   onProvider(callback) { providerCallback = callback; },
   mediaCommand(json, callback) {
     operations.push(["mediaCommand", json]);
@@ -251,7 +252,7 @@ test("widget renders one native generation and providers use native timers", asy
   assert.throws(() => retainedCanvasContext.clear(), /only be called inside onFrame/);
 });
 
-test("deterministic capture persists useStorage without a framework timer", async () => {
+test("runtime-owned capture mode persists useStorage without a framework timer", async () => {
   const source = `
     import { h, useStorage, widget } from "./src/index.ts";
     widget({ name: "Storage capture", size: [100, 50] }, () => {
@@ -268,6 +269,7 @@ test("deterministic capture persists useStorage without a framework timer", asyn
   let document = null;
   const native = {
     ...isolatedNative(),
+    captureMode: true,
     setInterval(milliseconds) { fixtureOperations.push(["setInterval", milliseconds]); return 1; },
     clearInterval(id) { fixtureOperations.push(["clearInterval", id]); },
     storageRead() { return document; },
@@ -282,6 +284,27 @@ test("deterministic capture persists useStorage without a framework timer", asyn
   assert.equal(JSON.parse(document).value, 2);
   assert.deepEqual(fixtureOperations.filter(([name]) => name === "setInterval"), []);
   assert.equal(fixtureOperations.filter(([name]) => name === "storageWrite").length, 1);
+
+  const productionOperations = [];
+  let productionDocument = null;
+  const productionNative = {
+    ...isolatedNative(),
+    captureMode: false,
+    setInterval(milliseconds) { productionOperations.push(["setInterval", milliseconds]); return 1; },
+    clearInterval(id) { productionOperations.push(["clearInterval", id]); },
+    storageRead() { return productionDocument; },
+    storageWrite(json) { productionOperations.push(["storageWrite", json]); productionDocument = json; },
+  };
+  const productionContext = { native: productionNative, __weaverCaptureNowMs: Date.parse("2026-08-24T17:30:00.000Z") };
+  vm.runInNewContext(output.outputFiles[0].text, productionContext);
+
+  productionNative.captureMode = true;
+  productionContext.setCapturedValue(2);
+  await Promise.resolve();
+
+  assert.equal(productionDocument, null);
+  assert.deepEqual(productionOperations.filter(([name]) => name === "setInterval"), [["setInterval", 200]]);
+  assert.deepEqual(productionOperations.filter(([name]) => name === "storageWrite"), []);
 });
 
 test("styling 08 runtime accepts only bundle-lowered path icons and rejects children before native mutation", () => {
@@ -311,7 +334,7 @@ function isolatedNative() {
   let id = 0;
   return {
     createNode() { return ++id; }, setProp() {}, setText() {}, appendChild() {}, insertBefore() {}, removeNode() {}, setRoot() {},
-    beginBatch() {}, endBatch() {}, abortBatch() {}, reportError() {}, setHandler() {}, onEvent() {}, hostAvailable() { return false; }, onProvider() {},
+    beginBatch() {}, endBatch() {}, abortBatch() {}, reportError() {}, setHandler() {}, onEvent() {}, hostAvailable() { return false; }, captureMode: false, onProvider() {},
     setInterval() { return 1; }, clearInterval() {}, onTimer() {}, setCanvasCommands() {}, onCanvasResize() {}, onCanvasFrame() {}, clearCanvasFrame() {},
     fetch: async () => ({ status: 200, body: "{}" }), storageRead() { return null; }, storageWrite() {}, log() {},
   };

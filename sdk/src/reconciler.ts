@@ -16,6 +16,10 @@ const MAX_CANVAS_WIRE_VALUES = 32_768;
 // scheduler/protocol bound rather than a silently starved animation budget;
 // the clamp itself retains no memory.
 const MAX_CANVAS_FPS = 60;
+// Native installs this immutable bridge capability before evaluating the
+// bundle. Widget code can adjust the exposed capture clock for deterministic
+// time, but it cannot opt ordinary execution into capture-only I/O behavior.
+const deterministicCapture = native.captureMode;
 
 export type WidgetChild = VNode | string | number | Signal<string | number> | null | undefined | false;
 export type Component = () => VNode;
@@ -1091,7 +1095,7 @@ function scheduleStorageWrite(_encoded: string): void {
   // production debounce only coalesces disk writes; it does not change the
   // hook's observable state. Persist immediately so an internal maintenance
   // timer is never mistaken for unsettled widget behavior in the receipt.
-  if (capturedClockMilliseconds() !== null) {
+  if (deterministicCapture) {
     flushStorage();
     return;
   }
