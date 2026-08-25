@@ -4,7 +4,7 @@ import { once } from "node:events";
 import test from "node:test";
 import { build } from "esbuild";
 import { fileURLToPath } from "node:url";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer } from "node:net";
@@ -78,6 +78,30 @@ test("CLI failures are emitted as one actionable block", () => {
   const result = spawnSync(process.execPath, ["cli/dist/index.js", "unknown", "widget"], { encoding: "utf8" });
   assert.equal(result.status, 1);
   assert.match(result.stderr, /^weaver failed \(1 error\)\n- Usage:/);
+});
+
+test("init accepts a path target and derives the widget name from its final segment", () => {
+  const root = mkdtempSync(join(tmpdir(), "weaver-init-path-"));
+  const target = join("examples", "tideglass");
+  const directory = join(realpathSync(root), target);
+  const cli = fileURLToPath(new URL("../dist/index.js", import.meta.url));
+  try {
+    const initialized = spawnSync(process.execPath, [cli, "init", target], { cwd: root, encoding: "utf8" });
+    assert.equal(initialized.status, 0, initialized.stderr);
+    assert.equal(initialized.stdout, `Initialized ${directory}\nNext: weaver check ${directory}\n`);
+    assert.match(readFileSync(join(directory, "widget.tsx"), "utf8"), /name: "Tideglass"/);
+    assert.ok(existsSync(join(directory, "tsconfig.json")));
+
+    const checked = spawnSync(process.execPath, [cli, "check", directory], { cwd: root, encoding: "utf8" });
+    assert.equal(checked.status, 0, checked.stderr);
+
+    const invalid = spawnSync(process.execPath, [cli, "init", join("examples", "2-fast")], { cwd: root, encoding: "utf8" });
+    assert.equal(invalid.status, 1);
+    assert.match(invalid.stderr, /Invalid widget directory name "2-fast" from target/);
+    assert.equal(existsSync(join(root, "examples", "2-fast")), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("capture requires one PNG output and rejects competing event sources", () => {

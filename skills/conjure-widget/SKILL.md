@@ -14,8 +14,9 @@ security rules, or the complete utility table matter; it is authoritative.
 ## Workflow
 
 1. From the Weaver repository root, scaffold with
-   `npx --no-install weaver init <name>` unless the directory exists.
-2. Edit `<name>/widget.tsx`. Keep one literal default export:
+   `npx --no-install weaver init <path>` unless the directory exists. The final
+   path segment becomes the widget's starter display name.
+2. Edit `<path>/widget.tsx`. Keep one literal default export:
    `export default widget({ ... }, () => <... />);`. Do not compute config.
 3. Keep local images/fonts/licenses inside the widget source root. Reference
    images with relative paths and fonts as `font-[file-stem]`.
