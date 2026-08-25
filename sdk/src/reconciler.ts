@@ -16,6 +16,10 @@ const MAX_CANVAS_WIRE_VALUES = 32_768;
 // scheduler/protocol bound rather than a silently starved animation budget;
 // the clamp itself retains no memory.
 const MAX_CANVAS_FPS = 60;
+// Native installs this immutable bridge capability before evaluating the
+// bundle. Widget code can adjust the exposed capture clock for deterministic
+// time, but it cannot opt ordinary execution into capture-only I/O behavior.
+const deterministicCapture = native.captureMode;
 
 export type WidgetChild = VNode | string | number | Signal<string | number> | null | undefined | false;
 export type Component = () => VNode;
@@ -1087,16 +1091,26 @@ function serializeStorage(values: Record<string, unknown>): string {
 }
 
 function scheduleStorageWrite(_encoded: string): void {
+  // Capture owns an isolated storage root and a deterministic clock. The
+  // production debounce only coalesces disk writes; it does not change the
+  // hook's observable state. Persist immediately so an internal maintenance
+  // timer is never mistaken for unsettled widget behavior in the receipt.
+  if (deterministicCapture) {
+    flushStorage();
+    return;
+  }
   if (storageTimerId !== 0) native.clearInterval(storageTimerId);
   storageTimerId = native.setInterval(200);
   native.onTimer(storageTimerId, () => runWidgetCallback("storage flush callback", () => {
-    native.clearInterval(storageTimerId);
-    storageTimerId = 0;
     flushStorage();
   }));
 }
 
 function flushStorage(): void {
+  if (storageTimerId !== 0) {
+    native.clearInterval(storageTimerId);
+    storageTimerId = 0;
+  }
   if (!storageDirty || !storageValues) return;
   native.storageWrite(serializeStorage(storageValues));
   storageDirty = false;
@@ -1137,9 +1151,12 @@ Object.defineProperty(globalThis, "__weaverHotSwapAccepted", { value: hotSwapAcc
 const weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
 const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"] as const;
 function pad2(value: number): string { return String(value).padStart(2, "0"); }
-function captureNowMilliseconds(): number {
+function capturedClockMilliseconds(): number | null {
   const captured = (globalThis as typeof globalThis & { __weaverCaptureNowMs?: unknown }).__weaverCaptureNowMs;
-  return typeof captured === "number" && Number.isFinite(captured) ? captured : Date.now();
+  return typeof captured === "number" && Number.isFinite(captured) ? captured : null;
+}
+function captureNowMilliseconds(): number {
+  return capturedClockMilliseconds() ?? Date.now();
 }
 function currentTime(): TimeData {
   const now = new Date(captureNowMilliseconds());

@@ -16,6 +16,7 @@ interface WeaverNativeBridge {
   setHandler(id: number, kind: "press" | "doublepress" | "rightpress" | "change", enabled: boolean): void;
   onEvent(callback: (id: number, kind: "press" | "doublepress" | "rightpress" | "change", payload: number | NativePressPayload | null) => void): void;
   hostAvailable(): boolean;
+  readonly captureMode: boolean;
   onProvider(callback: (jsonLine: string) => void): void;
   mediaCommand?(json: string, callback: (ok: boolean | null, error: string | null) => void): void;
   setInterval(ms: number): number;
@@ -32,4 +33,3 @@ interface WeaverNativeBridge {
 }
 
 declare const native: WeaverNativeBridge;
-

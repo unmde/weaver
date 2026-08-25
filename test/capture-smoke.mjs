@@ -42,6 +42,16 @@ try {
   assert.match(snapshotText(interactionAfter), /role=slider .* value=0\.9/);
   assert.match(snapshotText(interactionAfter), /role=text name="90%"/);
 
+  const tideglassBefore = capture("tideglass-before", "examples/tideglass");
+  const tideglassAfter = capture("tideglass-after", "examples/tideglass", [
+    "--action-file", join(root, "test", "capture", "tideglass.actions"),
+  ]);
+  assert.notEqual(imageHash(tideglassBefore), imageHash(tideglassAfter));
+  assert.match(snapshotText(tideglassAfter), /role=text name="63%"/);
+  assert.match(snapshotText(tideglassAfter), /role=text name="5 glasses logged"/);
+  assert.deepEqual(tideglassAfter.interactions.actions, ["click", "click"]);
+  assert.equal(tideglassAfter.pending.timers, 0);
+
   const noro = capture("noro", "examples/noro-shell", [
     "--provider-fixture", join(root, "test", "capture", "noro.provider.json"),
   ]);

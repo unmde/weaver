@@ -62,6 +62,7 @@ pub const Engine = struct {
         origins: []const []const u8,
         provider: *provider_mod.Client,
         media_transport_enabled: bool,
+        capture_mode: bool,
     ) !*Engine {
         const self = allocator.create(Engine) catch return error.OutOfMemory;
         errdefer allocator.destroy(self);
@@ -81,6 +82,7 @@ pub const Engine = struct {
             .provider = provider,
             .origins = origins,
             .media_transport_enabled = media_transport_enabled,
+            .capture_mode = capture_mode,
         };
         c.JS_SetMemoryLimit(runtime, memory_limit_bytes);
         c.JS_SetMaxStackSize(runtime, max_stack_bytes);
@@ -485,13 +487,36 @@ fn interruptHandler(_: ?*c.JSRuntime, context: ?*anyopaque) callconv(.c) c_int {
 }
 
 fn createTestEngine(tree: *tree_mod.Tree, store: *storage_mod.Store, provider: *provider_mod.Client) !*Engine {
-    return Engine.create(std.testing.allocator, tree, store, &.{}, provider, false);
+    return Engine.create(std.testing.allocator, tree, store, &.{}, provider, false, false);
 }
 
 test "diagnostic truncation preserves UTF-8 boundaries" {
     const details = "failure 💥";
     try std.testing.expectEqualStrings("failure ", validUtf8Prefix(details, details.len - 1));
     try std.testing.expectEqualStrings(details, validUtf8Prefix(details, details.len));
+}
+
+test "capture mode bridge capability is runtime-owned" {
+    var tree: tree_mod.Tree = .{ .allocator = std.testing.allocator };
+    defer tree.deinit();
+    var provider: provider_mod.Client = .{};
+    try provider.init(std.testing.io, null);
+    defer provider.deinit();
+    var store: storage_mod.Store = .{
+        .io = std.testing.io,
+        .allocator = std.testing.allocator,
+        .directory = ".",
+        .path = "weaver-js-engine-test-storage.json",
+        .temporary_path = "weaver-js-engine-test-storage.tmp",
+    };
+    const engine = try Engine.create(std.testing.allocator, &tree, &store, &.{}, &provider, false, true);
+    defer engine.destroy(std.testing.allocator);
+
+    try engine.evaluate(
+        \\try { globalThis.native = { captureMode: false }; } catch {}
+        \\try { native.captureMode = false; } catch {}
+        \\if (native.captureMode !== true) throw new Error("captureMode was replaced by widget code");
+    , "capture-mode-test.js");
 }
 
 test "a forced max_nodes failure is rolled back, named, and replaced by an error surface" {

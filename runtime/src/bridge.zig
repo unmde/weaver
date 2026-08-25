@@ -13,6 +13,7 @@ pub const State = struct {
     provider: *provider_mod.Client,
     origins: []const []const u8,
     media_transport_enabled: bool = false,
+    capture_mode: bool = false,
     media_tracker: media_pending.Tracker = .{},
     media_callbacks: [max_media_pending]c.JSValue = [_]c.JSValue{qjs.undefinedValue()} ** max_media_pending,
     timers: [max_timers]TimerSlot = [_]TimerSlot{.{}} ** max_timers,
@@ -103,6 +104,7 @@ pub fn install(ctx: *c.JSContext, bridge_state: *State) !void {
     try setFunction(ctx, native, "setHandler", setHandler, 3);
     try setFunction(ctx, native, "onEvent", onEvent, 1);
     try setFunction(ctx, native, "hostAvailable", hostAvailable, 0);
+    try setImmutableBoolean(ctx, native, "captureMode", bridge_state.capture_mode);
     try setFunction(ctx, native, "onProvider", onProvider, 1);
     if (bridge_state.media_transport_enabled) try setFunction(ctx, native, "mediaCommand", mediaCommand, 2);
     try setFunction(ctx, native, "setInterval", setInterval, 1);
@@ -116,7 +118,10 @@ pub fn install(ctx: *c.JSContext, bridge_state: *State) !void {
     try setFunction(ctx, native, "storageRead", storageRead, 0);
     try setFunction(ctx, native, "storageWrite", storageWrite, 1);
     try setFunction(ctx, native, "log", log, 1);
-    if (c.JS_SetPropertyStr(ctx, global, "native", native) < 0) return error.QuickJs;
+    // The bridge object is the widget sandbox boundary. In particular, the
+    // runtime-owned captureMode bit must not be replaceable by widget prelude
+    // code before the SDK evaluates.
+    if (c.JS_DefinePropertyValueStr(ctx, global, "native", native, c.JS_PROP_ENUMERABLE) < 0) return error.QuickJs;
     const console = c.JS_NewObject(ctx);
     if (c.JS_IsException(console)) return error.QuickJs;
     errdefer c.JS_FreeValue(ctx, console);
@@ -155,6 +160,11 @@ pub fn deinit(ctx: *c.JSContext, bridge_state: *State) void {
 fn setFunction(ctx: *c.JSContext, object: c.JSValue, name: [*:0]const u8, function: c.JSCFunction, argc: c_int) !void {
     const value = c.JS_NewCFunction2(ctx, function, name, argc, c.JS_CFUNC_generic, 0);
     if (c.JS_IsException(value) or c.JS_SetPropertyStr(ctx, object, name, value) < 0) return error.QuickJs;
+}
+
+fn setImmutableBoolean(ctx: *c.JSContext, object: c.JSValue, name: [*:0]const u8, enabled: bool) !void {
+    const value = c.JS_NewBool(ctx, enabled);
+    if (c.JS_IsException(value) or c.JS_DefinePropertyValueStr(ctx, object, name, value, c.JS_PROP_ENUMERABLE) < 0) return error.QuickJs;
 }
 
 fn state(ctx: *c.JSContext) *State {
