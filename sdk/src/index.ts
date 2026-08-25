@@ -15,6 +15,7 @@ export {
   type AudioData,
   type CanvasCtx,
   type CanvasFrame,
+  type CanvasFrameRate,
   type MemoryData,
   type MediaData,
   type MediaTransport,

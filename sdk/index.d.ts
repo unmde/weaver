@@ -73,6 +73,7 @@ export interface WFetchResponse {
 }
 
 export interface CanvasFrame { t: number; dt: number }
+export type CanvasFrameRate = number | "display";
 export interface CanvasCtx {
   readonly width: number;
   readonly height: number;
@@ -149,7 +150,7 @@ declare global {
         onRightPress?: (event: PressEvent) => void;
       };
       slider: BoxProps & { accessibilityLabel?: string; value: number; max: number; onChange: (value: number) => void };
-      canvas: BoxProps & { fps?: number; onFrame: (ctx: CanvasCtx, frame: CanvasFrame) => void };
+      canvas: BoxProps & { fps?: CanvasFrameRate; onFrame: (ctx: CanvasCtx, frame: CanvasFrame) => void };
     }
   }
 }
