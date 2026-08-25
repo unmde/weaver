@@ -1275,6 +1275,12 @@ fn synchronizeImages(model: *Model, effects: *Effects) !void {
     model.image_tree_generation = synchronized_generation;
 }
 
+fn nativeWindowLayer(manifest_layer: []const u8) native_sdk.WindowLayer {
+    if (std.mem.eql(u8, manifest_layer, "desktop")) return .bottom;
+    if (std.mem.eql(u8, manifest_layer, "topmost")) return .topmost;
+    return .normal;
+}
+
 pub fn main(init: std.process.Init) !void {
     const allocator = init.arena.allocator();
     const args = try init.minimal.args.toSlice(allocator);
@@ -1374,6 +1380,7 @@ pub fn main(init: std.process.Init) !void {
         .gpu_color_space = .srgb,
         .gpu_vsync = true,
     }};
+    const window_layer = nativeWindowLayer(loaded.manifest.layer);
     const shell_windows = [_]native_sdk.ShellWindow{.{
         .label = "main",
         .title = loaded.manifest.name,
@@ -1385,7 +1392,7 @@ pub fn main(init: std.process.Init) !void {
         .restore_state = false,
         .titlebar = .chromeless,
         .transparent = true,
-        .layer = if (std.mem.eql(u8, loaded.manifest.layer, "desktop")) .bottom else if (std.mem.eql(u8, loaded.manifest.layer, "topmost")) .topmost else .normal,
+        .layer = window_layer,
         .click_through = loaded.manifest.clickThrough,
         .no_activate = true,
         .views = &shell_views,
@@ -1564,6 +1571,8 @@ pub fn main(init: std.process.Init) !void {
         // move tick.
         .persist_window_state = false,
         .primary_display_anchor = if (builtin.os.tag == .macos and dragged == null) manifest_mod.primaryDisplayAnchor(loaded.manifest) else null,
+        .startup_window_layer = window_layer,
+        .startup_click_through = loaded.manifest.clickThrough,
         .js_window_api = false,
     }, init) catch |err| {
         std.log.err("widget runtime stopped after platform callback failure: {s}", .{@errorName(err)});
@@ -1672,6 +1681,12 @@ fn captureMediaCommandValid(command: provider_mod.CaptureMediaCommand) bool {
         std.mem.eql(u8, command.verb, "next") or std.mem.eql(u8, command.verb, "previous");
     if (!known_verb or is_seek != (command.seekMs != null)) return false;
     return command.seekMs == null or command.seekMs.? <= provider_mod.max_safe_integer;
+}
+
+test "runtime startup window layer mirrors the dynamic manifest" {
+    try std.testing.expectEqual(native_sdk.WindowLayer.bottom, nativeWindowLayer("desktop"));
+    try std.testing.expectEqual(native_sdk.WindowLayer.normal, nativeWindowLayer("normal"));
+    try std.testing.expectEqual(native_sdk.WindowLayer.topmost, nativeWindowLayer("topmost"));
 }
 
 test "capture media command seek must round-trip through JavaScript exactly" {
