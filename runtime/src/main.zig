@@ -957,10 +957,11 @@ fn buildNode(ui: *WidgetUi, model: *const Model, id: tree_mod.NodeId, is_root: b
         children[index] = buildNode(ui, model, child_id, false);
     }
     const result = switch (retained.kind) {
-        // SDK layout-only rows/columns do not paint their own style. A
-        // styled column is contractually a column-layout box, which is the
-        // builder's panel primitive; unstyled columns keep the lean node.
-        // A styled row gets the same painting panel around its row layout.
+        // SDK layout-only rows/columns/stacks do not paint their own style.
+        // A styled layout is contractually a painted box around its layout
+        // primitive: the panel owns paint/effects and the inner node keeps
+        // child layout. This is especially important for stacks because a
+        // Native stack with immediate commands is an immediate-canvas leaf.
         .column => if (hasPaintStyle(retained)) block: {
             const column_options: WidgetUi.ElementOptions = .{
                 .gap = retained.gap,
@@ -983,7 +984,15 @@ fn buildNode(ui: *WidgetUi, model: *const Model, id: tree_mod.NodeId, is_root: b
             options.gap = 0;
             break :block ui.panel(options, .{ui.row(row_options, children)});
         } else ui.row(options, children),
-        .stack => ui.stack(options, children),
+        .stack => if (hasPaintStyle(retained)) block: {
+            const stack_options: WidgetUi.ElementOptions = .{
+                .grow = 1,
+                .cross = options.cross,
+                .main = options.main,
+            };
+            options.gap = 0;
+            break :block ui.panel(options, .{ui.stack(stack_options, children)});
+        } else ui.stack(options, children),
         .panel => ui.panel(options, children),
         .icon => ui.el(.icon, options, .{}),
         .button => ui.panel(options, children),
@@ -2139,7 +2148,7 @@ test "bundled font resolution honors exact stems families and nearest weights" {
     try std.testing.expectEqual(@as(?native_sdk.canvas.FontId, native_sdk.canvas.default_mono_font_id), resolveFontId(try tree.nodeConst(id), &fonts));
 }
 
-test "retained stack projects overlay kind and rounded content clipping" {
+test "painted retained stack keeps overlay children under rounded inset shadow" {
     var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_state.deinit();
 
@@ -2152,19 +2161,34 @@ test "retained stack projects overlay kind and rounded content clipping" {
     try model.tree.setNumberProp(stack_id, "radius", 14);
     try model.tree.setNumberProp(stack_id, "radiusBottomLeft", 3);
     try model.tree.setOverflowHidden(stack_id, true);
+    try model.tree.setShadow(stack_id, .{
+        .offset = .{ .dx = 0, .dy = 0 },
+        .blur = 4,
+        .spread = 0,
+        .color = native_sdk.canvas.Color.rgb8(0, 0, 0),
+    });
+    try model.tree.setShadowInset(stack_id, true);
     try model.tree.setText(label_id, "overlay");
     try model.tree.appendChild(stack_id, background_id);
     try model.tree.appendChild(stack_id, label_id);
 
     var ui = WidgetUi.init(arena_state.allocator());
-    const projected = buildNodeForTest(&ui, &model, stack_id, false);
-    try std.testing.expectEqual(native_sdk.canvas.WidgetKind.stack, projected.widget.kind);
-    try std.testing.expect(projected.widget.layout.flags.clip_content);
-    try std.testing.expectEqual(@as(?f32, 14), projected.widget.style.radius);
-    try std.testing.expectEqual(@as(?f32, 3), projected.widget.style.radius_bottom_left);
-    try std.testing.expectEqual(@as(usize, 2), projected.nodes.len);
-    try std.testing.expectEqual(native_sdk.canvas.WidgetKind.panel, projected.nodes[0].widget.kind);
-    try std.testing.expectEqual(native_sdk.canvas.WidgetKind.text, projected.nodes[1].widget.kind);
+    const built = try ui.finalize(buildNodeForTest(&ui, &model, stack_id, false));
+    try std.testing.expectEqual(native_sdk.canvas.WidgetKind.panel, built.root.kind);
+    try std.testing.expect(built.root.layout.flags.clip_content);
+    try std.testing.expectEqual(@as(?f32, 14), built.root.style.radius);
+    try std.testing.expectEqual(@as(?f32, 3), built.root.style.radius_bottom_left);
+    try std.testing.expectEqual(@as(usize, 1), built.root.immediate_commands.len);
+    switch (built.root.immediate_commands[0]) {
+        .box_shadow => |shadow| try std.testing.expect(shadow.inset),
+        else => return error.TestExpectedEqual,
+    }
+    try std.testing.expectEqual(@as(usize, 1), built.root.children.len);
+    const overlay = built.root.children[0];
+    try std.testing.expectEqual(native_sdk.canvas.WidgetKind.stack, overlay.kind);
+    try std.testing.expectEqual(@as(usize, 2), overlay.children.len);
+    try std.testing.expectEqual(native_sdk.canvas.WidgetKind.panel, overlay.children[0].kind);
+    try std.testing.expectEqual(native_sdk.canvas.WidgetKind.text, overlay.children[1].kind);
 }
 
 test "styled Weaver button keeps button role and descendant accessible name" {

@@ -25,7 +25,7 @@ export default widget({
     <stack class="size-full rounded-[28px] overflow-hidden">
       <column class="size-full p-[16px] gap-[12px] rounded-[28px] bg-[#080c12]/96 border border-[#223044] shadow-[0_16px_40px_0_#00000080]">
         <row class="w-full grow gap-[16px]">
-          <stack class="w-[150px] h-[150px] shrink-0 rounded-[18px] overflow-hidden bg-[#101923] border border-[#2a3c52]">
+          <stack class="w-[150px] h-[150px] shrink-0 rounded-[18px] overflow-hidden bg-[#101923] border border-[#2a3c52] shadow-inner">
             {media.artPath
               ? <image src={media.artPath} fit="cover" class="size-full" />
               : (

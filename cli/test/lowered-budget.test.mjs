@@ -28,7 +28,7 @@ export default widget({ name: "Lowered Budget", size: [320, 200] }, () => (${tre
 `;
 }
 
-test("check rejects node counts after painted row and column lowering", () => {
+test("check rejects node counts after painted row, column, and stack lowering", () => {
   const groups = Array.from({ length: 16 }, (_, group) =>
     `<column key="g${group}">${Array.from({ length: 32 }, (_, child) => `<row key="r${group}-${child}" class="bg-[#111]" />`).join("")}</column>`,
   ).join("");
@@ -37,6 +37,19 @@ test("check rejects node counts after painted row and column lowering", () => {
     const checked = runCli(root, "check", widget);
     assert.equal(checked.status, 1);
     assert.match(checked.stderr, /LoweredWidgetNodeLimit: this tree lowers to 1041 Native nodes \(limit 1024\)/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("check counts the painted stack wrapper", () => {
+  let tree = "<text>leaf</text>";
+  for (let index = 0; index < 16; index += 1) tree = `<stack class="shadow-inner">${tree}</stack>`;
+  const { root, widget } = fixture(source(tree));
+  try {
+    const checked = runCli(root, "check", widget);
+    assert.equal(checked.status, 1);
+    assert.match(checked.stderr, /LoweredWidgetDepthLimit: this tree lowers to depth 33 \(Native limit 32\)/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

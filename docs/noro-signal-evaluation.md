@@ -19,8 +19,8 @@ track, time, progress, state, and PREV / PAUSE / NEXT controls.
 The working receipt reported:
 
 - status `ok`, 430 x 248 pixels, and no warnings;
-- 112 draw commands and 63 semantic nodes;
-- 105,976 pixels different from the transparent clear color;
+- 118 draw commands and 65 semantic nodes;
+- 106,200 pixels different from the transparent clear color;
 - no pending providers or images.
 
 Reproduce it with:
@@ -60,17 +60,18 @@ a clipping or reference-rasterizer problem:
 That means every `shadow-*` utility can erase the children of a TSX `<stack>`;
 `overflow-hidden` only made the initial symptom look like bad compositing.
 
-Proposed framework fix:
+Implemented framework fix:
 
-- Project a styled TSX stack as a painted panel containing an unstyled stack,
+- A styled TSX stack projects as a painted panel containing an unstyled stack,
   matching the existing styled row and column projection in `buildNode`. The
   panel owns background, border, radius, and shadow; the inner stack keeps
   overlay layout. This also gives inset shadows an explicit paint order.
-- Add retained-tree and layout-tree regressions in which a shadowed stack has
-  overlapping children. Assert that the shadow, fill, border, and every child
-  command are present, including the `shadow-inner` plus rounded clip case.
-- Keep the current short-term author workaround: do not put shadows on a
-  content-bearing stack. Put the effect on a panel wrapper instead.
+- Retained-tree and lowered-budget regressions cover a shadowed stack with
+  overlapping children and assert that the shadow, fill, border, and every
+  child command are present, including the `shadow-inner` plus rounded clip
+  case.
+- Noro Signal now uses its original `shadow-inner`; capture retains the artwork
+  subtree and reports 31 more draw commands than the failure receipt.
 
 A total non-clear-pixel count cannot catch this class of partial blanking, so a
 focused renderer regression is the useful tripwire; raising a global pixel

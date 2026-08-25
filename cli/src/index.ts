@@ -1673,7 +1673,7 @@ function validateLoweredTreeBudgets(project: SourceProject, errors: string[]): v
       ? { tag: node.openingElement.tagName.getText(node.getSourceFile()), attributes: node.openingElement.attributes }
       : { tag: node.tagName.getText(node.getSourceFile()), attributes: node.attributes };
   const isPaintedLayout = (node: ts.JsxElement | ts.JsxSelfClosingElement, tag: string): boolean => {
-    if (tag !== "row" && tag !== "column") return false;
+    if (tag !== "row" && tag !== "column" && tag !== "stack") return false;
     const { attributes } = tagAndAttributes(node);
     const sourceFile = node.getSourceFile();
     const classAttribute = attributes.properties.find((attribute): attribute is ts.JsxAttribute =>
@@ -1810,10 +1810,10 @@ function validateLoweredTreeBudgets(project: SourceProject, errors: string[]): v
   const evidenceNode = roots[0];
   const limitation = " The static estimate follows the exported widget through local components and one level of relative imports; runtime limits remain authoritative for dynamic collections and unresolved component output.";
   if (lowered.nodes > nativeWidgetNodeLimit) {
-    errors.push(locationMessage(evidenceNode.getSourceFile(), evidenceNode, `LoweredWidgetNodeLimit: this tree lowers to ${lowered.nodes} Native nodes (limit ${nativeWidgetNodeLimit}); node capacity exhausted: max_nodes=${nativeWidgetNodeLimit}, asked for ${lowered.nodes}, headroom=${nativeWidgetNodeLimit - lowered.nodes}. Painted <row>/<column> elements add an inner layout node.${limitation}`));
+    errors.push(locationMessage(evidenceNode.getSourceFile(), evidenceNode, `LoweredWidgetNodeLimit: this tree lowers to ${lowered.nodes} Native nodes (limit ${nativeWidgetNodeLimit}); node capacity exhausted: max_nodes=${nativeWidgetNodeLimit}, asked for ${lowered.nodes}, headroom=${nativeWidgetNodeLimit - lowered.nodes}. Painted <row>/<column>/<stack> elements add an inner layout node.${limitation}`));
   }
   if (lowered.depth > nativeWidgetDepthLimit) {
-    errors.push(locationMessage(evidenceNode.getSourceFile(), evidenceNode, `LoweredWidgetDepthLimit: this tree lowers to depth ${lowered.depth} (Native limit ${nativeWidgetDepthLimit}); painted <row>/<column> elements add one nesting level.${limitation}`));
+    errors.push(locationMessage(evidenceNode.getSourceFile(), evidenceNode, `LoweredWidgetDepthLimit: this tree lowers to depth ${lowered.depth} (Native limit ${nativeWidgetDepthLimit}); painted <row>/<column>/<stack> elements add one nesting level.${limitation}`));
   }
   if (lowered.maxChildren > nativeWidgetChildLimit) {
     errors.push(locationMessage(evidenceNode.getSourceFile(), evidenceNode, `LoweredWidgetChildLimit: one authored parent lowers to ${lowered.maxChildren} direct Native children; child capacity exhausted: max_children=${nativeWidgetChildLimit}, asked for ${lowered.maxChildren}, headroom=${nativeWidgetChildLimit - lowered.maxChildren}.${limitation}`));
