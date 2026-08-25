@@ -217,17 +217,23 @@ async function main(argv: string[]): Promise<void> {
   await devWidget(directory);
 }
 
-function initWidget(name: string): void {
+function initWidget(target: string): void {
+  const directory = resolve(target);
+  const name = basename(directory);
   if (!/^[a-zA-Z][a-zA-Z0-9_-]*$/.test(name)) {
-    throw new WeaverFailure([`Invalid widget name "${name}". Use letters, numbers, hyphens, or underscores and start with a letter.`]);
+    throw new WeaverFailure([`Invalid widget directory name "${name}" from target "${target}". The final path segment must start with a letter and contain only letters, numbers, hyphens, or underscores.`]);
   }
-  const directory = resolve(name);
   if (existsSync(directory)) throw new WeaverFailure([`Cannot initialize ${directory}: the path already exists.`]);
   mkdirSync(directory, { recursive: true });
   const displayName = name.replace(/[-_]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
   writeFileSync(join(directory, "widget.tsx"), starterSource(displayName), "utf8");
   writeAuthoringTsconfig(directory);
-  process.stdout.write(`Initialized ${directory}\nNext: weaver check ${name}\n`);
+  process.stdout.write(`Initialized ${directory}\nNext: weaver check ${shellCommandArgument(directory)}\n`);
+}
+
+function shellCommandArgument(value: string): string {
+  if (process.platform === "win32") return `"${value.replace(/"/g, '""')}"`;
+  return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
 function writeAuthoringTsconfig(directory: string): void {

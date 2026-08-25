@@ -234,7 +234,7 @@ the Lucide/Feather license beside bundles containing named Lucide geometry.
 ## CLI
 
 ```
-weaver init <name>       scaffold: <name>/widget.tsx (working starter clock) + tsconfig
+weaver init <path>       scaffold: <path>/widget.tsx (working starter clock) + tsconfig
 weaver check <dir>       tsc --noEmit + config/class/subscribe validation; agent-readable errors
 weaver dev <dir>         bundle → run in weaver-widget.exe → watch → rebundle+restart on change
 weaver bundle <dir>      esbuild → dist/bundle.js (local output; install rebuilds an owned copy)
