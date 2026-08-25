@@ -55,6 +55,7 @@ export interface MediaTransport {
   pause(): Promise<boolean>;
   next(): Promise<boolean>;
   previous(): Promise<boolean>;
+  /** Seeks to the nearest whole millisecond. */
   seek(ms: number): Promise<boolean>;
 }
 

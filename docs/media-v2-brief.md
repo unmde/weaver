@@ -231,7 +231,8 @@ transport.seek(ms: number);                    // absolute position
   reported success; resolve `false` = a well-formed request reached weaverd
   but the OS/session declined (no session, `TryX` returned false, capability
   refused). Reject = channel unavailable, malformed protocol, timeout,
-  disconnect, or shutdown. `seekMs` must be a finite non-negative integer;
+  disconnect, or shutdown. `seek(ms)` accepts a finite non-negative number;
+  the SDK rounds it to a JavaScript-safe integer before sending `seekMs`, and
   weaverd clamps to known duration when duration is known. Commands execute
   FIFO per widget; at most **4 pending** per widget (a 5th call rejects
   immediately); ack timeout **3 s**; command IDs are runtime-scoped
