@@ -349,6 +349,84 @@ function isolatedNative() {
   };
 }
 
+test("canvas display rate follows the surface clock while numeric rates stay fixed", async () => {
+  const source = `
+    import { h, useState, widget } from "./src/index.ts";
+    widget({ name: "Canvas frame-rate fixture", size: [100, 50] }, () => {
+      const [displayActive, setDisplayActive] = useState(true);
+      globalThis.pauseDisplayCanvas = () => setDisplayActive(false);
+      return h("row", null,
+        h("canvas", {
+          class: "w-[10px] h-[10px]",
+          fps: displayActive ? "display" : 0,
+          onFrame(ctx) { ctx.clear(); },
+        }),
+        h("canvas", {
+          class: "w-[10px] h-[10px]",
+          fps: 60,
+          onFrame(ctx) { ctx.clear(); },
+        }),
+        h("canvas", {
+          class: "w-[10px] h-[10px]",
+          fps: 30,
+          onFrame(ctx) { ctx.clear(); },
+        }),
+      );
+    });
+  `;
+  const output = await build({
+    stdin: { contents: source, resolveDir: fileURLToPath(new URL("..", import.meta.url)), sourcefile: "canvas-frame-rate-fixture.ts" },
+    bundle: true, format: "iife", platform: "neutral", write: false,
+  });
+  const fixtureOperations = [];
+  const frameCallbacks = new Map();
+  let id = 0;
+  const native = {
+    ...isolatedNative(),
+    createNode(type) { fixtureOperations.push(["createNode", type, ++id]); return id; },
+    reportError(...args) { fixtureOperations.push(["reportError", ...args]); },
+    setInterval(milliseconds) { fixtureOperations.push(["setInterval", milliseconds]); return 1; },
+    onCanvasFrame(canvas, callback) { fixtureOperations.push(["onCanvasFrame", canvas]); frameCallbacks.set(canvas, callback); },
+    clearCanvasFrame(canvas) { fixtureOperations.push(["clearCanvasFrame", canvas]); frameCallbacks.delete(canvas); },
+    setCanvasCommands(canvas) { fixtureOperations.push(["setCanvasCommands", canvas]); },
+  };
+  const context = { native };
+  vm.runInNewContext(output.outputFiles[0].text, context);
+
+  assert.deepEqual(fixtureOperations.filter(([name]) => name === "reportError"), []);
+  const canvasNodes = fixtureOperations.filter(([name, type]) => name === "createNode" && type === "canvas");
+  const displayCanvas = canvasNodes[0][2];
+  const fixedCanvas = canvasNodes[1][2];
+  assert.ok(frameCallbacks.has(displayCanvas));
+  assert.ok(frameCallbacks.has(fixedCanvas));
+  assert.deepEqual(fixtureOperations.filter(([name]) => name === "setInterval"), [["setInterval", 33]]);
+
+  const displayBefore = fixtureOperations.filter(([name, canvas]) => name === "setCanvasCommands" && canvas === displayCanvas).length;
+  const fixedBefore = fixtureOperations.filter(([name, canvas]) => name === "setCanvasCommands" && canvas === fixedCanvas).length;
+  for (const timestamp of [10, 10 + 1 / 120, 10 + 2 / 120]) {
+    frameCallbacks.get(displayCanvas)(timestamp);
+    frameCallbacks.get(fixedCanvas)(timestamp);
+  }
+  assert.equal(
+    fixtureOperations.filter(([name, canvas]) => name === "setCanvasCommands" && canvas === displayCanvas).length - displayBefore,
+    3,
+  );
+  assert.equal(
+    fixtureOperations.filter(([name, canvas]) => name === "setCanvasCommands" && canvas === fixedCanvas).length - fixedBefore,
+    2,
+  );
+
+  const displayDrawsBeforePause = fixtureOperations.filter(([name, canvas]) => name === "setCanvasCommands" && canvas === displayCanvas).length;
+  context.pauseDisplayCanvas();
+  await Promise.resolve();
+  assert.ok(fixtureOperations.some(([name, canvas]) => name === "clearCanvasFrame" && canvas === displayCanvas));
+  assert.equal(frameCallbacks.has(displayCanvas), false);
+  assert.equal(
+    fixtureOperations.filter(([name, canvas]) => name === "setCanvasCommands" && canvas === displayCanvas).length,
+    displayDrawsBeforePause,
+  );
+});
+
 test("provider signals update bound text and sampled values without a root render", async () => {
   const source = `
     import { h, useProviderSignal, useState, widget } from "./src/index.ts";

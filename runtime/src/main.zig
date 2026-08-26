@@ -680,6 +680,19 @@ fn viewRevision(model: *const Model) u64 {
     return model.tree.generation *% 2 +% @intFromBool(widget_log.failed());
 }
 
+/// Native surface requests are one-shot. A registered canvas callback owns
+/// the next request even when its retained commands are byte-for-byte
+/// unchanged; clearing the callback after dispatch leaves the surface idle.
+fn rearmCanvasFrameIfRegistered(
+    runtime: *native_sdk.Runtime,
+    window_id: native_sdk.platform.WindowId,
+    canvas_label: []const u8,
+    registered: bool,
+) anyerror!void {
+    if (!registered) return;
+    _ = try runtime.requestCanvasFrame(window_id, canvas_label);
+}
+
 /// Canvas callbacks mutate fixed command storage in `Tree.canvases`; the
 /// retained Native layout already owns the corresponding widget geometry.
 /// Re-point the retained slices (their lengths may change), emit once for all
@@ -691,6 +704,19 @@ fn projectSameViewUpdate(
     model: *const Model,
     msg: Msg,
 ) anyerror!bool {
+    // The update has already run by the time projection starts. Observe the
+    // current callback state before specializing by message: a provider wake
+    // can register fps="display" from idle and must start the one-shot native
+    // frame chain, while a canvas callback can clear itself and must not
+    // request another tick. Paint diffing cannot own animation lifetime: an
+    // honest animation may draw identical commands on successive ticks.
+    try rearmCanvasFrameIfRegistered(
+        runtime,
+        window_id,
+        canvas_label,
+        (model.engine orelse return true).hasCanvasFrames(),
+    );
+
     switch (msg) {
         .canvas_frame => {},
         else => return true,
@@ -1275,6 +1301,17 @@ fn synchronizeImages(model: *Model, effects: *Effects) !void {
     model.image_tree_generation = synchronized_generation;
 }
 
+const NativeWindowLayers = struct {
+    shell: native_sdk.app_manifest.WindowLayer,
+    startup: native_sdk.WindowLayer,
+};
+
+fn nativeWindowLayers(manifest_layer: []const u8) NativeWindowLayers {
+    if (std.mem.eql(u8, manifest_layer, "desktop")) return .{ .shell = .bottom, .startup = .bottom };
+    if (std.mem.eql(u8, manifest_layer, "topmost")) return .{ .shell = .topmost, .startup = .topmost };
+    return .{ .shell = .normal, .startup = .normal };
+}
+
 pub fn main(init: std.process.Init) !void {
     const allocator = init.arena.allocator();
     const args = try init.minimal.args.toSlice(allocator);
@@ -1374,6 +1411,7 @@ pub fn main(init: std.process.Init) !void {
         .gpu_color_space = .srgb,
         .gpu_vsync = true,
     }};
+    const window_layers = nativeWindowLayers(loaded.manifest.layer);
     const shell_windows = [_]native_sdk.ShellWindow{.{
         .label = "main",
         .title = loaded.manifest.name,
@@ -1385,7 +1423,7 @@ pub fn main(init: std.process.Init) !void {
         .restore_state = false,
         .titlebar = .chromeless,
         .transparent = true,
-        .layer = if (std.mem.eql(u8, loaded.manifest.layer, "desktop")) .bottom else if (std.mem.eql(u8, loaded.manifest.layer, "topmost")) .topmost else .normal,
+        .layer = window_layers.shell,
         .click_through = loaded.manifest.clickThrough,
         .no_activate = true,
         .views = &shell_views,
@@ -1564,6 +1602,8 @@ pub fn main(init: std.process.Init) !void {
         // move tick.
         .persist_window_state = false,
         .primary_display_anchor = if (builtin.os.tag == .macos and dragged == null) manifest_mod.primaryDisplayAnchor(loaded.manifest) else null,
+        .startup_window_layer = window_layers.startup,
+        .startup_click_through = loaded.manifest.clickThrough,
         .js_window_api = false,
     }, init) catch |err| {
         std.log.err("widget runtime stopped after platform callback failure: {s}", .{@errorName(err)});
@@ -1672,6 +1712,18 @@ fn captureMediaCommandValid(command: provider_mod.CaptureMediaCommand) bool {
         std.mem.eql(u8, command.verb, "next") or std.mem.eql(u8, command.verb, "previous");
     if (!known_verb or is_seek != (command.seekMs != null)) return false;
     return command.seekMs == null or command.seekMs.? <= provider_mod.max_safe_integer;
+}
+
+test "runtime startup window layer mirrors the dynamic manifest" {
+    const desktop = nativeWindowLayers("desktop");
+    try std.testing.expectEqual(native_sdk.app_manifest.WindowLayer.bottom, desktop.shell);
+    try std.testing.expectEqual(native_sdk.WindowLayer.bottom, desktop.startup);
+    const normal = nativeWindowLayers("normal");
+    try std.testing.expectEqual(native_sdk.app_manifest.WindowLayer.normal, normal.shell);
+    try std.testing.expectEqual(native_sdk.WindowLayer.normal, normal.startup);
+    const topmost = nativeWindowLayers("topmost");
+    try std.testing.expectEqual(native_sdk.app_manifest.WindowLayer.topmost, topmost.shell);
+    try std.testing.expectEqual(native_sdk.WindowLayer.topmost, topmost.startup);
 }
 
 test "capture media command seek must round-trip through JavaScript exactly" {
@@ -1923,6 +1975,102 @@ test "renderer backend status uses the portable public spelling" {
     try std.testing.expectEqualStrings("gpu", backendStatusLabel(.metal));
     try std.testing.expectEqualStrings("software", backendStatusLabel(.software));
     try std.testing.expectEqualStrings("-", backendStatusLabel(.none));
+}
+
+test "registered canvas callbacks rearm identical frames while paused callbacks stay stopped" {
+    const TestApp = struct {
+        fn app(self: *@This()) native_sdk.App {
+            return .{
+                .context = self,
+                .name = "weaver-canvas-frame-rearm",
+                .source = native_sdk.platform.WebViewSource.html("<p>idle</p>"),
+            };
+        }
+    };
+
+    const harness = try native_sdk.TestHarness().create(std.testing.allocator, .{});
+    defer harness.destroy(std.testing.allocator);
+    harness.null_platform.gpu_surfaces = true;
+    var app_state: TestApp = .{};
+    try harness.start(app_state.app());
+    _ = try harness.runtime.createView(.{
+        .window_id = 1,
+        .label = "canvas",
+        .kind = .gpu_surface,
+        .frame = native_sdk.geometry.RectF.init(0, 0, 100, 50),
+    });
+
+    harness.null_platform.gpu_surface_frame_request_count = 0;
+    try rearmCanvasFrameIfRegistered(&harness.runtime, 1, "canvas", false);
+    try std.testing.expectEqual(@as(usize, 0), harness.null_platform.gpu_surface_frame_request_count);
+    try rearmCanvasFrameIfRegistered(&harness.runtime, 1, "canvas", true);
+    try rearmCanvasFrameIfRegistered(&harness.runtime, 1, "canvas", true);
+    try std.testing.expectEqual(@as(usize, 2), harness.null_platform.gpu_surface_frame_request_count);
+}
+
+test "registering a display callback from an idle provider update starts its frame chain" {
+    const TestApp = struct {
+        fn app(self: *@This()) native_sdk.App {
+            return .{
+                .context = self,
+                .name = "weaver-canvas-frame-resume",
+                .source = native_sdk.platform.WebViewSource.html("<p>idle</p>"),
+            };
+        }
+    };
+
+    const harness = try native_sdk.TestHarness().create(std.testing.allocator, .{});
+    defer harness.destroy(std.testing.allocator);
+    harness.null_platform.gpu_surfaces = true;
+    var app_state: TestApp = .{};
+    try harness.start(app_state.app());
+    _ = try harness.runtime.createView(.{
+        .window_id = 1,
+        .label = "canvas",
+        .kind = .gpu_surface,
+        .frame = native_sdk.geometry.RectF.init(0, 0, 100, 50),
+    });
+
+    const model = try std.testing.allocator.create(Model);
+    defer std.testing.allocator.destroy(model);
+    model.* = .{};
+    model.tree.allocator = std.testing.allocator;
+    defer model.tree.deinit();
+    try model.provider.init(std.testing.io, null);
+    defer model.provider.deinit();
+    var store: storage_mod.Store = .{
+        .io = std.testing.io,
+        .allocator = std.testing.allocator,
+        .directory = ".",
+        .path = "weaver-canvas-frame-resume-storage.json",
+        .temporary_path = "weaver-canvas-frame-resume-storage.tmp",
+    };
+    const engine = try js_engine.Engine.create(
+        std.testing.allocator,
+        &model.tree,
+        &store,
+        &.{},
+        &model.provider,
+        false,
+        false,
+    );
+    defer engine.destroy(std.testing.allocator);
+    model.engine = engine;
+
+    const canvas_id = try model.tree.createNode(.canvas);
+    try std.testing.expectEqual(@as(tree_mod.NodeId, 1), canvas_id);
+    try engine.evaluate("native.onCanvasFrame(1, () => {});", "canvas-frame-resume-test.js");
+    try std.testing.expect(engine.hasCanvasFrames());
+
+    harness.null_platform.gpu_surface_frame_request_count = 0;
+    try std.testing.expect(try projectSameViewUpdate(
+        &harness.runtime,
+        1,
+        "canvas",
+        model,
+        .{ .external_wake = .{ .provider = true, .dev_reload = false } },
+    ));
+    try std.testing.expectEqual(@as(usize, 1), harness.null_platform.gpu_surface_frame_request_count);
 }
 
 test "dev reload crosses requestFrame into the frame-requested hook exactly once" {

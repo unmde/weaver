@@ -11,11 +11,12 @@ const STORAGE_QUOTA_BYTES = 256 * 1024;
 // mounted canvas allocates one 256 KiB Float64Array; unused canvas slots cost
 // nothing. Pinned to runtime/src/tree.zig max_canvas_wire_values.
 const MAX_CANVAS_WIRE_VALUES = 32_768;
-// Shipped widgets author at most 60 fps (m4b-synthetic), matching the native
-// surface clock. Faster requests cannot present extra frames, so 60 is a
-// scheduler/protocol bound rather than a silently starved animation budget;
-// the clamp itself retains no memory.
-const MAX_CANVAS_FPS = 60;
+// Repository audit (2026-08-25, origin/master 84b1245): m4b-synthetic is the
+// fastest shipped numeric canvas at 60 fps, and the public contract has always
+// capped numeric requests there. Keep that compatibility boundary; authors who
+// need the real screen cadence use "display", whose ceiling belongs to the
+// native surface clock instead of a duplicated JavaScript number.
+const MAX_NUMERIC_CANVAS_FPS = 60;
 // Native installs this immutable bridge capability before evaluating the
 // bundle. Widget code can adjust the exposed capture clock for deterministic
 // time, but it cannot opt ordinary execution into capture-only I/O behavior.
@@ -87,6 +88,7 @@ type ProviderValue = TimeData | CpuData | MemoryData | AudioData | MediaData;
 export interface WFetchInit { method?: "GET" | "POST"; headers?: Record<string, string>; body?: string }
 export interface WFetchResponse { status: number; ok: boolean; text(): Promise<string>; json(): Promise<unknown> }
 export interface CanvasFrame { t: number; dt: number }
+export type CanvasFrameRate = number | "display";
 export interface PressEvent { x: number; y: number; u: number; v: number }
 export interface CanvasCtx {
   readonly width: number;
@@ -139,7 +141,7 @@ interface HostElementProps {
   fit?: "cover" | "contain" | "stretch";
   tile?: boolean;
   onFrame?: (ctx: CanvasCtx, frame: CanvasFrame) => void;
-  fps?: number;
+  fps?: CanvasFrameRate;
 }
 
 interface ComponentInstance {
@@ -186,7 +188,7 @@ const pendingEffects: EffectHook[] = [];
 const handlers = new Map<number, HostElementProps>();
 interface CanvasBinding {
   onFrame: (ctx: CanvasCtx, frame: CanvasFrame) => void;
-  fps?: number;
+  fps?: CanvasFrameRate;
   timerId: number;
   surfaceClock: boolean;
   width: number;
@@ -653,11 +655,14 @@ function applyElementProps(instance: HostInstance, props: Record<string, unknown
     next.iconStroke = props.iconStroke;
   } else if (instance.type === "canvas") {
     if (typeof props.onFrame !== "function") throw new Error("<canvas> requires onFrame={(ctx, frame) => ...}");
-    if (props.fps !== undefined && (typeof props.fps !== "number" || !Number.isFinite(props.fps) || props.fps < 0)) {
-      throw new Error("<canvas> fps must be zero or a positive number when provided");
+    if (props.fps !== undefined && props.fps !== "display" &&
+        (typeof props.fps !== "number" || !Number.isFinite(props.fps) || props.fps < 0)) {
+      throw new Error('<canvas> fps must be 0, a positive number, or "display" when provided');
     }
     next.onFrame = props.onFrame as (ctx: CanvasCtx, frame: CanvasFrame) => void;
-    next.fps = props.fps === undefined ? undefined : Math.min(MAX_CANVAS_FPS, props.fps as number);
+    next.fps = props.fps === undefined || props.fps === "display"
+      ? props.fps
+      : Math.min(MAX_NUMERIC_CANVAS_FPS, props.fps as number);
   }
   if (Boolean(previous.onPress) !== Boolean(next.onPress)) native.setHandler(instance.id, "press", Boolean(next.onPress));
   if (Boolean(previous.onDoublePress) !== Boolean(next.onDoublePress)) native.setHandler(instance.id, "doublepress", Boolean(next.onDoublePress));
@@ -732,10 +737,10 @@ function setHostText(instance: HostInstance, text: string): void {
   instance.text = text;
 }
 
-function updateCanvasBinding(id: number, onFrame: (ctx: CanvasCtx, frame: CanvasFrame) => void, fps: number | undefined, width: number, height: number): void {
+function updateCanvasBinding(id: number, onFrame: (ctx: CanvasCtx, frame: CanvasFrame) => void, fps: CanvasFrameRate | undefined, width: number, height: number): void {
   let binding = canvases.get(id);
   const mounted = binding === undefined;
-  const intervalChanged = binding?.fps !== fps;
+  const rateChanged = binding?.fps !== fps;
   if (!binding) {
     binding = {
       onFrame, fps, timerId: 0, surfaceClock: false, width, height,
@@ -751,14 +756,14 @@ function updateCanvasBinding(id: number, onFrame: (ctx: CanvasCtx, frame: Canvas
     binding.height = height;
     if (sizeChanged) binding.ctx = createCanvasContext(binding);
   }
-  if (intervalChanged && binding.timerId !== 0) {
+  if (rateChanged && binding.timerId !== 0) {
     native.clearInterval(binding.timerId);
     binding.timerId = 0;
     binding.lastT = undefined;
     binding.nextT = undefined;
     binding.nativeTimestampStarted = false;
   }
-  if (intervalChanged && binding.surfaceClock) {
+  if (rateChanged && binding.surfaceClock) {
     native.clearCanvasFrame(id);
     binding.surfaceClock = false;
     binding.lastT = undefined;
@@ -774,9 +779,17 @@ function updateCanvasBinding(id: number, onFrame: (ctx: CanvasCtx, frame: Canvas
     drawCanvasFrame(id, captureNowMilliseconds() / 1000);
     return;
   }
-  if (fps >= MAX_CANVAS_FPS) {
+  if (fps === "display") {
     if (!binding.surfaceClock) {
       native.onCanvasFrame(id, (timestampSeconds) => drawCanvasFrame(id, timestampSeconds));
+      binding.surfaceClock = true;
+      drawCanvasFrame(id, captureNowMilliseconds() / 1000);
+    }
+    return;
+  }
+  if (fps >= MAX_NUMERIC_CANVAS_FPS) {
+    if (!binding.surfaceClock) {
+      native.onCanvasFrame(id, (timestampSeconds) => drawTimedCanvasFrame(id, timestampSeconds));
       binding.surfaceClock = true;
       drawCanvasFrame(id, captureNowMilliseconds() / 1000);
     }
@@ -797,7 +810,7 @@ function updateCanvasBinding(id: number, onFrame: (ctx: CanvasCtx, frame: Canvas
 
 function drawTimedCanvasFrame(id: number, timestampSeconds: number): void {
   const binding = canvases.get(id);
-  if (!binding || binding.fps === undefined || binding.fps === 0) return;
+  if (!binding || typeof binding.fps !== "number" || binding.fps === 0) return;
   const period = 1 / binding.fps;
   if (binding.nextT === undefined) binding.nextT = timestampSeconds;
   if (timestampSeconds + 0.000_001 < binding.nextT) return;

@@ -264,11 +264,12 @@ the desktop.
 ## `<canvas>` — immediate mode (the ADR 0009 exception)
 
 ```tsx
-<canvas class="w-[288px] h-[64px]" fps={30} onFrame={(ctx, frame) => { … }} />
+<canvas class="w-[288px] h-[64px]" fps="display" onFrame={(ctx, frame) => { … }} />
 ```
 
 ```ts
 interface CanvasFrame { t: number; dt: number }        // seconds
+type CanvasFrameRate = number | "display";
 interface CanvasCtx {
   width: number; height: number;                       // logical px
   clear(color?: string): void;                         // default: transparent
@@ -280,13 +281,17 @@ interface CanvasCtx {
 }
 ```
 
-- `fps` capped at 60; omitted → draws once per React render. `fps={0}` pauses
-  the frame clock entirely (0% cost) while keeping the last frame on screen —
-  the intended idle pattern for data-driven canvases: `fps={active ? 30 : 0}`.
-- `onFrame` runs on the native frame clock; commands batch into one
+- `fps="display"` draws once per native surface frame, matching a 60 Hz or
+  high-refresh display without guessing its rate. This is the default choice
+  for fluid visualizers: `fps={active ? "display" : 0}`.
+- A positive numeric `fps` requests a fixed lower cadence and remains capped
+  at 60 for compatibility. `fps={0}` pauses the frame clock entirely (0% cost)
+  while keeping the last frame on screen; omitted draws once per React render.
+- `onFrame` runs on the selected native clock; commands batch into one
   immediate-mode buffer per frame. Colors are `#rgb/#rrggbb/#rrggbbaa`.
-- A canvas with `fps > 0` is an *animated* widget and is billed accordingly
-  (ADR 0005); everything outside the canvas stays retained/idle-zero.
+- A canvas with `fps="display"` or `fps > 0` is an *animated* widget and is
+  billed accordingly (ADR 0005); everything outside the canvas stays
+  retained/idle-zero.
 
 ## Providers: `audio` and `media` (host-fed)
 

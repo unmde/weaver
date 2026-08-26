@@ -66,4 +66,9 @@ test("public Signal and provider declarations match their runtime source", () =>
   for (const hook of ["useProvider", "useProviderSignal"]) {
     assert.deepEqual(providerOverloads(declarations, hook), providerOverloads(reconciler, hook));
   }
+  const canvasFrameRatePattern = /^export type CanvasFrameRate = [^;]+;/m;
+  assert.equal(
+    declarationBlock(declarations, canvasFrameRatePattern, "public CanvasFrameRate declaration"),
+    declarationBlock(reconciler, canvasFrameRatePattern, "runtime CanvasFrameRate declaration"),
+  );
 });
