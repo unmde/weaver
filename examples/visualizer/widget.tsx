@@ -49,7 +49,7 @@ export default widget({
           <column class="size-full">
             <canvas
               class="w-[312px] h-[75px]"
-              fps={active ? 30 : 0}
+              fps={active ? "display" : 0}
               onFrame={(ctx, frame) => {
                 const sample = audio.value;
                 ctx.clear();

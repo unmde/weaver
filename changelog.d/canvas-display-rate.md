@@ -1,0 +1,1 @@
+feature: **Display-rate canvas animation**: `<canvas fps="display">` now follows each native surface frame on standard and high-refresh displays, while numeric FPS remains a fixed, compatibility-capped cadence and `fps={0}` still stops animation work.

@@ -51,7 +51,7 @@ Import from `@weaver/sdk`.
 | `<image src="…">` | local source; `fit="cover|contain|stretch"`, optional `tile` |
 | `<button>` | required `onPress`; optional `onDoublePress`, `onRightPress` |
 | `<slider>` | `value`, positive `max`, `onChange` |
-| `<canvas>` | `onFrame(ctx, frame)`, optional `fps`; use only for drawing that primitives cannot express |
+| `<canvas>` | `onFrame(ctx, frame)`, optional `fps`; use `fps="display"` for fluid motion, a number only for an intentional fixed cadence, and `0` once animation settles |
 
 Press callbacks receive `{x,y,u,v}`: local logical pixels plus normalized
 0–1 coordinates. A zero-argument `onPress` remains valid. Prefer native

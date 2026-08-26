@@ -1,0 +1,1 @@
+fix: **Honor each widget's startup window policy**: runtime-loaded `layer` and `clickThrough` values now reach the native startup window before it is created, so visible topmost widgets are not incorrectly paced as occluded desktop surfaces.
