@@ -1,8 +1,5 @@
 import { useEffect, useProviderSignal, useState, widget, type AudioData } from "@weaver/sdk";
 
-// A canvas gets no host GPU surface if any ancestor clips, or if a layer with
-// opacity paints behind it. So: no overflow-hidden anywhere (each overlay image
-// carries its own radius instead), and the well behind the meter is plain black.
 // Same chassis as the noro-shell player: #1a1a1a body, black recessed well,
 // Cozette pixel type, grain over everything, and one red accent. The meter is
 // a segmented ladder built from the player's 13px progress-bar cell, so both
@@ -46,9 +43,9 @@ export default widget({
   }), [audio]);
   const readoutSignal = audio.map(readoutValue);
   return (
-    <stack class="size-full rounded-[20px]">
+    <stack class="size-full rounded-[20px] overflow-hidden">
       <column class="size-full bg-[#1a1a1a] rounded-[20px] border border-[#000000] shadow-[0_1px_2px_0_#ffffff1a] shadow-inner p-[14px]">
-        <stack class="w-full h-[96px] rounded-t-[16px] rounded-b-[4px] bg-[#000000] border border-[#000000]">
+        <stack class="w-full h-[96px] rounded-t-[16px] rounded-b-[4px] overflow-hidden bg-[#000000] border border-[#000000]">
           <column class="size-full">
             <canvas
               class="w-[312px] h-[75px]"
@@ -117,14 +114,14 @@ export default widget({
               <text class="w-[72px] text-right text-[13px] text-[#ffffff] font-[Cozette-Subset]">{readoutSignal}</text>
             </row>
           </column>
-          <image src="./assets/GrainTile.png" tile class="size-full opacity-20 rounded-t-[16px] rounded-b-[4px]" />
+          <image src="./assets/GrainTile.png" tile class="size-full opacity-20" />
         </stack>
 
-        <stack class="w-full h-[24px] mt-[10px] rounded-[3px] bg-[#1a1a1a] border border-[#000000]">
-          <image src="./assets/GrilleTile.png" tile class="size-full opacity-5 rounded-[3px]" />
+        <stack class="w-full h-[24px] mt-[10px] rounded-[3px] overflow-hidden bg-[#1a1a1a] border border-[#000000]">
+          <image src="./assets/GrilleTile.png" tile class="size-full opacity-5" />
         </stack>
       </column>
-      <image src="./assets/GrainTile.png" tile class="size-full opacity-5 rounded-[20px]" />
+      <image src="./assets/GrainTile.png" tile class="size-full opacity-5" />
     </stack>
   );
 });

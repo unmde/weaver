@@ -313,19 +313,12 @@ fn endBatch(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, _: [*c]c.JSValue
             .{ tag, violation.node_id, if (violation.kind == .button) " or visible descendant text" else "" },
         );
     }
-    if (authored_tree.canvasAncestorViolation()) |violation| {
-        return switch (violation.reason) {
-            .clip => failFmt(
-                js,
-                "CanvasNeedsUnclippedAncestors: canvas node {d} is under overflow-hidden ancestor {d}; a host GPU surface cannot be clipped",
-                .{ violation.canvas_id, violation.ancestor_id },
-            ),
-            .opacity => failFmt(
-                js,
-                "CanvasNeedsOpaqueAncestors: canvas node {d} is under opacity ancestor {d}; a host GPU surface cannot be placed behind an opacity layer",
-                .{ violation.canvas_id, violation.ancestor_id },
-            ),
-        };
+    if (authored_tree.canvasOpacityAncestorViolation()) |violation| {
+        return failFmt(
+            js,
+            "CanvasNeedsOpaqueAncestors: canvas node {d} is under opacity ancestor {d}; the canvas cannot participate in ancestor opacity",
+            .{ violation.canvas_id, violation.ancestor_id },
+        );
     }
     authored_tree.commitBatch();
     return qjs.undefinedValue();

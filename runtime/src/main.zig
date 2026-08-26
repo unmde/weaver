@@ -2383,6 +2383,34 @@ test "painted retained stack keeps overlay children under rounded inset shadow" 
     try std.testing.expectEqual(native_sdk.canvas.WidgetKind.text, overlay.children[1].kind);
 }
 
+test "rounded overflow stack projects a canvas child under the native clip" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+
+    var model: Model = .{};
+    const stack_id = try model.tree.createNode(.stack);
+    const canvas_id = try model.tree.createNode(.canvas);
+    try model.tree.setNumberProp(stack_id, "width", 100);
+    try model.tree.setNumberProp(stack_id, "height", 100);
+    try model.tree.setNumberProp(stack_id, "radius", 24);
+    try model.tree.setOverflowHidden(stack_id, true);
+    try model.tree.setNumberProp(canvas_id, "width", 100);
+    try model.tree.setNumberProp(canvas_id, "height", 100);
+    try model.tree.appendChild(stack_id, canvas_id);
+
+    var ui = WidgetUi.init(arena_state.allocator());
+    const built = try ui.finalize(buildNodeForTest(&ui, &model, stack_id, false));
+    try std.testing.expectEqual(native_sdk.canvas.WidgetKind.panel, built.root.kind);
+    try std.testing.expect(built.root.layout.flags.clip_content);
+    try std.testing.expectEqual(@as(?f32, 24), built.root.style.radius);
+    try std.testing.expectEqual(@as(usize, 1), built.root.children.len);
+    const overlay = built.root.children[0];
+    try std.testing.expectEqual(native_sdk.canvas.WidgetKind.stack, overlay.kind);
+    try std.testing.expectEqual(@as(usize, 1), overlay.children.len);
+    try std.testing.expectEqual(native_sdk.canvas.WidgetKind.stack, overlay.children[0].kind);
+    try std.testing.expectEqual(@as(usize, 0), overlay.children[0].immediate_commands.len);
+}
+
 test "styled Weaver button prefers its explicit accessible name" {
     var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena_state.deinit();

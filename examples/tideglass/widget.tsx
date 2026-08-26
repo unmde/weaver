@@ -4,7 +4,7 @@ const dailyGoal = 8;
 
 export default widget({
   name: "Tideglass",
-  size: [380, 224],
+  size: [476, 320],
   anchor: { corner: "bottom-right", offset: [24, 24] },
 }, () => {
   const [glasses, setGlasses] = useStorage("glasses", 3);
@@ -12,7 +12,8 @@ export default widget({
   const percentage = Math.round((glasses / dailyGoal) * 100);
 
   return (
-    <column class="size-full p-4 gap-3 bg-[#071b26]/96 rounded-3xl border border-[#164e63] shadow-[0_16px_36px_-12px_#020617cc]">
+    <stack class="size-full pl-[48px] pt-[32px] pr-[48px] pb-[64px]">
+    <column class="w-[380px] h-[224px] p-4 gap-3 bg-[#071b26]/96 rounded-3xl border border-[#164e63] shadow-[0_16px_36px_-12px_#020617cc]">
       <row class="w-full items-center justify-between">
         <column class="gap-1">
           <text class="text-xs font-semibold tracking-[2px] text-[#67e8f9]">TIDEGLASS</text>
@@ -64,5 +65,6 @@ export default widget({
         </button>
       </row>
     </column>
+    </stack>
   );
 });

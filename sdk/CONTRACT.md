@@ -177,6 +177,11 @@ utility.
 | `w-N`, `w-[Npx]`, `h-N`, `h-[Npx]` | fixed size |
 | `truncate` | single-line ellipsis (text only) |
 
+The widget window is exactly `config.size`. Outset shadows do not enlarge it.
+`weaver check` rejects a full-window root with an outset shadow and reports the
+exact transparent room required on every side. Put the shadow on an inset
+surface inside that room, or use `shadow-inner`/`shadow-none`.
+
 Named text sizes use Tailwind's paired size/line-height defaults:
 `xs` 12/16, `sm` 14/20, `base` 16/24, `lg` 18/28, `xl` 20/28,
 `2xl` 24/32, `3xl` 30/36, and `4xl` 36/40 (logical pixels). An explicit
@@ -457,8 +462,11 @@ layout API.
 |---|---|
 | `overflow-hidden` | clip descendant painting to this element's resolved rounded bounds |
 
-The clip applies to images, text, panels, and nested content. Per-corner
-`rounded-*` utilities shape the mask, including asymmetric corners.
+The clip applies to canvases, images, text, panels, and nested content.
+Per-corner `rounded-*` utilities shape the mask, including asymmetric corners.
+This is the intended way to give a canvas-backed visual rounded edges. An
+opacity ancestor remains unsupported for `<canvas>`; apply that opacity while
+drawing the canvas instead.
 
 ## PR 10: image fitting, rounded masks, and tiling
 

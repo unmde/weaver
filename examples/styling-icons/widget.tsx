@@ -2,10 +2,11 @@ import { widget } from "@weaver/sdk";
 
 export default widget({
   name: "Styling Icons",
-  size: [440, 290],
+  size: [500, 350],
   anchor: { corner: "top-right", offset: [24, 24] },
 }, () => (
-  <column class="w-full h-full p-5 gap-4 rounded-2xl bg-slate-950 border border-slate-700 shadow-xl">
+  <stack class="size-full pl-[30px] pt-[10px] pr-[30px] pb-[50px]">
+  <column class="w-[440px] h-[290px] p-5 gap-4 rounded-2xl bg-slate-950 border border-slate-700 shadow-xl">
     <row class="items-center gap-3">
       <icon name="audio-waveform" class="w-10 h-10 text-fuchsia-400" />
       <column>
@@ -39,4 +40,5 @@ export default widget({
       </column>
     </row>
   </column>
+  </stack>
 ));

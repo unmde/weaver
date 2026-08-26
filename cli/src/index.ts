@@ -1602,7 +1602,6 @@ interface LoweredTreeMetrics {
   canvases: number;
   images: number;
   maxTextBytes: number;
-  clippedCanvas: boolean;
   opacityCanvas: boolean;
 }
 
@@ -1642,7 +1641,7 @@ function statusDivergenceWarnings(document: ReturnType<typeof readStatus>): stri
   return warnings;
 }
 
-function validateLoweredTreeBudgets(project: SourceProject, errors: string[]): void {
+function validateLoweredTree(project: SourceProject, errors: string[]): void {
   type JsxRoot = ts.JsxElement | ts.JsxSelfClosingElement | ts.JsxFragment;
   interface ComponentDefinition {
     key: string;
@@ -1770,7 +1769,6 @@ function validateLoweredTreeBudgets(project: SourceProject, errors: string[]): v
     canvases: Math.max(0, ...values.map((value) => value.canvases)),
     images: Math.max(0, ...values.map((value) => value.images)),
     maxTextBytes: Math.max(0, ...values.map((value) => value.maxTextBytes)),
-    clippedCanvas: values.some((value) => value.clippedCanvas),
     opacityCanvas: values.some((value) => value.opacityCanvas),
   });
   const staticPrimitiveText = (expression: ts.Expression): string | null => {
@@ -1784,7 +1782,7 @@ function validateLoweredTreeBudgets(project: SourceProject, errors: string[]): v
   };
   const emptyMetrics = (): LoweredTreeMetrics => ({
     nodes: 0, roots: 0, depth: 0, maxChildren: 0, canvases: 0, images: 0, maxTextBytes: 0,
-    clippedCanvas: false, opacityCanvas: false,
+    opacityCanvas: false,
   });
   const combineSiblings = (values: LoweredTreeMetrics[]): LoweredTreeMetrics => ({
     nodes: values.reduce((sum, value) => sum + value.nodes, 0),
@@ -1794,25 +1792,23 @@ function validateLoweredTreeBudgets(project: SourceProject, errors: string[]): v
     canvases: values.reduce((sum, value) => sum + value.canvases, 0),
     images: values.reduce((sum, value) => sum + value.images, 0),
     maxTextBytes: Math.max(0, ...values.map((value) => value.maxTextBytes)),
-    clippedCanvas: values.some((value) => value.clippedCanvas),
     opacityCanvas: values.some((value) => value.opacityCanvas),
   });
-  const canvasLayer = (node: ts.JsxElement | ts.JsxSelfClosingElement): "clip" | "opacity" | null => {
+  const canvasHasOpacityLayer = (node: ts.JsxElement | ts.JsxSelfClosingElement): boolean => {
     const { tag, attributes } = tagAndAttributes(node);
-    if (/^[A-Z]/.test(tag)) return null;
+    if (/^[A-Z]/.test(tag)) return false;
     const sourceFile = node.getSourceFile();
     const classAttribute = attributes.properties.find((attribute): attribute is ts.JsxAttribute =>
       ts.isJsxAttribute(attribute) && attribute.name.getText(sourceFile) === "class");
     const classText = classAttribute ? jsxStringValue(classAttribute.initializer) : "";
-    if (classText === null) return null;
+    if (classText === null) return false;
     try {
       const compiled = compileClass(classText);
-      if (compiled.overflowHidden === true) return "clip";
-      if (typeof compiled.opacity === "number" && compiled.opacity < 1) return "opacity";
+      return typeof compiled.opacity === "number" && compiled.opacity < 1;
     } catch {
       // The ordinary class validator reports the malformed utility.
+      return false;
     }
-    return null;
   };
   const metrics = (node: JsxRoot, visiting: Set<string>): LoweredTreeMetrics => {
     const childMetrics = (children: readonly ts.JsxChild[], parentTag: string | null): LoweredTreeMetrics[] => {
@@ -1860,7 +1856,7 @@ function validateLoweredTreeBudgets(project: SourceProject, errors: string[]): v
       if (complete) textBytes = Buffer.byteLength(text, "utf8");
     }
     const directChildren = combinedChildren.roots;
-    const layer = canvasLayer(node);
+    const hasOpacityLayer = canvasHasOpacityLayer(node);
     return {
       nodes: ownDepth + combinedChildren.nodes,
       roots: 1,
@@ -1869,9 +1865,156 @@ function validateLoweredTreeBudgets(project: SourceProject, errors: string[]): v
       canvases: combinedChildren.canvases + (tag === "canvas" ? 1 : 0),
       images: combinedChildren.images + (tag === "image" ? 1 : 0),
       maxTextBytes: Math.max(combinedChildren.maxTextBytes, textBytes),
-      clippedCanvas: combinedChildren.clippedCanvas || (layer === "clip" && combinedChildren.canvases > 0),
-      opacityCanvas: combinedChildren.opacityCanvas || (layer === "opacity" && combinedChildren.canvases > 0),
+      opacityCanvas: combinedChildren.opacityCanvas || (hasOpacityLayer && combinedChildren.canvases > 0),
     };
+  };
+  type PrimitiveRoot = ts.JsxElement | ts.JsxSelfClosingElement;
+  const primitiveRoots = (node: JsxRoot, visiting: Set<string>): PrimitiveRoot[] => {
+    if (ts.isJsxFragment(node)) {
+      const result: PrimitiveRoot[] = [];
+      for (const child of node.children) {
+        if (ts.isJsxElement(child) || ts.isJsxSelfClosingElement(child) || ts.isJsxFragment(child)) {
+          result.push(...primitiveRoots(child, visiting));
+        } else if (ts.isJsxExpression(child) && child.expression) {
+          for (const root of expressionRoots(child.expression)) result.push(...primitiveRoots(root, visiting));
+        }
+      }
+      return result;
+    }
+    const { tag } = tagAndAttributes(node);
+    if (!/^[A-Z]/.test(tag)) return [node];
+    const component = componentScopes.get(node.getSourceFile())?.get(tag);
+    if (!component || visiting.has(component.key)) return [];
+    const next = new Set(visiting);
+    next.add(component.key);
+    return component.roots.flatMap((root) => primitiveRoots(root, next));
+  };
+  interface ShadowOutsets { left: number; top: number; right: number; bottom: number }
+  interface VisualRect { x: number; y: number; width: number; height: number }
+  const shadowOutsets = (value: unknown, inset: unknown): ShadowOutsets | null => {
+    if (typeof value !== "string" || value === "" || value === "none" || inset === true) return null;
+    const parts = value.split(" ");
+    if (parts.length !== 5 || parts[4].endsWith("00")) return null;
+    const [offsetX, offsetY, blur, spread] = parts.slice(0, 4).map(Number);
+    if (![offsetX, offsetY, blur, spread].every(Number.isFinite)) return null;
+    // Matches native-sdk drawing.shadowBounds: translate, then inflate by
+    // abs(spread) + blur. These are authored logical pixels, not a new limit.
+    const radius = Math.abs(spread) + blur;
+    return {
+      left: Math.max(0, radius - offsetX),
+      top: Math.max(0, radius - offsetY),
+      right: Math.max(0, radius + offsetX),
+      bottom: Math.max(0, radius + offsetY),
+    };
+  };
+  const formatPixels = (value: number): string => Number.isInteger(value) ? String(value) : String(Number(value.toFixed(3)));
+  const compiledClass = (node: PrimitiveRoot): Record<string, unknown> | null => {
+    const { attributes } = tagAndAttributes(node);
+    const sourceFile = node.getSourceFile();
+    const classAttribute = attributes.properties.find((attribute): attribute is ts.JsxAttribute =>
+      ts.isJsxAttribute(attribute) && attribute.name.getText(sourceFile) === "class");
+    const classText = classAttribute ? jsxStringValue(classAttribute.initializer) : "";
+    if (classText === null) return null;
+    try {
+      return compileClass(classText) as Record<string, unknown>;
+    } catch {
+      return null; // The ordinary class validator reports the malformed utility.
+    }
+  };
+  const visualChildren = (node: PrimitiveRoot): PrimitiveRoot[] => {
+    if (!ts.isJsxElement(node)) return [];
+    const result: PrimitiveRoot[] = [];
+    for (const child of node.children) {
+      if (ts.isJsxElement(child) || ts.isJsxSelfClosingElement(child) || ts.isJsxFragment(child)) {
+        result.push(...primitiveRoots(child, new Set()));
+      } else if (ts.isJsxExpression(child) && child.expression) {
+        for (const root of expressionRoots(child.expression)) result.push(...primitiveRoots(root, new Set()));
+      }
+    }
+    return result;
+  };
+  const validateVisualNodeBounds = (node: PrimitiveRoot, rect: VisualRect, seen: Set<string>): boolean => {
+    const nodeKey = `${node.getSourceFile().fileName}:${node.getStart()}`;
+    if (seen.has(nodeKey)) return false;
+    seen.add(nodeKey);
+    const { tag, attributes } = tagAndAttributes(node);
+    const sourceFile = node.getSourceFile();
+    const classAttribute = attributes.properties.find((attribute): attribute is ts.JsxAttribute =>
+      ts.isJsxAttribute(attribute) && attribute.name.getText(sourceFile) === "class");
+    const compiled = compiledClass(node);
+    if (!compiled) return false;
+    const [surfaceWidth, surfaceHeight] = project.config.size;
+    const shadows = [
+      [compiled.shadow, compiled.shadowInset],
+      [compiled.hoverShadow, compiled.hoverShadowInset],
+      [compiled.pressedShadow, compiled.pressedShadowInset],
+    ] as const;
+    const outsets = shadows.map(([shadow, inset]) => shadowOutsets(shadow, inset)).filter((value): value is ShadowOutsets => value !== null);
+    if (outsets.length > 0) {
+      const required = outsets.reduce<ShadowOutsets>((result, value) => ({
+        left: Math.max(result.left, value.left),
+        top: Math.max(result.top, value.top),
+        right: Math.max(result.right, value.right),
+        bottom: Math.max(result.bottom, value.bottom),
+      }), { left: 0, top: 0, right: 0, bottom: 0 });
+      const available: ShadowOutsets = {
+        left: rect.x,
+        top: rect.y,
+        right: surfaceWidth - rect.x - rect.width,
+        bottom: surfaceHeight - rect.y - rect.height,
+      };
+      const missing: ShadowOutsets = {
+        left: Math.max(0, required.left - available.left),
+        top: Math.max(0, required.top - available.top),
+        right: Math.max(0, required.right - available.right),
+        bottom: Math.max(0, required.bottom - available.bottom),
+      };
+      if (missing.left > 0 || missing.top > 0 || missing.right > 0 || missing.bottom > 0) {
+        const paintedWidth = surfaceWidth + missing.left + missing.right;
+        const paintedHeight = surfaceHeight + missing.top + missing.bottom;
+        errors.push(locationMessage(
+          sourceFile,
+          classAttribute ?? node,
+          `RootOutsetShadowClipped: root-surface <${tag}> has an outset shadow outside config.size [${formatPixels(surfaceWidth)}, ${formatPixels(surfaceHeight)}]. ` +
+          `Required shadow room: left=${formatPixels(required.left)}px, top=${formatPixels(required.top)}px, right=${formatPixels(required.right)}px, bottom=${formatPixels(required.bottom)}px; ` +
+          `available: left=${formatPixels(available.left)}px, top=${formatPixels(available.top)}px, right=${formatPixels(available.right)}px, bottom=${formatPixels(available.bottom)}px; ` +
+          `missing: left=${formatPixels(missing.left)}px, top=${formatPixels(missing.top)}px, right=${formatPixels(missing.right)}px, bottom=${formatPixels(missing.bottom)}px; painted bounds=${formatPixels(paintedWidth)}x${formatPixels(paintedHeight)}. ` +
+          `Fix: expand config.size by the missing room and inset this surface by the required left/top room, or use shadow-inner/shadow-none.`,
+        ));
+        return true;
+      }
+    }
+    if (tag !== "stack" && tag !== "row" && tag !== "column") return false;
+    const uniformPadding = typeof compiled.padding === "number" ? compiled.padding : 0;
+    const padding = {
+      left: typeof compiled.paddingLeft === "number" && compiled.paddingLeft >= 0 ? compiled.paddingLeft : uniformPadding,
+      top: typeof compiled.paddingTop === "number" && compiled.paddingTop >= 0 ? compiled.paddingTop : uniformPadding,
+      right: typeof compiled.paddingRight === "number" && compiled.paddingRight >= 0 ? compiled.paddingRight : uniformPadding,
+      bottom: typeof compiled.paddingBottom === "number" && compiled.paddingBottom >= 0 ? compiled.paddingBottom : uniformPadding,
+    };
+    const content: VisualRect = {
+      x: rect.x + padding.left,
+      y: rect.y + padding.top,
+      width: rect.width - padding.left - padding.right,
+      height: rect.height - padding.top - padding.bottom,
+    };
+    if (content.width < 0 || content.height < 0) return false;
+    const children = visualChildren(node);
+    // Stack children overlay independently, so every full-size child has the
+    // content rect. A row or column passes that same rect only when it has one
+    // visual child; multiple flex children require layout to determine their
+    // main-axis sizes and are left to runtime rendering.
+    const candidates = tag === "stack" || children.length === 1 ? children : [];
+    for (const child of candidates) {
+      const childCompiled = compiledClass(child);
+      if (!childCompiled) continue;
+      const fillsContent = (childCompiled.widthPercent === 100 && childCompiled.heightPercent === 100) ||
+        (childCompiled.width === content.width && childCompiled.height === content.height);
+      const hasMargins = ["marginLeft", "marginTop", "marginRight", "marginBottom"].some((key) =>
+        typeof childCompiled[key] === "number" && childCompiled[key] !== 0);
+      if (fillsContent && !hasMargins && validateVisualNodeBounds(child, content, seen)) return true;
+    }
+    return false;
   };
   const exportNode = project.sourceFile.statements.find(ts.isExportAssignment);
   const component = exportNode && ts.isCallExpression(exportNode.expression) ? exportNode.expression.arguments[1] : undefined;
@@ -1881,6 +2024,18 @@ function validateLoweredTreeBudgets(project: SourceProject, errors: string[]): v
   else if (ts.isIdentifier(component)) roots = componentScopes.get(project.sourceFile)?.get(component.text)?.roots ?? [];
   else roots = expressionRoots(component);
   if (roots.length === 0) return;
+  const seenVisualRoots = new Set<string>();
+  for (const root of roots.flatMap((value) => primitiveRoots(value, new Set()))) {
+    const key = `${root.getSourceFile().fileName}:${root.getStart()}`;
+    if (seenVisualRoots.has(key)) continue;
+    seenVisualRoots.add(key);
+    const compiled = compiledClass(root);
+    if (!compiled) continue;
+    const [surfaceWidth, surfaceHeight] = project.config.size;
+    const fillsSurface = (compiled.widthPercent === 100 && compiled.heightPercent === 100) ||
+      (compiled.width === surfaceWidth && compiled.height === surfaceHeight);
+    if (fillsSurface) validateVisualNodeBounds(root, { x: 0, y: 0, width: surfaceWidth, height: surfaceHeight }, new Set());
+  }
   const lowered = maximum(roots.map((root) => metrics(root, new Set())));
   const evidenceNode = roots[0];
   const limitation = " The static estimate follows the exported widget through local components and one level of relative imports; runtime limits remain authoritative for dynamic collections and unresolved component output.";
@@ -1901,9 +2056,6 @@ function validateLoweredTreeBudgets(project: SourceProject, errors: string[]): v
   }
   if (lowered.images > nativeWidgetImageLimit) {
     errors.push(locationMessage(evidenceNode.getSourceFile(), evidenceNode, `LoweredWidgetImageLimit: this tree contains ${lowered.images} images; image registry capacity exhausted: max_images=${nativeWidgetImageLimit}, asked for ${lowered.images}, headroom=${nativeWidgetImageLimit - lowered.images}.${limitation}`));
-  }
-  if (lowered.clippedCanvas && !errors.some((error) => error.includes("CanvasNeedsUnclippedAncestors"))) {
-    errors.push(locationMessage(evidenceNode.getSourceFile(), evidenceNode, `CanvasNeedsUnclippedAncestors: a reachable <canvas> is under an overflow-hidden ancestor in the statically lowered component tree. A host GPU surface cannot participate in ancestor clipping; move the canvas outside that ancestor and apply clipping inside onFrame.${limitation}`));
   }
   if (lowered.opacityCanvas && !errors.some((error) => error.includes("CanvasNeedsOpaqueAncestors"))) {
     errors.push(locationMessage(evidenceNode.getSourceFile(), evidenceNode, `CanvasNeedsOpaqueAncestors: a reachable <canvas> is under an opacity ancestor in the statically lowered component tree. A host GPU surface cannot be placed behind an opacity layer; move the canvas outside that ancestor and apply opacity inside onFrame.${limitation}`));
@@ -2060,7 +2212,7 @@ function validateSource(project: SourceProject): string[] {
     }
     return "none";
   };
-  const canvasAncestorProblem = (node: ts.JsxOpeningElement | ts.JsxSelfClosingElement): { tag: string; kind: "clip" | "opacity" } | null => {
+  const canvasOpacityAncestor = (node: ts.JsxOpeningElement | ts.JsxSelfClosingElement): string | null => {
     let current: ts.Node | undefined = node.parent;
     while (current) {
       if (ts.isJsxElement(current) && current.openingElement !== node) {
@@ -2073,8 +2225,7 @@ function validateSource(project: SourceProject): string[] {
         if (classText !== null) {
           try {
             const compiled = compileClass(classText);
-            if (compiled.overflowHidden === true) return { tag, kind: "clip" };
-            if (typeof compiled.opacity === "number" && compiled.opacity < 1) return { tag, kind: "opacity" };
+            if (typeof compiled.opacity === "number" && compiled.opacity < 1) return tag;
           } catch {
             // The ordinary class validator reports the malformed utility.
           }
@@ -2269,16 +2420,12 @@ function validateSource(project: SourceProject): string[] {
         errors.push(locationMessage(sourceFile, node, `CanvasNeedsExplicitSize: <canvas> has no class. A canvas has no intrinsic size and draws nothing without one; give it explicit pixel dimensions, e.g. class="w-[312px] h-[71px]".`));
       }
       if (tag === "canvas") {
-        const problem = canvasAncestorProblem(node);
-        if (problem) {
-          const name = problem.kind === "clip" ? "CanvasNeedsUnclippedAncestors" : "CanvasNeedsOpaqueAncestors";
-          const cause = problem.kind === "clip"
-            ? `overflow-hidden <${problem.tag}> ancestor`
-            : `opacity <${problem.tag}> ancestor`;
+        const opacityAncestor = canvasOpacityAncestor(node);
+        if (opacityAncestor) {
           errors.push(locationMessage(
             sourceFile,
             node,
-            `${name}: <canvas> is under an ${cause}. A host GPU surface cannot participate in ancestor clipping or opacity layers, so the canvas would be denied and the widget could blank. Fix: move the canvas outside that ancestor and apply clipping/opacity inside onFrame.`,
+            `CanvasNeedsOpaqueAncestors: <canvas> is under an opacity <${opacityAncestor}> ancestor. The canvas cannot participate in ancestor opacity, so the widget would be denied and could blank. Fix: move the canvas outside that ancestor or apply opacity inside onFrame.`,
           ));
         }
       }
@@ -2333,7 +2480,7 @@ function validateSource(project: SourceProject): string[] {
     }
   }
   validateMediaTransportCapability(project, errors);
-  validateLoweredTreeBudgets(project, errors);
+  validateLoweredTree(project, errors);
   return errors;
 }
 

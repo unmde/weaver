@@ -92,14 +92,12 @@ budget, the limit, and the ask. But:
   (`runtime/src/main.zig:362` evaluateCandidate) — extend that rejection to
   candidates whose *first render* throws, and keep the old bundle running.
 
-## Seam 6 — dynamic canvas denial remains screen-silent
+## Seam 6 — dynamic canvas opacity denial remains screen-silent
 
-- `weaver check` already reports statically knowable clipping and opacity
-  violations as `CanvasNeedsUnclippedAncestors` and
-  `CanvasNeedsOpaqueAncestors`; the relevant validators live in
-  `cli/src/index.ts:1527-1681`. The remaining gap is a runtime diagnostic when
-  the host denies a canvas surface dynamically, so the widget cannot blank
-  without a named reason.
+- Rounded `overflow-hidden` ancestors now clip canvases in the shared native
+  render tree. `weaver check` and the runtime still report unsupported opacity
+  ancestry as `CanvasNeedsOpaqueAncestors`, so a canvas cannot blank without a
+  named reason.
 
 ## Seam 7 — empty-catch inventory
 

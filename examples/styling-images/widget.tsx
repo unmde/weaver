@@ -2,10 +2,11 @@ import { widget } from "@weaver/sdk";
 
 export default widget({
   name: "Styling Images",
-  size: [720, 330],
+  size: [780, 390],
   anchor: { corner: "top-right", offset: [24, 24] },
 }, () => (
-  <column class="size-full p-5 gap-4 bg-slate-950 rounded-2xl border border-slate-700 shadow-xl">
+  <stack class="size-full pl-[30px] pt-[10px] pr-[30px] pb-[50px]">
+  <column class="w-[720px] h-[330px] p-5 gap-4 bg-slate-950 rounded-2xl border border-slate-700 shadow-xl">
     <column class="gap-1">
       <text class="text-xl font-semibold text-white">Image fit and masks</text>
       <text class="text-sm text-slate-400">One local asset, three exact projection paths</text>
@@ -25,4 +26,5 @@ export default widget({
       </column>
     </row>
   </column>
+  </stack>
 ));

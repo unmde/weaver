@@ -7,13 +7,14 @@ function describe(kind: string, event: PressEvent | undefined): string {
 
 export default widget({
   name: "Styling Interaction",
-  size: [560, 300],
+  size: [620, 360],
   anchor: { corner: "top-right", offset: [24, 24] },
 }, () => {
   const [last, setLast] = useState("Hover, press, double-click, or right-click the button");
   const [level, setLevel] = useState(38);
   return (
-    <column class="size-full p-5 gap-4 bg-slate-950 rounded-2xl border border-slate-700 shadow-xl">
+    <stack class="size-full pl-[30px] pt-[10px] pr-[30px] pb-[50px]">
+    <column class="w-[560px] h-[300px] p-5 gap-4 bg-slate-950 rounded-2xl border border-slate-700 shadow-xl">
       <column class="gap-1">
         <text class="text-xl font-semibold text-white">Native interaction states</text>
         <text class="text-sm text-slate-400">Visual swaps stay native; events report local and normalized coordinates</text>
@@ -41,5 +42,6 @@ export default widget({
         />
       </column>
     </column>
+    </stack>
   );
 });
