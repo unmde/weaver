@@ -355,6 +355,7 @@ test("canvas display rate follows the surface clock while numeric rates stay fix
     widget({ name: "Canvas frame-rate fixture", size: [100, 50] }, () => {
       const [displayActive, setDisplayActive] = useState(true);
       globalThis.pauseDisplayCanvas = () => setDisplayActive(false);
+      globalThis.resumeDisplayCanvas = () => setDisplayActive(true);
       return h("row", null,
         h("canvas", {
           class: "w-[10px] h-[10px]",
@@ -399,6 +400,7 @@ test("canvas display rate follows the surface clock while numeric rates stay fix
   const fixedCanvas = canvasNodes[1][2];
   assert.ok(frameCallbacks.has(displayCanvas));
   assert.ok(frameCallbacks.has(fixedCanvas));
+  const savedDisplayCallback = frameCallbacks.get(displayCanvas);
   assert.deepEqual(fixtureOperations.filter(([name]) => name === "setInterval"), [["setInterval", 33]]);
 
   const displayBefore = fixtureOperations.filter(([name, canvas]) => name === "setCanvasCommands" && canvas === displayCanvas).length;
@@ -421,9 +423,27 @@ test("canvas display rate follows the surface clock while numeric rates stay fix
   await Promise.resolve();
   assert.ok(fixtureOperations.some(([name, canvas]) => name === "clearCanvasFrame" && canvas === displayCanvas));
   assert.equal(frameCallbacks.has(displayCanvas), false);
+  savedDisplayCallback(11);
   assert.equal(
     fixtureOperations.filter(([name, canvas]) => name === "setCanvasCommands" && canvas === displayCanvas).length,
     displayDrawsBeforePause,
+  );
+
+  context.resumeDisplayCanvas();
+  await Promise.resolve();
+  const resumedDisplayCallback = frameCallbacks.get(displayCanvas);
+  assert.equal(typeof resumedDisplayCallback, "function");
+  assert.notEqual(resumedDisplayCallback, savedDisplayCallback);
+  const displayDrawsBeforeResume = fixtureOperations.filter(([name, canvas]) => name === "setCanvasCommands" && canvas === displayCanvas).length;
+  savedDisplayCallback(12);
+  assert.equal(
+    fixtureOperations.filter(([name, canvas]) => name === "setCanvasCommands" && canvas === displayCanvas).length,
+    displayDrawsBeforeResume,
+  );
+  resumedDisplayCallback(12);
+  assert.equal(
+    fixtureOperations.filter(([name, canvas]) => name === "setCanvasCommands" && canvas === displayCanvas).length,
+    displayDrawsBeforeResume + 1,
   );
 });
 
