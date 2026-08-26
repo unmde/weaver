@@ -191,6 +191,7 @@ interface CanvasBinding {
   fps?: CanvasFrameRate;
   timerId: number;
   surfaceClock: boolean;
+  surfaceClockGeneration?: object;
   width: number;
   height: number;
   lastT?: number;
@@ -764,8 +765,9 @@ function updateCanvasBinding(id: number, onFrame: (ctx: CanvasCtx, frame: Canvas
     binding.nativeTimestampStarted = false;
   }
   if (rateChanged && binding.surfaceClock) {
-    native.clearCanvasFrame(id);
     binding.surfaceClock = false;
+    binding.surfaceClockGeneration = undefined;
+    native.clearCanvasFrame(id);
     binding.lastT = undefined;
     binding.nextT = undefined;
     binding.nativeTimestampStarted = false;
@@ -781,16 +783,14 @@ function updateCanvasBinding(id: number, onFrame: (ctx: CanvasCtx, frame: Canvas
   }
   if (fps === "display") {
     if (!binding.surfaceClock) {
-      native.onCanvasFrame(id, (timestampSeconds) => drawCanvasFrame(id, timestampSeconds));
-      binding.surfaceClock = true;
+      bindCanvasSurfaceClock(id, binding, (timestampSeconds) => drawCanvasFrame(id, timestampSeconds));
       drawCanvasFrame(id, captureNowMilliseconds() / 1000);
     }
     return;
   }
   if (fps >= MAX_NUMERIC_CANVAS_FPS) {
     if (!binding.surfaceClock) {
-      native.onCanvasFrame(id, (timestampSeconds) => drawTimedCanvasFrame(id, timestampSeconds));
-      binding.surfaceClock = true;
+      bindCanvasSurfaceClock(id, binding, (timestampSeconds) => drawTimedCanvasFrame(id, timestampSeconds));
       drawCanvasFrame(id, captureNowMilliseconds() / 1000);
     }
     return;
@@ -808,6 +808,16 @@ function updateCanvasBinding(id: number, onFrame: (ctx: CanvasCtx, frame: Canvas
   }
 }
 
+function bindCanvasSurfaceClock(id: number, binding: CanvasBinding, draw: (timestampSeconds: number) => void): void {
+  const generation = {};
+  native.onCanvasFrame(id, (timestampSeconds) => {
+    if (canvases.get(id) !== binding || !binding.surfaceClock || binding.surfaceClockGeneration !== generation) return;
+    draw(timestampSeconds);
+  });
+  binding.surfaceClock = true;
+  binding.surfaceClockGeneration = generation;
+}
+
 function drawTimedCanvasFrame(id: number, timestampSeconds: number): void {
   const binding = canvases.get(id);
   if (!binding || typeof binding.fps !== "number" || binding.fps === 0) return;
@@ -823,7 +833,11 @@ function disposeCanvas(id: number): void {
   const binding = canvases.get(id);
   if (!binding) return;
   if (binding.timerId !== 0) native.clearInterval(binding.timerId);
-  if (binding.surfaceClock) native.clearCanvasFrame(id);
+  if (binding.surfaceClock) {
+    binding.surfaceClock = false;
+    binding.surfaceClockGeneration = undefined;
+    native.clearCanvasFrame(id);
+  }
   canvases.delete(id);
 }
 
