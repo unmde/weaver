@@ -1,0 +1,3 @@
+interface:
+  display_name: "Repair Framework Friction"
+  short_description: "Take a Weaver defect through a green PR"

@@ -38,3 +38,10 @@ Measure twice, cut once: understand the problem fully before building, because c
 
 ## Some general rules
 These are meant to steer us in the right direction. They are not hard-set, but we should default to following them. If you think one should be ignored, be very loud and clear about that and get approval from us before doing it.
+
+## Framework friction is product work
+When a supported Weaver workflow exposes a reproducible defect in Weaver-owned code, or returns an error that leaves a fresh agent unable to recover, keep the failing case and treat the defect as part of the current task. Minimize it and reproduce it against the current default branch before starting a repair. Keep widget code honest instead of hiding the defect with a local workaround. A change that chooses new product semantics, crosses into another repository or submodule, or turns an unsupported request into a feature needs approval first.
+
+For a confirmed Weaver defect, follow [`.agents/skills/repair-framework-friction/SKILL.md`](.agents/skills/repair-framework-friction/SKILL.md). This is standing authorization to fix Weaver-owned code, create or update a dedicated branch and pull request, and babysit its current head until required checks pass and no actionable review thread remains. It does not authorize merging the pull request.
+
+When delegation is available and the repair can be separated from the original task, dispatch that skill to one subagent in an isolated worktree. The discovering agent owns the diagnosis, minimized reproduction, and final retest. The repair agent owns the regression test, root-cause fix, branch, pull request, and review loop. The discovering agent must receive the repair evidence and rerun the original workflow before reporting its task complete. Run the same skill directly when delegation is unavailable or the work cannot be separated cleanly.
