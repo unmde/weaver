@@ -5,12 +5,16 @@ description: Create or change a Weaver desktop widget, then prove its code, pixe
 
 # Conjure a Weaver widget
 
-Turn the request into one checked and captured widget. Capture is the development
-loop, not a final gate. Get the first coherent tree on screen early, inspect it,
-and keep the pixels beside the code while the widget changes. Preserve the
-requested visual and interaction intent. When Weaver does not support part of
-that intent, name the boundary instead of inventing behavior that the framework
-ignores.
+Turn the request into one checked and captured widget. Start live development
+before the first source edit so every valid saved revision can appear on the
+desktop while the agent keeps working. `weaver dev` is a continuous visible
+authoring surface, not a checkpoint: leave it running in the background and do
+not wait for a rebuild or hot swap before making the next edit. Capture remains
+the deterministic inspection loop, not a final gate. Get the first coherent tree
+on screen early, inspect it, and keep the pixels beside the code while the widget
+changes. Preserve the requested visual and interaction intent. When Weaver does
+not support part of that intent, name the boundary instead of inventing behavior
+that the framework ignores.
 
 ## Workflow
 
@@ -25,20 +29,27 @@ ignores.
    read [`docs/agent-widget-capture.md`](../../docs/agent-widget-capture.md) now.
    Define stable capture inputs and a name for each state the request needs so
    every pass renders the same evidence.
-3. Build the first coherent visual slice in `<path>/widget.tsx` with one literal
+3. Before the first source edit, start
+   `npx --no-install weaver dev <path>` in a long-lived background session and
+   keep its output available while authoring. Continue working once the watcher
+   has launched; never pause between edits to wait for presentation. Treat build
+   and runtime diagnostics from the session as live feedback. If the current
+   platform cannot run Weaver's desktop host, preserve the exact failure and
+   continue through deterministic capture without claiming a live result.
+4. Build the first coherent visual slice in `<path>/widget.tsx` with one literal
    default export:
    `export default widget({ ... }, () => <... />);`. Import Weaver APIs from
    `@weaver/sdk`; keep other modules, assets, and their licenses inside the
    widget source root.
-4. Enter the **Render loop** as soon as that slice can render. Run it before
+5. Enter the **Render loop** as soon as that slice can render. Run it before
    building the rest of the widget, then after each edit that can change pixels,
    semantics, or interaction behavior. No such edit is complete until its PNG
    has been opened and inspected.
-5. Run `npx --no-install weaver dev <path>` only when desktop placement, live OS
-   integration, or behavior outside deterministic capture needs inspection.
-   Inspect that behavior on the real desktop. Leave the process running when the
-   user needs the live widget for review.
-6. Report the widget path, captured images, behavior exercised, receipt evidence,
+6. Use the already-running live widget to inspect desktop placement, live OS
+   integration, and behavior outside deterministic capture. Leave the process
+   running when the user needs the live widget for review; otherwise stop it when
+   authoring is complete.
+7. Report the widget path, captured images, behavior exercised, receipt evidence,
    live result when used, and each remaining boundary. Completion requires the
    requested result, not merely successful commands.
 
