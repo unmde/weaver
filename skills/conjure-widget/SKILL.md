@@ -1,132 +1,99 @@
 ---
 name: conjure-widget
-description: Create or remix a Weaver desktop widget from a natural-language request and take it through scaffold, TSX editing, static checking, deterministic capture, and optional live desktop preview. Use for "make me a widget", "build a desktop widget", "conjure a clock/status surface", or requests to change an existing Weaver widget.
+description: Create or change a Weaver desktop widget, then prove its code, pixels, semantics, and requested interactions. Use for widget authoring requests; framework implementation belongs to Weaver maintainer workflows.
 ---
 
 # Conjure a Weaver widget
 
-Turn a natural-language request into one checked `widget.tsx`, capture its
-pixels and semantic tree, then launch the real desktop surface only when live
-OS behavior needs inspection. Preserve visual intent and keep unsupported
-requests loud. Read `sdk/CONTRACT.md` when exact props, provider shapes,
-security rules, or the complete utility table matter; it is authoritative.
+Turn the request into one checked and captured widget. Capture is the development
+loop, not a final gate. Get the first coherent tree on screen early, inspect it,
+and keep the pixels beside the code while the widget changes. Preserve the
+requested visual and interaction intent. When Weaver does not support part of
+that intent, name the boundary instead of inventing behavior that the framework
+ignores.
 
 ## Workflow
 
-1. From the Weaver repository root, scaffold with
-   `npx --no-install weaver init <path>` unless the directory exists. The final
-   path segment becomes the widget's starter display name.
-2. Edit `<path>/widget.tsx`. Keep one literal default export:
-   `export default widget({ ... }, () => <... />);`. Do not compute config.
-3. Keep local images/fonts/licenses inside the widget source root. Reference
-   images with relative paths and fonts as `font-[file-stem]`.
-4. Run `npx --no-install weaver check <path>` and fix every error. Never
-   suppress an unknown utility, undeclared provider/origin, or asset failure.
-5. Choose any convenient `<capture-name>`, then run
-   `npx --no-install weaver capture <path> --out <capture-name>.png`. Inspect
-   the PNG, `<capture-name>.snapshot.txt`, and `<capture-name>.receipt.json`;
-   a successful receipt must describe nonblank pixels, the semantic tree, and
-   any pending work.
-   Use semantic `--action-file` steps for interaction and an explicit
-   `--provider-fixture` for every subscribed provider except `time`. See
-   `docs/agent-widget-capture.md` for both schemas.
-6. Run `npx --no-install weaver dev <path>` only when the request needs live
-   desktop placement, OS integration, or interactive visual inspection. Leave
-   it running for inspection; saving `widget.tsx` validates and hot-swaps when
-   window config is unchanged.
-7. Report the captured result, interaction behavior, receipt evidence, and any
-   explicit boundary.
+1. Inspect the target before editing. For a new widget, run
+   `npx --no-install weaver init <path>` from the Weaver repository root; the
+   final path segment becomes the starter display name. For an existing widget,
+   read its `widget.tsx`, local modules, assets, and licenses without running
+   `init` over it.
+2. Read the relevant current sections under **Contract routing** before choosing
+   elements, hooks, providers, classes, assets, network access, or capabilities.
+   When the request uses interaction, changing time, provider data, or replay,
+   read [`docs/agent-widget-capture.md`](../../docs/agent-widget-capture.md) now.
+   Define stable capture inputs and a name for each state the request needs so
+   every pass renders the same evidence.
+3. Build the first coherent visual slice in `<path>/widget.tsx` with one literal
+   default export:
+   `export default widget({ ... }, () => <... />);`. Import Weaver APIs from
+   `@weaver/sdk`; keep other modules, assets, and their licenses inside the
+   widget source root.
+4. Enter the **Render loop** as soon as that slice can render. Run it before
+   building the rest of the widget, then after each edit that can change pixels,
+   semantics, or interaction behavior. No such edit is complete until its PNG
+   has been opened and inspected.
+5. Run `npx --no-install weaver dev <path>` only when desktop placement, live OS
+   integration, or behavior outside deterministic capture needs inspection.
+   Inspect that behavior on the real desktop. Leave the process running when the
+   user needs the live widget for review.
+6. Report the widget path, captured images, behavior exercised, receipt evidence,
+   live result when used, and each remaining boundary. Completion requires the
+   requested result, not merely successful commands.
 
-## Elements and events
+## Render loop
 
-Import from `@weaver/sdk`.
+For each defined state:
 
-| Element | Purpose and special props |
-|---|---|
-| `<column>`, `<row>` | flex flow containers |
-| `<stack>` | overlay children in paint order; use full-size children for layers |
-| `<panel>` | painted box with column children |
-| `<text>` | string/number children only |
-| `<icon name="…">` / `<icon d="…">` | full-catalog Lucide name or custom SVG path; no children; size with `w-*`/`h-*`, color with `text-*` |
-| `<image src="…">` | local source; `fit="cover|contain|stretch"`, optional `tile` |
-| `<button>` | required `onPress`; optional `onDoublePress`, `onRightPress` |
-| `<slider>` | `value`, positive `max`, `onChange` |
-| `<canvas>` | `onFrame(ctx, frame)`, optional `fps`; use `fps="display"` for fluid motion, a number only for an intentional fixed cadence, and `0` once animation settles |
+1. Run `npx --no-install weaver check <path>` until it exits successfully. Fix
+   every named widget error. Preserve unsupported intent as a reported boundary
+   rather than suppressing unknown utilities, undeclared providers or origins,
+   invalid assets, or import failures.
+2. Run `npx --no-install weaver capture <path> --out <capture-name>.png` with the
+   state's fixed clock, semantic actions, provider fixture, or session journal.
+3. Open the PNG with the available image-viewing tool. File creation and a green
+   receipt are not visual proof. Inspect layout, overlap, clipping, duplication,
+   spacing, alignment, contrast, assets, and the requested state at the actual
+   widget dimensions.
+4. Inspect `<capture-name>.snapshot.txt` and `<capture-name>.receipt.json`. The
+   receipt must have `status: "ok"`; the semantic tree must expose the intended
+   content and controls; every warning and pending item must be understood.
+5. Compare the rendered state with the request. Fix the visible and semantic
+   mismatches found in that pass, then restart the loop. For interactions, prove
+   both the initial state and every requested post-action state.
 
-Press callbacks receive `{x,y,u,v}`: local logical pixels plus normalized
-0–1 coordinates. A zero-argument `onPress` remains valid. Prefer native
-`hover:`/`pressed:` classes for visual feedback; do not round-trip state
-through JS.
+## Contract routing
 
-## Hooks, providers, and network
+[`sdk/CONTRACT.md`](../../sdk/CONTRACT.md) is authoritative and chronological;
+later amendments supersede earlier scheduling notes. Read only the headings the
+widget needs:
 
-Available hooks: `useState`, `useRef`, `useEffect`, `useInterval`,
-`useStorage`, `useProvider`, and `useMediaTransport`. Providers are `time`,
-`cpu`, `memory`, `audio`, and `media`; every provider must also appear in
-literal `config.subscribe`. Audio is change/silence-aware.
+- For module shape, literal config, hooks, and reload behavior, read **Module
+  shape**, **`widget(config, component)`**, **Hooks**, and **Hot swap**.
+- For the current element and class set, read **Consolidated v0.4 authoring
+  tables**. Read **Bundled fonts**, **Icons**, and the matching styling amendment
+  when those branches apply.
+- For buttons, sliders, press coordinates, or interaction styles, read **PR 11:
+  native interaction states and press events**. Use native `hover:` and
+  `pressed:` classes for visual feedback instead of rendering pointer state
+  through JavaScript.
+- For fetch, storage, CPU, or memory, read the matching M2 heading. For canvas,
+  audio, media observation, artwork, or transport, read the matching M3 or
+  **Media v2 amendment** heading. Use `fps="display"` for fluid canvas motion,
+  a number only for an intentional fixed cadence, and `0` once animation
+  settles.
 
-`useProvider("media")` returns title, artist, album, tri-state `status`,
-source-compatible `playing`, display-only `sourceApp`, optional local
-`artPath`, and position/duration milliseconds. Keep `<image>.src` required and
-render art conditionally:
+Use `weaver check` as the final authority for statically knowable widget errors.
+Do not infer browser DOM, CSS, package, or network behavior that the contract
+does not provide.
 
-```tsx
-{media.artPath
-  ? <image src={media.artPath} fit="cover" />
-  : <panel class="bg-zinc-800" />}
-```
+## Framework failures
 
-Media control is separate from observation. Declare literal
-`capabilities: ["media-transport"]`, then call `useMediaTransport()` for
-`play`, `pause`, `next`, `previous`, and absolute `seek(ms)`. Every verb
-returns `Promise<boolean>`: `true` means the OS reported success, `false`
-means a valid request was declined, and channel/protocol/timeout failures
-reject. Transport-only widgets do not need `subscribe: ["media"]`.
-
-Use `wfetch` only for HTTPS hosts listed exactly in `config.origins`.
-`media-transport` is the only supported capability; keep `capabilities`
-absent unless those verbs are required. Plain TSX is bundled automatically;
-do not add external imports beyond `@weaver/sdk` and widget-local
-modules/assets.
-
-## Styling surface
-
-Tailwind semantics apply left-to-right; one scale unit is 4 logical px.
-Arbitrary lengths use bracketed pixel forms. Named colors use the Tailwind v4
-palette and accept `/NN` alpha.
-
-- Spacing: `p/px/py/pt/pr/pb/pl-*`, `m/mx/my/mt/mr/mb/ml-*` (negative margins
-  allowed), `gap-*`.
-- Sizing: `w-*`, `h-*`, `size-*`, full/fractions/auto, min/max bounds, and
-  `aspect-square|video|[W/H]|auto`.
-- Flex: `items-*`, `justify-start|center|end|between|around|evenly`, numeric
-  `grow-*`, `shrink|shrink-0`, `self-*`, `flex-wrap|flex-nowrap`.
-- Surfaces: uniform/directional/per-corner `rounded-*`, `border` widths/colors,
-  `bg-*`, `opacity-*`, outset/inset/arbitrary `shadow-*`, and `overflow-hidden`.
-- Text: named/arbitrary sizes, five `font-*` weights, `font-sans|mono|[stem]`,
-  alignment, `leading-*`, `tracking-*`, `line-clamp-*`, `truncate`,
-  `tabular-nums`, and `text-shadow-*`.
-- Interaction: only `hover:` and `pressed:` + `bg-<color>`, `text-<color>`,
-  `opacity-N`, `border-<color>`, or `shadow-*`. Pressed wins over hover.
-
-For a non-pressable child inside a `<button>` or `<slider>`, `hover:` and
-`pressed:` automatically follow the nearest pressable ancestor; do not add a
-`group` class. A state variant outside any pressable ancestor fails
-`weaver check` with `NearestPressableAncestor`.
-
-Use `<stack>` plus ordinary size/alignment classes for overlays. Apply
-`rounded-*` directly to images for masks; `tile` repeats at natural size and
-overrides fit geometry. Pair `overflow-hidden` with radii to clip descendants.
-
-Unknown utilities are errors. Gradients, transforms, transitions, animations,
-blur/backdrop blur, absolute positioning, grid, scrolling, and responsive
-variants are not in this surface; redesign with supported primitives or state
-the boundary instead of inventing a no-op.
-
-## Asset bounds
-
-- Bundle at most two parseable TrueType-outline faces, each at most 512 KiB.
-  Path-backed icons consume no font slot.
-- Font family stems must match `font-[stem]`; keep adjacent license files.
-- Images remain widget-local. Remote/provider image URLs are unsupported;
-  media artwork arrives only as the optional host-cache local `artPath`.
+A documented unsupported behavior is a widget boundary. A minimized supported
+widget that still fails is a framework reproduction. So is invalid widget input
+that produces an opaque or internal error instead of an actionable diagnostic.
+Preserve the widget, exact command, complete output, and platform. Inside the
+Weaver source checkout, follow the root instructions for framework friction.
+Outside it, report the reproduction and blocker without weakening the widget or
+claiming completion.

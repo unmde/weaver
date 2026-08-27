@@ -1,4 +1,4 @@
 interface:
   display_name: "Conjure Widget"
-  short_description: "Create Weaver desktop widgets from prompts"
+  short_description: "Create or change a Weaver desktop widget"
   default_prompt: "Use $conjure-widget to make me a desktop widget."
