@@ -1,6 +1,6 @@
 import { spawn, spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { closeSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, realpathSync, renameSync, rmSync, statSync, watch, writeFileSync } from "node:fs";
+import { closeSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import type { Dirent } from "node:fs";
 import { basename, dirname, extname, isAbsolute, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
@@ -9,6 +9,8 @@ import { build } from "esbuild";
 import ts from "typescript";
 import { compileClass, UtilityError } from "../../sdk/src/class-compiler.js";
 import { signalDevReload } from "./dev-reload.js";
+import { createDevRebuildLoop } from "./dev-rebuild-loop.js";
+import { watchDevDirectory } from "./dev-watcher.js";
 import { lowerIconSource, resolveIconSpec } from "./icon-transform.js";
 import { originDeclared, originHost, originNotDeclaredMessage, validOriginHost } from "./origin.js";
 import { publishCaptureArtifacts } from "./capture-publish.js";
@@ -945,9 +947,6 @@ async function devWidget(directory: string): Promise<void> {
   const temporaryRegistration = !existing;
   const logFollower = followLogFile(project.config.name, true);
   printCleanupWarnings(startupWarnings);
-  let rebuilding = false;
-  let pending = false;
-  let debounce: NodeJS.Timeout | undefined;
   let staleBuild: { since: Date; firstError: string } | null = null;
   const staleReminder = setInterval(() => {
     if (!staleBuild) return;
@@ -955,11 +954,6 @@ async function devWidget(directory: string): Promise<void> {
   }, 10_000);
   staleReminder.unref();
   const rebuild = async (): Promise<void> => {
-    if (rebuilding) {
-      pending = true;
-      return;
-    }
-    rebuilding = true;
     try {
       const next = await bundleWidget(directory);
       const configChanged = JSON.stringify(next.manifest) !== JSON.stringify(activeManifest);
@@ -982,21 +976,16 @@ async function devWidget(directory: string): Promise<void> {
         staleBuild = { since: new Date(), firstError: firstFailureLine(error) };
         process.stderr.write(`weaver dev OUT OF DATE since ${staleBuild.since.toISOString()}: ${staleBuild.firstError}; the window is still running the last good bundle\n`);
       }
-    } finally {
-      rebuilding = false;
-      if (pending) {
-        pending = false;
-        void rebuild();
-      }
     }
   };
-  const watcher = watch(directory, { recursive: true }, (_event, filename) => {
-    const changed = filename?.toString().replace(/\\/g, "/") ?? "";
-    if (changed === "dist" || changed.startsWith("dist/") ||
-        changed === ".git" || changed.startsWith(".git/") ||
-        changed === ".weaver-dev-port") return;
-    clearTimeout(debounce);
-    debounce = setTimeout(() => void rebuild(), 100);
+  const rebuildLoop = createDevRebuildLoop(rebuild);
+  let stopping = false;
+  const watcher = watchDevDirectory(directory, () => {
+    if (stopping) return;
+    rebuildLoop.schedule();
+  }, (error) => {
+    if (stopping) return;
+    process.stderr.write(`weaver dev WATCH ERROR: ${errorMessage(error)}; source changes may not rebuild until weaver dev restarts\n`);
   });
   process.stdout.write(`weaver dev watching source, assets, and fonts under ${directory}\n`);
   const presentationDeadline = Date.now() + 10_000;
@@ -1021,16 +1010,24 @@ async function devWidget(directory: string): Promise<void> {
   }, 1_000);
   presentationWatch.unref();
   await new Promise<void>((resolvePromise) => {
-    let stopping = false;
     const stop = (): void => {
       if (stopping) return;
       stopping = true;
       watcher.close();
-      logFollower.stop();
-      clearTimeout(debounce);
       clearInterval(staleReminder);
       clearInterval(presentationWatch);
       void (async () => {
+        try {
+          await watcher.close();
+        } catch (error) {
+          printFailure(error);
+        }
+        try {
+          await rebuildLoop.drain();
+        } catch (error) {
+          printFailure(error);
+        }
+        logFollower.stop();
         try {
           const shutdownWarnings: string[] = [];
           await withRegistryLock(() => {
@@ -1057,12 +1054,14 @@ async function devWidget(directory: string): Promise<void> {
         } catch (error) {
           printFailure(error);
         } finally {
+          process.off("SIGINT", stop);
+          process.off("SIGTERM", stop);
           resolvePromise();
         }
       })();
     };
-    process.once("SIGINT", stop);
-    process.once("SIGTERM", stop);
+    process.on("SIGINT", stop);
+    process.on("SIGTERM", stop);
   });
 }
 

@@ -7,6 +7,7 @@
     "weaver": "bin/weaver.js"
   },
   "dependencies": {
+    "chokidar": "4.0.3",
     "esbuild": "0.25.6",
     "lucide-static": "1.26.0",
     "svg-pathdata": "7.2.0",
