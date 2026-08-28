@@ -30,10 +30,13 @@ honest. Report any part Weaver does not support as a boundary.
 3. Start the **Live loop** before the first source edit. Run
    `npx --no-install weaver dev <path>` in a long-lived background session and
    keep its output available and its widget visible to the user. Return to
-   authoring once the command reports that it is watching. Rebuilds and hot swaps
-   can finish while later edits continue. If the current platform cannot run
-   Weaver's desktop host, record the exact failure, use the Render loop, and
-   report the user-facing live view as unavailable.
+   authoring once the command reports that it is watching. Keep observing the
+   Live loop for the next 10 seconds while authoring continues. Report the
+   user-facing live view as available only if that interval ends without a
+   `weaver dev ERROR` presentation-health diagnostic. Rebuilds and hot swaps can
+   finish while later edits continue. If the current platform cannot run
+   Weaver's desktop host or presentation health fails, record the exact failure,
+   use the Render loop, and report the user-facing live view as unavailable.
 4. Build the first coherent visual slice in `<path>/widget.tsx` with one literal
    default export:
    `export default widget({ ... }, () => <... />);`. Import Weaver APIs from
