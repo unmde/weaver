@@ -5,11 +5,15 @@ export interface DevRebuildLoop {
 
 export function createDevRebuildLoop(rebuild: () => Promise<void>): DevRebuildLoop {
   let dirty = false;
-  let startQueued = false;
+  let scheduled: NodeJS.Immediate | undefined;
   let active: Promise<void> | undefined;
 
   const run = (): Promise<void> => {
     if (active) return active;
+    if (scheduled) {
+      clearImmediate(scheduled);
+      scheduled = undefined;
+    }
     active = (async () => {
       while (dirty) {
         dirty = false;
@@ -26,10 +30,9 @@ export function createDevRebuildLoop(rebuild: () => Promise<void>): DevRebuildLo
   };
 
   const queueStart = (): void => {
-    if (startQueued || active) return;
-    startQueued = true;
-    queueMicrotask(() => {
-      startQueued = false;
+    if (scheduled || active) return;
+    scheduled = setImmediate(() => {
+      scheduled = undefined;
       void run();
     });
   };
@@ -40,7 +43,7 @@ export function createDevRebuildLoop(rebuild: () => Promise<void>): DevRebuildLo
       queueStart();
     },
     async drain(): Promise<void> {
-      while (dirty || startQueued || active) await run();
+      while (dirty || scheduled || active) await run();
     },
   };
 }

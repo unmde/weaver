@@ -12,14 +12,18 @@ const bundle = await build({
 });
 const { createDevRebuildLoop } = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].contents).toString("base64")}`);
 
-test("dev rebuilds coalesce one event-loop turn without a timer", async () => {
+test("dev rebuilds coalesce one event-loop turn across watcher microtasks", async () => {
   let rebuilds = 0;
   const loop = createDevRebuildLoop(async () => { rebuilds += 1; });
 
   loop.schedule();
-  loop.schedule();
+  await Promise.resolve();
   loop.schedule();
   await Promise.resolve();
+  loop.schedule();
+  assert.equal(rebuilds, 0);
+
+  await new Promise((resolvePromise) => setImmediate(resolvePromise));
   await loop.drain();
 
   assert.equal(rebuilds, 1);
@@ -41,7 +45,7 @@ test("dev rebuilds rerun the newest dirty generation without overlap", async () 
   }));
 
   loop.schedule();
-  await Promise.resolve();
+  await new Promise((resolvePromise) => setImmediate(resolvePromise));
   assert.equal(rebuilds, 1);
 
   loop.schedule();
