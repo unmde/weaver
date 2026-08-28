@@ -1,0 +1,1 @@
+fix: **Keep the final live edit**: `weaver dev` now coalesces same-turn filesystem events without a fixed delay, reruns when files change during a build, and drains the newest build before removing the dev widget.
