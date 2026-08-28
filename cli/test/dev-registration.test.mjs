@@ -12,11 +12,24 @@ const bundle = await build({
 });
 const { endDevRegistration } = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].contents).toString("base64")}`);
 
-for (const prior of [
-  undefined,
-  { name: "Clock", sourcePath: "/weaver/widgets/clock", enabled: false },
+for (const { title, prior, fallback } of [
+  {
+    title: "dev shutdown removes its temporary registration when host reload fails",
+    prior: undefined,
+    fallback: [],
+  },
+  {
+    title: "dev shutdown restores the installed registration when host reload fails",
+    prior: { name: "Clock", sourcePath: "/weaver/widgets/clock", enabled: false },
+    fallback: [{ name: "Clock", sourcePath: "/weaver/widgets/clock", enabled: false }],
+  },
+  {
+    title: "dev shutdown does not restore a stale dev registration when host reload fails",
+    prior: { name: "Clock", sourcePath: "/projects/clock", enabled: true, dev: true },
+    fallback: [],
+  },
 ]) {
-  test(`dev shutdown keeps the ended registration removed when host reload fails${prior ? " and restores the installed registration" : ""}`, () => {
+  test(title, () => {
     const current = {
       widgets: [
         { name: "Weather", sourcePath: "/widgets/weather", enabled: true },
@@ -42,7 +55,7 @@ for (const prior of [
     assert.equal(reloadAttempts, 1);
     assert.deepEqual(stored.widgets, [
       { name: "Weather", sourcePath: "/widgets/weather", enabled: true },
-      ...(prior ? [prior] : []),
+      ...fallback,
     ]);
   });
 }

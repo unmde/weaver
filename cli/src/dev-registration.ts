@@ -12,7 +12,7 @@ export function endDevRegistration(
   if (!registration?.dev || !pathsEqual(registration.sourcePath, directory)) return undefined;
 
   const widgets = current.widgets.filter((widget) => widget.name !== name);
-  if (prior) widgets.push(prior);
+  if (prior && !prior.dev) widgets.push(prior);
   const next = { widgets };
   write(next);
   // Dev has ended, so this registry remains authoritative even when the
