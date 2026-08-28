@@ -24,6 +24,7 @@ test("dev watcher normalizes atomic saves and ignores Weaver output", async () =
   const directory = await mkdtemp(join(tmpdir(), "weaver-dev-watcher-"));
   const sourcePath = join(directory, "widget.tsx");
   const replacementPath = join(directory, ".widget.tsx.tmp");
+  const markerPath = join(directory, "marker.tsx");
   const outputPath = join(directory, "dist", "widget.js");
   const gitPath = join(directory, ".git", "config");
   const portPath = join(directory, ".weaver-dev-port");
@@ -49,14 +50,14 @@ test("dev watcher normalizes atomic saves and ignores Weaver output", async () =
     await writeFile(outputPath, "generated");
     await writeFile(gitPath, "internal");
     await writeFile(portPath, "internal");
-    await writeFile(sourcePath, "after again");
-    await waitForEvent(watcher, events, () => events.filter(([event, path]) => event === "change" && path === sourcePath).length >= 2);
+    await writeFile(markerPath, "marker");
+    await waitForEvent(watcher, events, ([event, path]) => event === "add" && path === markerPath);
 
     assert.equal(events.some(([, path]) => path === outputPath), false);
     assert.equal(events.some(([, path]) => path === gitPath), false);
     assert.equal(events.some(([, path]) => path === portPath), false);
     assert.equal(events.some(([event, path]) => (event === "add" || event === "unlink") && path === sourcePath), false);
-    assert.equal(events.filter(([, path]) => path === sourcePath).length, 2);
+    assert.equal(events.filter(([, path]) => path === sourcePath).length, 1);
   } finally {
     await watcher.close();
     await rm(directory, { recursive: true, force: true });
