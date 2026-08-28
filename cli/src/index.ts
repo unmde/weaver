@@ -1,6 +1,6 @@
 import { spawn, spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { closeSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, realpathSync, renameSync, rmSync, statSync, watch, writeFileSync } from "node:fs";
+import { closeSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import type { Dirent } from "node:fs";
 import { basename, dirname, extname, isAbsolute, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
@@ -10,6 +10,7 @@ import ts from "typescript";
 import { compileClass, UtilityError } from "../../sdk/src/class-compiler.js";
 import { signalDevReload } from "./dev-reload.js";
 import { createDevRebuildLoop } from "./dev-rebuild-loop.js";
+import { watchDevDirectory } from "./dev-watcher.js";
 import { lowerIconSource, resolveIconSpec } from "./icon-transform.js";
 import { originDeclared, originHost, originNotDeclaredMessage, validOriginHost } from "./origin.js";
 import { publishCaptureArtifacts } from "./capture-publish.js";
@@ -979,13 +980,12 @@ async function devWidget(directory: string): Promise<void> {
   };
   const rebuildLoop = createDevRebuildLoop(rebuild);
   let stopping = false;
-  const watcher = watch(directory, { recursive: true }, (_event, filename) => {
+  const watcher = watchDevDirectory(directory, () => {
     if (stopping) return;
-    const changed = filename?.toString().replace(/\\/g, "/") ?? "";
-    if (changed === "dist" || changed.startsWith("dist/") ||
-        changed === ".git" || changed.startsWith(".git/") ||
-        changed === ".weaver-dev-port") return;
     rebuildLoop.schedule();
+  }, (error) => {
+    if (stopping) return;
+    process.stderr.write(`weaver dev WATCH ERROR: ${errorMessage(error)}; source changes may not rebuild until weaver dev restarts\n`);
   });
   process.stdout.write(`weaver dev watching source, assets, and fonts under ${directory}\n`);
   const presentationDeadline = Date.now() + 10_000;
@@ -1017,6 +1017,11 @@ async function devWidget(directory: string): Promise<void> {
       clearInterval(staleReminder);
       clearInterval(presentationWatch);
       void (async () => {
+        try {
+          await watcher.close();
+        } catch (error) {
+          printFailure(error);
+        }
         try {
           await rebuildLoop.drain();
         } catch (error) {
