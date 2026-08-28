@@ -43,11 +43,13 @@ honest. Report any part Weaver does not support as a boundary.
    building the rest of the widget, then after each edit that can change pixels,
    semantics, or interaction behavior. No such edit is complete until its PNG
    has been opened and inspected.
-6. At the end of authoring, account for every stale-build or runtime diagnostic
-   in the **Live loop** output so the user-facing widget matches the last valid
-   save. Keep the process running when the user wants the final widget left open.
-   Otherwise, stop it. Use Render loop artifacts for every visual, semantic, and
-   interaction receipt.
+6. After the final source save, keep the **Live loop** running until it reports
+   that save through `weaver dev bundle ready for in-place hot swap` or
+   `weaver dev restarted widget: window config changed`. An `OUT OF DATE`
+   message keeps this step open until the source is fixed and `weaver dev`
+   reports that it caught up. Then keep the process running when the user wants
+   the final widget left open. Otherwise, stop it. Use Render loop artifacts for
+   every visual, semantic, and interaction receipt.
 7. Report the widget path, captured images, behavior exercised, receipt evidence,
    whether the user-facing live view ran or its exact failure, and each remaining
    boundary. Completion requires the requested result, not merely successful
