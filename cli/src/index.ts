@@ -1049,12 +1049,14 @@ async function devWidget(directory: string): Promise<void> {
         } catch (error) {
           printFailure(error);
         } finally {
+          process.off("SIGINT", stop);
+          process.off("SIGTERM", stop);
           resolvePromise();
         }
       })();
     };
-    process.once("SIGINT", stop);
-    process.once("SIGTERM", stop);
+    process.on("SIGINT", stop);
+    process.on("SIGTERM", stop);
   });
 }
 

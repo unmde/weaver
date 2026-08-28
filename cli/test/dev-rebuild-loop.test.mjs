@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { build } from "esbuild";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const bundle = await build({
@@ -81,4 +82,15 @@ test("dev shutdown drain waits for a queued final rebuild", async () => {
 
   assert.equal(drained, true);
   assert.equal(rebuilds, 1);
+});
+
+test("dev keeps signal guards installed through asynchronous shutdown", () => {
+  const source = readFileSync(fileURLToPath(new URL("../src/index.ts", import.meta.url)), "utf8");
+  const devSource = source.slice(source.indexOf("async function devWidget"), source.indexOf("function logPath"));
+
+  assert.match(devSource, /process\.on\("SIGINT", stop\)/);
+  assert.match(devSource, /process\.on\("SIGTERM", stop\)/);
+  assert.match(devSource, /process\.off\("SIGINT", stop\)/);
+  assert.match(devSource, /process\.off\("SIGTERM", stop\)/);
+  assert.doesNotMatch(devSource, /process\.once\("SIG(?:INT|TERM)", stop\)/);
 });
