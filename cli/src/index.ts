@@ -10,6 +10,7 @@ import ts from "typescript";
 import { compileClass, UtilityError } from "../../sdk/src/class-compiler.js";
 import { signalDevReload } from "./dev-reload.js";
 import { createDevRebuildLoop } from "./dev-rebuild-loop.js";
+import { endDevRegistration } from "./dev-registration.js";
 import { watchDevDirectory } from "./dev-watcher.js";
 import { lowerIconSource, resolveIconSpec } from "./icon-transform.js";
 import { originDeclared, originHost, originNotDeclaredMessage, validOriginHost } from "./origin.js";
@@ -944,7 +945,6 @@ async function devWidget(directory: string): Promise<void> {
       : nextRegistry;
     startupWarnings.push(...sweepUnregisteredInstallDirectories(cleanupRegistry));
   });
-  const temporaryRegistration = !existing;
   const logFollower = followLogFile(project.config.name, true);
   printCleanupWarnings(startupWarnings);
   let staleBuild: { since: Date; firstError: string } | null = null;
@@ -1032,20 +1032,16 @@ async function devWidget(directory: string): Promise<void> {
           const shutdownWarnings: string[] = [];
           await withRegistryLock(() => {
             const current = readRegistry();
-            const registration = current.widgets.find((widget) => widget.name === project.config.name);
-            if (registration?.dev && pathsEqual(registration.sourcePath, directory)) {
-              const widgets = current.widgets.filter((widget) => widget.name !== project.config.name);
-              if (!temporaryRegistration && existing) widgets.push(existing);
-              const nextRegistry = { widgets };
-              writeRegistry(nextRegistry);
-              try { signalHost("--signal-reload"); }
-              catch (error) {
-                writeRegistry(current);
-                try { signalHost("--signal-reload"); }
-                catch { /* Preserve the reload failure after restoring the authoritative registry. */ }
-                throw error;
-              }
-              shutdownWarnings.push(...sweepUnregisteredInstallDirectories(nextRegistry));
+            const endedRegistry = endDevRegistration(
+              current,
+              project.config.name,
+              directory,
+              existing,
+              writeRegistry,
+              () => signalHost("--signal-reload"),
+            );
+            if (endedRegistry) {
+              shutdownWarnings.push(...sweepUnregisteredInstallDirectories(endedRegistry));
             } else {
               shutdownWarnings.push(...sweepUnregisteredInstallDirectories(current));
             }
