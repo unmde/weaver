@@ -5,12 +5,14 @@ description: Create or change a Weaver desktop widget, then prove its code, pixe
 
 # Conjure a Weaver widget
 
-Turn the request into one checked and captured widget. Capture is the development
-loop, not a final gate. Get the first coherent tree on screen early, inspect it,
-and keep the pixels beside the code while the widget changes. Preserve the
-requested visual and interaction intent. When Weaver does not support part of
-that intent, name the boundary instead of inventing behavior that the framework
-ignores.
+Turn the request into one checked and captured widget while the user watches it
+take shape on the desktop. Start the **Live loop** before the first source edit.
+Its audience is the user. It keeps `weaver dev` running in the background so
+each valid save can appear while the next edit is underway. Use the **Render
+loop** for the agent's deterministic inspection and interaction proof. Get the
+first coherent tree on screen early, then inspect each capture while changing
+the code. Preserve the requested visual and interaction intent. Keep the widget
+honest. Report any part Weaver does not support as a boundary.
 
 ## Workflow
 
@@ -25,22 +27,36 @@ ignores.
    read [`docs/agent-widget-capture.md`](../../docs/agent-widget-capture.md) now.
    Define stable capture inputs and a name for each state the request needs so
    every pass renders the same evidence.
-3. Build the first coherent visual slice in `<path>/widget.tsx` with one literal
+3. Start the **Live loop** before the first source edit. Run
+   `npx --no-install weaver dev <path>` in a long-lived background session and
+   keep its output available and its widget visible to the user. Return to
+   authoring once the command reports that it is watching. Keep observing the
+   Live loop for the next 10 seconds while authoring continues. Report the
+   user-facing live view as available only if that interval ends without a
+   `weaver dev ERROR` presentation-health diagnostic. Rebuilds and hot swaps can
+   finish while later edits continue. If the current platform cannot run
+   Weaver's desktop host or presentation health fails, record the exact failure,
+   use the Render loop, and report the user-facing live view as unavailable.
+4. Build the first coherent visual slice in `<path>/widget.tsx` with one literal
    default export:
    `export default widget({ ... }, () => <... />);`. Import Weaver APIs from
    `@weaver/sdk`; keep other modules, assets, and their licenses inside the
    widget source root.
-4. Enter the **Render loop** as soon as that slice can render. Run it before
+5. Enter the **Render loop** as soon as that slice can render. Run it before
    building the rest of the widget, then after each edit that can change pixels,
    semantics, or interaction behavior. No such edit is complete until its PNG
    has been opened and inspected.
-5. Run `npx --no-install weaver dev <path>` only when desktop placement, live OS
-   integration, or behavior outside deterministic capture needs inspection.
-   Inspect that behavior on the real desktop. Leave the process running when the
-   user needs the live widget for review.
-6. Report the widget path, captured images, behavior exercised, receipt evidence,
-   live result when used, and each remaining boundary. Completion requires the
-   requested result, not merely successful commands.
+6. After the final source save, keep the **Live loop** running until it reports
+   that save through `weaver dev bundle ready for in-place hot swap` or
+   `weaver dev restarted widget: window config changed`. An `OUT OF DATE`
+   message keeps this step open until the source is fixed and `weaver dev`
+   reports that it caught up. Then keep the process running when the user wants
+   the final widget left open. Otherwise, stop it. Use Render loop artifacts for
+   every visual, semantic, and interaction receipt.
+7. Report the widget path, captured images, behavior exercised, receipt evidence,
+   whether the user-facing live view ran or its exact failure, and each remaining
+   boundary. Completion requires the requested result, not merely successful
+   commands.
 
 ## Render loop
 
