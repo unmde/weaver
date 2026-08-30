@@ -12,7 +12,9 @@ independent GPU timestamp samples for the worst current paint, a 512 by 512
 Oklab mesh with 16 patches. It also installs the complete gradient showcase,
 requires the live status to report `backend=gpu`, captures both the reference
 renderer and the real window, and records a ten-second settled CPU and memory
-sample.
+sample. Every showcase panel also carries retained label text and a text
+shadow above its gradient, so `backend: "gpu"` proves the mixed-content path
+did not demote the frame.
 
 The D3D test calls `D3D11CreateDevice` with `D3D_DRIVER_TYPE_HARDWARE` and
 rejects adapters marked `DXGI_ADAPTER_FLAG_SOFTWARE`. WARP is not an accepted
@@ -73,6 +75,7 @@ The acceptance gate is:
   microseconds per draw;
 - the bundled showcase selects `renderBackend: "gpu"`;
 - the live widget reports `backend: "gpu"`; and
+- every panel label and text shadow remains visible above its GPU gradient;
 - `gradient-stack-gpu.png` visibly agrees with
   `gradient-stack-reference.png` for the linear, radial, conic, repeating,
   layered, and mesh panels.
