@@ -67,7 +67,7 @@ $failure = $null
 $widgetStarted = $false
 
 $results = [ordered]@{
-    schema = "weaver.windows-gradient-gpu.v1"
+    schema = "weaver.windows-gradient-gpu.v2"
     status = "running"
     startedUtc = [DateTime]::UtcNow.ToString("o")
     finishedUtc = $null
@@ -142,7 +142,7 @@ function Read-Status {
     try { return Get-Content $path -Raw | ConvertFrom-Json } catch { return $null }
 }
 
-function Capture-Window([IntPtr]$hwnd, [string]$path) {
+function Capture-Window([IntPtr]$hwnd, [string]$path, [string]$referencePath) {
     $rect = New-Object WeaverGradientWin32+RECT
     $origin = New-Object WeaverGradientWin32+POINT
     Add-Check "gradient-window-client-rect" ([WeaverGradientWin32]::GetClientRect($hwnd, [ref]$rect)) "hwnd=0x$('{0:x}' -f $hwnd.ToInt64())"
@@ -165,15 +165,48 @@ function Capture-Window([IntPtr]$hwnd, [string]$path) {
         [WeaverGradientWin32]::SetWindowPos($hwnd, $hwndNotTopmost, 0, 0, 0, 0, $flags) | Out-Null
     }
     $bitmap.Save($path, [Drawing.Imaging.ImageFormat]::Png)
+    Add-Check "gradient-reference-image-exists" (Test-Path $referencePath) $referencePath
+    $reference = [Drawing.Bitmap]::new($referencePath)
+    $referenceWidth = $reference.Width
+    $referenceHeight = $reference.Height
     $colors = [Collections.Generic.HashSet[int]]::new()
-    for ($y = 0; $y -lt $height; $y += 4) {
-        for ($x = 0; $x -lt $width; $x += 4) {
-            [void]$colors.Add($bitmap.GetPixel($x, $y).ToArgb())
+    $dimensionsMatch = $referenceWidth -eq $width -and $referenceHeight -eq $height
+    $sampleCount = 0
+    $closeSampleCount = 0
+    [double]$absoluteChannelError = 0
+    try {
+        if ($dimensionsMatch) {
+            for ($y = 0; $y -lt $height; $y += 4) {
+                for ($x = 0; $x -lt $width; $x += 4) {
+                    $actual = $bitmap.GetPixel($x, $y)
+                    $expected = $reference.GetPixel($x, $y)
+                    [void]$colors.Add($actual.ToArgb())
+                    $redError = [Math]::Abs([int]$actual.R - [int]$expected.R)
+                    $greenError = [Math]::Abs([int]$actual.G - [int]$expected.G)
+                    $blueError = [Math]::Abs([int]$actual.B - [int]$expected.B)
+                    $absoluteChannelError += $redError + $greenError + $blueError
+                    if (($redError + $greenError + $blueError) -le 96) { $closeSampleCount++ }
+                    $sampleCount++
+                }
+            }
         }
+    } finally {
+        $reference.Dispose()
+        $bitmap.Dispose()
     }
-    $bitmap.Dispose()
+    $meanAbsoluteChannelError = if ($sampleCount -eq 0) { [double]::PositiveInfinity } else { $absoluteChannelError / (3.0 * $sampleCount) }
+    $closeSamplePercent = if ($sampleCount -eq 0) { 0.0 } else { 100.0 * $closeSampleCount / $sampleCount }
+    Add-Check "gradient-capture-reference-dimensions" $dimensionsMatch "capture=${width}x${height} reference=${referenceWidth}x${referenceHeight}"
     Add-Check "gradient-window-nonuniform" ($colors.Count -ge 256) "sampledUniqueArgb=$($colors.Count)"
-    return [pscustomobject]@{ widthPx = $width; heightPx = $height; sampledUniqueArgb = $colors.Count }
+    Add-Check "gradient-capture-reference-similarity" ($meanAbsoluteChannelError -le 40.0 -and $closeSamplePercent -ge 55.0) "meanAbsoluteChannelError=$([Math]::Round($meanAbsoluteChannelError, 3)) closeSamplePercent=$([Math]::Round($closeSamplePercent, 3))"
+    return [pscustomobject]@{
+        widthPx = $width
+        heightPx = $height
+        sampledUniqueArgb = $colors.Count
+        referenceSampleCount = $sampleCount
+        meanAbsoluteChannelError = [Math]::Round($meanAbsoluteChannelError, 3)
+        closeSamplePercent = [Math]::Round($closeSamplePercent, 3)
+    }
 }
 
 function Sample-Processes([int]$widgetPid, [int]$rendererPid, [int]$seconds = 10) {
@@ -244,6 +277,7 @@ try {
     for ($sample = 1; $sample -le $Samples; $sample++) {
         $run = Invoke-Recorded "d3d-gradient-sample-$('{0:d2}' -f $sample)" $NativeRoot "zig" @("build", "test-windows-d3d-presenter", "-Doptimize=ReleaseFast")
         $joined = $run.Lines -join "`n"
+        Add-Check "d3d-clean-command-report-$sample" ($joined -notmatch '(?m)^failed command:') $joined
         $timingMatch = [regex]::Match($joined, 'mesh-gradient 512x512 16-patch Oklab GPU ([0-9]+(?:\.[0-9]+)?)us/draw')
         Add-Check "d3d-gradient-timestamp-$sample" $timingMatch.Success $joined
         $timings += [double]$timingMatch.Groups[1].Value
@@ -306,7 +340,7 @@ try {
     $hwnd = [WeaverGradientWin32]::FindWindow([uint32]$widget.pid, "Gradient Stack")
     Add-Check "gradient-live-window" ($hwnd -ne [IntPtr]::Zero -and [WeaverGradientWin32]::IsWindow($hwnd)) "hwnd=0x$('{0:x}' -f $hwnd.ToInt64())"
     $screenshotName = "gradient-stack-gpu.png"
-    $capture = Capture-Window $hwnd (Join-Path $OutputDirectory $screenshotName)
+    $capture = Capture-Window $hwnd (Join-Path $OutputDirectory $screenshotName) (Join-Path $OutputDirectory $referenceName)
     $processSample = Sample-Processes ([int]$widget.pid) $rendererPid
     $results.live = [pscustomobject]@{
         widgetPid = [int]$widget.pid

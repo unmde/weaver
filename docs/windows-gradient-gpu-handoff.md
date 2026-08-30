@@ -1,7 +1,62 @@
 # Windows gradient GPU handoff
 
-This pass tests the current Weaver gradient implementation. Upstream Native
-work is deliberately out of scope.
+This pass owns the Windows implementation loop for the current Weaver gradient
+work. The Windows agent may diagnose failures, edit both repositories, add
+tests, commit, push, and rerun until the hardware receipt is honest. Upstream
+contribution and merging remain out of scope.
+
+## Agent operating contract
+
+Work on these branches only:
+
+- Weaver: `agent/gradient-exploration`
+- Native: `agent/windows-gradient-gpu-spike`
+
+Do not merge either PR, rebase shared history, force-push, or modify `master`.
+Preserve unrelated work. A verifier failure is work to diagnose, not a reason
+to weaken the check.
+
+When a run fails or an image is wrong:
+
+1. Keep the failed ZIP unchanged. Read `results.json`, the named command log,
+   `windows-dpi.log`, and both PNGs.
+2. Reproduce the narrow failure before editing.
+3. Fix the owning layer. Weaver owns the acceptance script, CLI, runtime, host,
+   renderer, and outer integration. Native owns the Windows D3D presenter,
+   shared-renderer client, window styles, and packet decoding.
+4. Add a regression check that fails on the observed behavior.
+5. Run the focused test first, then the relevant repository suite.
+6. Commit and push Native first if it changed. Update Weaver's Native gitlink
+   and `expectedNativeCommit` in `scripts/release-audit.mjs`, run
+   `npm run audit:release`, then commit and push Weaver.
+7. Watch both PRs. Fix real Greptile findings. If Greptile fails only because
+   its cached submodule is stale or its runner times out, retrigger it on the
+   unchanged head with `@greptileai` and cite the exact-pin CI check.
+8. Rerun this script. Open both PNGs yourself. Return the final ZIP, the exact
+   Weaver and Native commits, and a short list of fixes you pushed.
+
+The loop ends only when the v2 receipt passes, every command log is clean, the
+GPU screenshot visibly matches the reference, both worktrees are clean, and
+both PR heads are pushed. Do not stop after compilation or `backend=gpu`.
+
+## Current Windows work
+
+The 2026-08-30 v1 receipt proved that the RTX 4070 created and presented a
+shared D3D11 surface, but it also exposed two verifier defects that v2 now
+rejects:
+
+- `zig build test-windows-d3d-presenter` returned exit code zero while its log
+  ended with `failed command:`. Give the hardware benchmark an unambiguous
+  execution path and preserve the decoder and shader tests.
+- `Graphics.CopyFromScreen` captured the desktop behind the
+  `WS_EX_NOREDIRECTIONBITMAP` DirectComposition window. Implement a capture
+  path that sees the composed window, most likely Windows Graphics Capture or
+  another DWM-backed API. Do not remove the production no-redirection style,
+  demote the widget to CPU, or lower the new reference-similarity gate to make
+  the receipt pass.
+
+Treat those as starting diagnoses, not prescribed patches. Prove the actual
+cause on the Windows machine before choosing the implementation.
 
 ## What the run proves
 
@@ -39,14 +94,28 @@ Make sure `git`, `node`, `npm`, `zig`, and `pwsh` resolve in a fresh PowerShell
 window. Update the display driver before the run, then reboot if the installer
 asks.
 
-## Run
+## Start or resume the branches
 
 ```powershell
-git clone https://github.com/unmde/weaver.git
-cd weaver
-git fetch origin agent/gradient-exploration
-git switch --track origin/agent/gradient-exploration
+git fetch origin
+git switch agent/gradient-exploration
+git pull --ff-only origin agent/gradient-exploration
 git submodule update --init --recursive
+
+git -C runtime/native-sdk fetch origin
+git -C runtime/native-sdk switch agent/windows-gradient-gpu-spike
+git -C runtime/native-sdk pull --ff-only origin agent/windows-gradient-gpu-spike
+
+git rev-parse HEAD
+git -C runtime/native-sdk rev-parse HEAD
+```
+
+For a fresh checkout, clone Weaver first and create the tracking Weaver branch
+with `git switch --track origin/agent/gradient-exploration`.
+
+Run the complete receipt after focused fixes pass:
+
+```powershell
 pwsh -NoProfile -File .\scripts\verify-gradient-gpu.ps1
 ```
 
@@ -70,18 +139,23 @@ failure evidence is usually more useful than a clean second attempt.
 
 The acceptance gate is:
 
-- `results.json` has `status: "passed"`;
+- `results.json` has schema `weaver.windows-gradient-gpu.v2` and
+  `status: "passed"`;
 - every recorded command exits zero;
+- no benchmark log contains `failed command:`;
 - all timestamp samples name one stable hardware adapter and contain finite
   microseconds per draw;
 - the bundled showcase selects `renderBackend: "gpu"`;
 - the live widget reports `backend: "gpu"`;
 - `windows-dpi.log` records a completed shared-renderer surface for that exact
   widget PID;
+- the GPU capture has the same dimensions as the deterministic reference and
+  passes the sampled similarity gate;
 - every panel label and text shadow remains visible above its GPU gradient;
 - `gradient-stack-gpu.png` visibly agrees with
   `gradient-stack-reference.png` for the linear, radial, conic, repeating,
   layered, and mesh panels.
 
 The screenshot still needs human inspection. The script intentionally does not
-pretend that a high unique-color count proves gradient semantics.
+pretend that a high unique-color count or a similarity score proves gradient
+semantics.
