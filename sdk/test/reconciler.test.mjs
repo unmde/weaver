@@ -83,6 +83,10 @@ test("widget renders one native generation and providers use native timers", asy
     const keyed = [sdk.h("panel", { key: "a" }), sdk.h("panel", { key: "b" })];
     return sdk.h("column", { class: "p-2 pt-0 mx-1 w-1/2 min-w-4 max-w-0 max-h-[60px] aspect-square justify-evenly grow-2 shrink-0 self-end flex-wrap shadow-inner shadow-red-500/40" },
       sdk.h("panel", { class: "w-0" }),
+      sdk.h("panel", { background: [
+        { type: "linear", stops: [{ offset: 0, color: "red-500" }, { offset: 1, color: "blue-500" }] },
+        { type: "radial", center: [0.25, 0.5], radius: [0.8, 1], stops: [{ offset: 0, color: "#ffffffcc" }, { offset: 1, color: "transparent" }] },
+      ] }),
       sdk.h("text", { class: "text-[13px] text-center leading-tight tracking-[-0.5px] line-clamp-2 tabular-nums font-bold font-mono text-shadow-md" }, time.ss),
       sdk.h("text", null, cpu.percent.toFixed(1)),
       sdk.h("text", null, audio.bands[0].toFixed(2)),
@@ -153,6 +157,9 @@ test("widget renders one native generation and providers use native timers", asy
     assert.ok(operations.some((operation) => operation[0] === "setProp" && operation[1] === rootColumnId && operation[2] === key && operation[3] === value), `${key} wire prop`);
   }
   assert.ok(operations.some((operation) => operation[0] === "setProp" && operation[2] === "width" && operation[3] === 0), "explicit w-0 wire prop");
+  const gradientOperation = operations.find((operation) => operation[0] === "setProp" && operation[2] === "backgroundGradient");
+  assert.ok(gradientOperation, "typed background gradient wire prop");
+  assert.deepEqual(JSON.parse(gradientOperation[3]).layers.map((layer) => layer.kind), ["linear", "radial"]);
   const styledTextId = operations.find((operation) => operation[0] === "createNode" && operation[1] === "text")[2];
   for (const [key, value] of [
     ["fontScale", 13 / 14], ["fontWeight", "bold"], ["fontFamily", "mono"], ["textAlign", "center"],
@@ -327,6 +334,7 @@ test("styling 10 image props reject invalid fit and tile before native mutation"
   const operationCount = operations.length;
   assert.throws(() => sdk.h("image", { src: "./cover.png", fit: "scale-down" }), /fit must be "cover", "contain", or "stretch"/);
   assert.throws(() => sdk.h("image", { src: "./cover.png", tile: "yes" }), /tile must be boolean/);
+  assert.throws(() => sdk.h("image", { src: "./cover.png", background: { type: "linear", stops: [] } }), /gradient backgrounds are supported on <column>, <row>, <stack>, <panel>, and <button>; received <image>/);
   assert.equal(operations.length, operationCount);
 });
 

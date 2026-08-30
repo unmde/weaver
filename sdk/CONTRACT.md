@@ -153,6 +153,10 @@ utility.
 | `border-[#rgb/#rrggbb/#rrggbbaa]`, optional `/NN` alpha suffix | border color; color alone does not create width |
 | `bg-`, `text-`, `border-` + Tailwind v4 named color (`red-50` through `taupe-950`, `white`, `black`, `transparent`), optional `/NN` | official v4.3.3 palette converted from OKLCH to the runtime's sRGB8 wire format; alpha multiplies the named color's alpha |
 | `bg-[#rgb/#rrggbb/#rrggbbaa]`, optional `/NN` alpha suffix | background color |
+| `bg-gradient-to-{r,tr,t,tl,l,bl,b,br}`, `bg-linear-to-*` | linear gradient direction; requires `from-*` and `to-*` |
+| `bg-repeating-gradient-to-*`, `bg-repeating-linear-to-*` | repeating linear gradient direction |
+| `from/via/to-<color>`, optional `/NN` alpha | linear-gradient stop colors |
+| `from/via/to-N%`, bracketed percentage also accepted | linear-gradient stop offsets |
 | `text-[#…]` | text color |
 | `text-{xs,sm,base,lg,xl,2xl,3xl,4xl}` | font scale |
 | `text-[Npx]` | arbitrary font size (`N / 14` font scale) |
@@ -187,9 +191,56 @@ Named text sizes use Tailwind's paired size/line-height defaults:
 `2xl` 24/32, `3xl` 30/36, and `4xl` 36/40 (logical pixels). An explicit
 `leading-*` utility overrides the paired default regardless of class order.
 
-Still deliberately absent (check-error): gradients, hover/state variants,
-and transitions. The shadow surface intentionally supports one shadow per
+Still deliberately absent (check-error): focus/active variants and
+transitions. The shadow surface intentionally supports one shadow per
 node; comma-separated CSS shadow lists are not part of the packed wire form.
+
+### Gradient backgrounds
+
+The container surfaces `<column>`, `<row>`, `<stack>`, `<panel>`, and `<button>`
+accept a typed `background` prop. One value paints one gradient; an array paints
+bottom-to-top, so the final item is the top layer. Leaf media and controls
+reject gradient backgrounds instead of silently ignoring them; put the leaf in
+a gradient panel.
+Coordinates are normalized against the laid-out border box and may extend
+outside `0..1` for deliberately off-center effects.
+
+```tsx
+<panel background={{
+  type: "radial",
+  center: [0.3, 0.2],
+  radius: [0.8, 0.6],
+  interpolation: "oklab",
+  spread: "pad",
+  stops: [
+    { offset: 0, color: "#FFFFFFCC" },
+    { offset: 1, color: "indigo-950" },
+  ],
+}} />
+```
+
+The four shapes are:
+
+- `linear`: optional `start` and `end`; defaults to `[0, .5]` → `[1, .5]`.
+- `radial`: optional `center` and elliptical `radius`; defaults to `[.5, .5]`
+  and `[.5, .5]`.
+- `conic`: optional `center` and `from`; `from` is CSS-style clockwise degrees
+  from twelve o'clock.
+- `mesh`: one or more bicubic patches. Each patch has sixteen row-major control
+  points and four corner colors ordered top-left, top-right, bottom-right,
+  bottom-left.
+
+Axis gradients support `spread: "pad" | "repeat" | "reflect"`. Repeating is
+therefore a spread behavior, not a separate gradient shape. All shapes support
+`interpolation: "srgb" | "srgb-linear" | "oklab"`; the default is
+`"srgb-linear"`. Colors are bracketed hex or Tailwind v4 names. Stops are
+explicit `{ offset, color }` values; offsets are retained as authored so repeat
+periods and hard stops are deterministic.
+
+The authoring boundary enforces 1–8 layers, 64 total axis stops, 16 total mesh
+patches, sixteen control points per patch, finite coordinates, and a 16 KiB
+canonical wire document. The runtime validates the same limits again before
+mutating the retained tree.
 
 ### Bundled fonts
 
@@ -545,14 +596,14 @@ the sections above.
 
 | Element | Shipped props beyond `class` and `children` | Content model |
 |---|---|---|
-| `<column>` | none | box children, vertical flex |
-| `<row>` | none | box children, horizontal flex |
-| `<stack>` | none | box children, overlay layout; paint the backdrop on a child |
-| `<panel>` | none | box children, vertical flex with a painted surface |
+| `<column>` | optional typed `background` gradient stack | box children, vertical flex |
+| `<row>` | optional typed `background` gradient stack | box children, horizontal flex |
+| `<stack>` | optional typed `background` gradient stack | box children, overlay layout |
+| `<panel>` | optional typed `background` gradient stack | box children, vertical flex with a painted surface |
 | `<text>` | none | strings and numbers only |
 | `<icon>` | required literal `name` from `iconNames` | no children |
 | `<image>` | required local `src`; optional `fit="cover/contain/stretch"`, `tile` | no rendered children |
-| `<button>` | required `onPress`; optional `onDoublePress`, `onRightPress` | box children |
+| `<button>` | required `onPress`; optional `onDoublePress`, `onRightPress`, typed `background` gradient stack | box children |
 | `<slider>` | required `value`, `max`, `onChange` | no rendered children |
 | `<canvas>` | required `onFrame`; optional `fps` | no rendered children |
 
@@ -564,14 +615,15 @@ the sections above.
 | radii | `rounded`, `rounded-md/lg/xl/2xl/3xl/full`, `rounded-[Npx]`, directional and corner `rounded-t/r/b/l/tl/tr/br/bl` forms with the same suffixes |
 | borders | `border`, `border-N`, `border-[Npx]`, `border-<named-color>`, `border-[#hex]`, optional `/NN` color alpha |
 | colors | `bg/text/border-<Tailwind-v4-color>`, `bg/text/border-[#hex]`, optional `/NN` alpha |
+| gradients | `bg-gradient-to-*`, `bg-linear-to-*`, repeating variants, `from/via/to-<color>`, `from/via/to-N%` |
 | typography | `text-xs/sm/base/lg/xl/2xl/3xl/4xl`, `text-[Npx]`, `font-light/normal/medium/semibold/bold`, `font-sans/mono`, `font-[file-stem]`, `text-left/center/right`, all documented `leading-*` and `tracking-*` forms, `line-clamp-N/none`, `tabular-nums`, `normal-nums`, `truncate` |
 | effects | `shadow`, `shadow-sm/md/lg/xl/inner/none`, `shadow-[X_Y_BLUR_SPREAD_#hex]`, `shadow-<color>`, `text-shadow`, `text-shadow-sm/md/lg/none`, `opacity-N` |
 | overflow | `overflow-hidden` |
 | native state | `hover/pressed:bg-<color>`, `hover/pressed:text-<color>`, `hover/pressed:opacity-N`, `hover/pressed:border-<color>` |
 
 The contract-table unit test freezes both row sets and compiles a representative
-for every syntax branch. Gradients, transitions, positioned layout, arbitrary
-state prefixes, and every utility absent from these tables remain loud
+for every syntax branch. Transitions, positioned layout, arbitrary state
+prefixes, and every utility absent from these tables remain loud
 `UtilityError` failures with a fix-it.
 
 ---

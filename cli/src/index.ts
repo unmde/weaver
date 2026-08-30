@@ -2381,6 +2381,13 @@ function validateSource(project: SourceProject): string[] {
         else {
           try {
             const compiled = compileClass(classText);
+            if (compiled.backgroundGradient !== undefined && tag !== "column" && tag !== "row" && tag !== "stack" && tag !== "panel" && tag !== "button") {
+              errors.push(locationMessage(
+                sourceFile,
+                classAttribute,
+                `GradientBackgroundElementUnsupported: gradient backgrounds are supported on <column>, <row>, <stack>, <panel>, and <button>; received <${tag}>. Fix: move the gradient to a containing panel.`,
+              ));
+            }
             const hasStateVariant = Object.keys(compiled).some((key) => key.startsWith("hover") || key.startsWith("pressed"));
             if (hasStateVariant && tag !== "button" && tag !== "slider" && stateVariantAncestry(node) === "none") {
               errors.push(locationMessage(

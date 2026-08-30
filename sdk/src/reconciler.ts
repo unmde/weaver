@@ -1,4 +1,5 @@
 import { compileClass, type ClassProps } from "./class-compiler.js";
+import { serializeBackground, type BackgroundGradientStack } from "./gradients.js";
 
 // Storage receipt (2026-07-29): serializing a realistic good notes fixture
 // (100 records with 900-byte bodies and metadata) measured 103,291 bytes.
@@ -142,6 +143,7 @@ interface HostElementProps {
   tile?: boolean;
   onFrame?: (ctx: CanvasCtx, frame: CanvasFrame) => void;
   fps?: CanvasFrameRate;
+  backgroundGradient?: string;
 }
 
 interface ComponentInstance {
@@ -174,6 +176,10 @@ let hotSwapSeed: HotSwapSlot[] | null = parseHotSwapSeed(encodedHotSwapSeed);
 let hotSwapCompatible = !hotSwapSeedProvided || hotSwapSeed !== null;
 
 export const Fragment = Symbol("weaver.fragment");
+
+function supportsGradientBackground(type: ElementType): boolean {
+  return type === "column" || type === "row" || type === "stack" || type === "panel" || type === "button";
+}
 
 let rootComponent: Component | null = null;
 let rootInstance: Instance | null = null;
@@ -244,6 +250,9 @@ export function h(type: ElementType, props: Record<string, unknown> | null, ...c
   if ((type === "button" || type === "slider") && source.accessibilityLabel !== undefined &&
       (typeof source.accessibilityLabel !== "string" || source.accessibilityLabel.trim().length === 0)) {
     throw new Error(`<${type}> accessibilityLabel must be a non-empty string naming the action`);
+  }
+  if (typeof type === "string" && source.background !== undefined && !supportsGradientBackground(type)) {
+    throw new Error(`gradient backgrounds are supported on <column>, <row>, <stack>, <panel>, and <button>; received <${type}>`);
   }
   return {
     __weaverElement: true,
@@ -538,7 +547,7 @@ function reconcileHost(parentId: number | null, previous: Instance | null, vnode
     instance.props = nextProps;
     instance.className = className;
   }
-  applyElementProps(instance, vnode.props);
+  applyElementProps(instance, vnode.props, instance.props.backgroundGradient);
   if (type === "text") {
     const children = vnode.children.filter(isRenderable);
     const binding = children.find(isSignal);
@@ -603,7 +612,7 @@ function applyProps(id: number, previous: ClassProps, next: ClassProps): void {
     padding: 0, paddingTop: -1, paddingRight: -1, paddingBottom: -1, paddingLeft: -1,
     marginTop: 0, marginRight: 0, marginBottom: 0, marginLeft: 0,
     gap: 0, radius: 0, radiusTopLeft: -1, radiusTopRight: -1, radiusBottomRight: -1, radiusBottomLeft: -1,
-    borderWidth: 0, borderColor: "", shadow: "", shadowInset: false, textShadow: "", background: "", textColor: "",
+    borderWidth: 0, borderColor: "", shadow: "", shadowInset: false, textShadow: "", background: "", backgroundGradient: "", textColor: "",
     fontScale: 1, fontWeight: "normal", fontFamily: "sans", textAlign: "start", lineHeight: 0,
     letterSpacing: 0, lineClamp: 0, tabularNums: false, opacity: 1, crossAlign: "stretch",
     hoverBackground: "", hoverTextColor: "", hoverOpacity: -1, hoverBorderColor: "", hoverShadow: "", hoverShadowInset: false,
@@ -613,15 +622,32 @@ function applyProps(id: number, previous: ClassProps, next: ClassProps): void {
     widthPercent: 0, heightPercent: 0, aspectRatio: 0, truncate: false, overflowHidden: false,
   };
   for (const key of Object.keys(defaults) as (keyof ClassProps)[]) {
+    // Gradient class utilities and the explicit background prop share one
+    // wire property. Resolve their precedence in applyElementProps so an
+    // unchanged explicit prop still wins when only the class changes.
+    if (key === "backgroundGradient") continue;
     const before = previous[key] ?? defaults[key];
     const after = next[key] ?? defaults[key];
     if (!Object.is(before, after)) native.setProp(id, key, after);
   }
 }
 
-function applyElementProps(instance: HostInstance, props: Record<string, unknown>): void {
+function applyElementProps(instance: HostInstance, props: Record<string, unknown>, classBackgroundGradient?: string): void {
   const previous = instance.elementProps;
   const next: HostElementProps = {};
+  const hasGradientBackground = props.background !== undefined || classBackgroundGradient !== undefined;
+  if (hasGradientBackground && !supportsGradientBackground(instance.type)) {
+    throw new Error(`gradient backgrounds are supported on <column>, <row>, <stack>, <panel>, and <button>; received <${instance.type}>`);
+  }
+  if (props.background !== undefined) {
+    try {
+      next.backgroundGradient = serializeBackground(props.background as BackgroundGradientStack);
+    } catch (error) {
+      throw new Error(`<${instance.type}> background is invalid: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  } else {
+    next.backgroundGradient = classBackgroundGradient;
+  }
   if (instance.type === "button") {
     if (typeof props.onPress !== "function") throw new Error("<button> requires onPress={() => ...}");
     next.onPress = props.onPress as (event?: PressEvent) => void;
@@ -683,6 +709,9 @@ function applyElementProps(instance: HostInstance, props: Record<string, unknown
   if (!Object.is(previous.iconStroke, next.iconStroke) && next.iconStroke !== undefined) native.setProp(instance.id, "iconStroke", next.iconStroke);
   if (!Object.is(previous.fit, next.fit) && next.fit !== undefined) native.setProp(instance.id, "imageFit", next.fit);
   if (!Object.is(previous.tile, next.tile) && next.tile !== undefined) native.setProp(instance.id, "imageTile", next.tile);
+  if (!Object.is(previous.backgroundGradient ?? "", next.backgroundGradient ?? "")) {
+    native.setProp(instance.id, "backgroundGradient", next.backgroundGradient ?? "");
+  }
   instance.elementProps = next;
   if (instance.type === "canvas" && next.onFrame) {
     updateCanvasBinding(instance.id, next.onFrame, next.fps, instance.props.width ?? 0, instance.props.height ?? 0);

@@ -4,6 +4,7 @@ const weaver_build_options = @import("weaver_build_options");
 const runner = @import("runner");
 const native_sdk = @import("native_sdk");
 const geometry_mod = @import("geometry.zig");
+const gradient_mod = @import("gradients.zig");
 const dev_reload = @import("dev_reload.zig");
 const image_paths = @import("image_paths.zig");
 const js_engine = @import("js_engine.zig");
@@ -768,7 +769,7 @@ fn projectionFailurePanel(ui: *WidgetUi, is_root: bool) WidgetUi.Node {
 fn hasPaintStyle(node: *const tree_mod.Node) bool {
     return node.background != null or node.border_color != null or node.border_width > 0 or node.radius > 0 or
         node.radius_top_left >= 0 or node.radius_top_right >= 0 or node.radius_bottom_right >= 0 or node.radius_bottom_left >= 0 or node.shadow != null or
-        !node.hover_style.isEmpty() or !node.pressed_style.isEmpty();
+        node.backgroundGradientSlice().len > 0 or !node.hover_style.isEmpty() or !node.pressed_style.isEmpty();
 }
 
 fn nativeInteractionStyle(style: tree_mod.InteractionStyle) ?native_sdk.canvas.WidgetInteractionStyle {
@@ -795,6 +796,10 @@ fn nativeInteractionStyle(style: tree_mod.InteractionStyle) ?native_sdk.canvas.W
 
 fn attachEffects(ui: *WidgetUi, retained: *const tree_mod.Node, font_id: ?native_sdk.canvas.FontId, source: WidgetUi.Node) WidgetUi.Node {
     var icon_elements: ?[]const native_sdk.canvas.PathElement = null;
+    const gradient_commands = gradient_mod.decode(ui.arena, retained.backgroundGradientSlice()) catch |err| block: {
+        if (retained.backgroundGradientSlice().len > 0) noteProjectionFailure("widget gradient projection failed: cause={s}", .{@errorName(err)});
+        break :block &.{};
+    };
     if (retained.iconPathSlice().len > 0) {
         const element_count = native_sdk.canvas.normalized_path.countElements(retained.iconPathSlice()) catch |err| block: {
             std.log.err("bundle emitted invalid normalized icon path: {s}", .{@errorName(err)});
@@ -814,7 +819,8 @@ fn attachEffects(ui: *WidgetUi, retained: *const tree_mod.Node, font_id: ?native
     const count = @as(usize, @intFromBool(retained.shadow != null)) +
         @as(usize, @intFromBool(retained.text_shadow != null)) +
         @as(usize, @intFromBool(font_id != null)) +
-        @as(usize, @intFromBool(icon_elements != null));
+        @as(usize, @intFromBool(icon_elements != null)) +
+        gradient_commands.len;
     if (count == 0) return source;
     const existing = source.widget.immediate_commands;
     const combined = ui.arena.alloc(native_sdk.canvas.ImmediateCanvasCommand, existing.len + count) catch |err| {
@@ -823,6 +829,8 @@ fn attachEffects(ui: *WidgetUi, retained: *const tree_mod.Node, font_id: ?native
     };
     @memcpy(combined[0..existing.len], existing);
     var cursor: usize = existing.len;
+    @memcpy(combined[cursor .. cursor + gradient_commands.len], gradient_commands);
+    cursor += gradient_commands.len;
     if (retained.shadow) |shadow| {
         combined[cursor] = .{ .box_shadow = .{
             .offset = shadow.offset,
@@ -2194,6 +2202,46 @@ test "attached effects combine builder metadata with box and text shadows" {
     }
     switch (built.root.immediate_commands[2]) {
         .text_shadow => |shadow| try std.testing.expectEqual(@as(f32, 3), shadow.blur),
+        else => return error.TestExpectedEqual,
+    }
+}
+
+test "gradient-only layout lowers through a painted wrapper and preserves painter order" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    var model: Model = .{ .tree = .{ .allocator = std.testing.allocator } };
+    defer model.tree.deinit();
+    const row = try model.tree.createNode(.row);
+    const child = try model.tree.createNode(.panel);
+    try model.tree.appendChild(row, child);
+    try model.tree.setBackgroundGradient(row,
+        \\{"v":1,"layers":[{"kind":"linear","start":[0,0.5],"end":[1,0.5],"stops":[{"offset":0,"color":"#FF0000FF"},{"offset":1,"color":"#0000FFFF"}],"spread":"repeat","interpolation":"srgb"},{"kind":"radial","center":[0.25,0.5],"radii":[0.75,1],"stops":[{"offset":0,"color":"#FFFFFFFF"},{"offset":1,"color":"#FFFFFF00"}],"spread":"pad","interpolation":"oklab"}]}
+    );
+
+    var ui = WidgetUi.init(arena_state.allocator());
+    const built = try ui.finalize(buildNodeForTest(&ui, &model, row, true));
+    try std.testing.expectEqual(native_sdk.canvas.WidgetKind.panel, built.root.kind);
+    try std.testing.expectEqual(@as(usize, 1), built.root.children.len);
+    try std.testing.expectEqual(native_sdk.canvas.WidgetKind.row, built.root.children[0].kind);
+    try std.testing.expectEqual(@as(usize, 2), built.root.immediate_commands.len);
+    switch (built.root.immediate_commands[0]) {
+        .background_gradient => |gradient| switch (gradient) {
+            .linear => |linear| {
+                try std.testing.expectEqual(native_sdk.canvas.GradientSpread.repeat, linear.spread);
+                try std.testing.expectEqual(native_sdk.canvas.GradientInterpolation.srgb, linear.interpolation);
+            },
+            else => return error.TestExpectedEqual,
+        },
+        else => return error.TestExpectedEqual,
+    }
+    switch (built.root.immediate_commands[1]) {
+        .background_gradient => |gradient| switch (gradient) {
+            .radial => |radial| {
+                try std.testing.expectEqual(native_sdk.geometry.PointF.init(0.25, 0.5), radial.center);
+                try std.testing.expectEqual(native_sdk.canvas.GradientInterpolation.oklab, radial.interpolation);
+            },
+            else => return error.TestExpectedEqual,
+        },
         else => return error.TestExpectedEqual,
     }
 }

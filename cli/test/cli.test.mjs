@@ -630,6 +630,23 @@ export default widget({ name: "State Test", size: [160, 80] }, () =>
   }
 });
 
+test("check rejects gradient classes on non-container leaves", () => {
+  const root = mkdtempSync(join(tmpdir(), "weaver-gradient-element-"));
+  const cli = fileURLToPath(new URL("../dist/index.js", import.meta.url));
+  try {
+    assert.equal(spawnSync(process.execPath, [cli, "init", "widget"], { cwd: root, encoding: "utf8" }).status, 0);
+    writeFileSync(join(root, "widget", "widget.tsx"), `import { widget } from "@weaver/sdk";
+export default widget({ name: "Gradient Element", size: [160, 80] }, () =>
+  <canvas class="w-[40px] h-[40px] bg-linear-to-r from-red-500 to-blue-500" onFrame={() => {}} />);
+`);
+    const checked = spawnSync(process.execPath, [cli, "check", join(root, "widget")], { encoding: "utf8" });
+    assert.equal(checked.status, 1);
+    assert.match(checked.stderr, /GradientBackgroundElementUnsupported: gradient backgrounds are supported on <column>, <row>, <stack>, <panel>, and <button>; received <canvas>/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("check requires statically knowable actionable controls to have accessible names", () => {
   const root = mkdtempSync(join(tmpdir(), "weaver-accessible-name-"));
   try {

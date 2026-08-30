@@ -1,237 +1,276 @@
-# Gradient exploration
+# Gradient architecture and verification
 
-Status: executable Weaver Native-fork spike, not a production contract
+Status: implemented on `agent/gradient-exploration`; hardware Windows GPU
+timing remains an opt-in receipt that must run on a Windows machine.
 
 ## Verdict
 
-We should not build a Weaver-only gradient rasterizer. Native already has the
-right low-level primitive for linear gradients: a `Fill.linear_gradient` value,
-gradient stops, deterministic reference rendering, display-list resources,
-macOS packet rendering, and a Direct2D implementation in official upstream.
+Weaver should own the authoring contract and Native should own gradient
+semantics and rendering. That split is now executable:
 
-The missing layer is retained widget authoring. Native's `WidgetStyle` accepts
-only a solid background color, and Weaver's class compiler rejects every
-gradient utility before it reaches the runtime. Radial and conic gradients do
-not exist in Native yet.
+- Weaver exposes typed linear, radial, conic, repeating, layered, and mesh
+  backgrounds, validates them, and stores one sparse canonical document on the
+  retained node.
+- Native resolves normalized geometry after layout, emits ordinary display-list
+  paints, and renders the same model through its reference, macOS, and Windows
+  paths.
+- Repeating and reflecting are spread modes on linear, radial, and conic
+  gradients. They are not separate shape implementations.
+- Layering is ordinary painter order. Each layer becomes a same-shape draw from
+  bottom to top, preserving alpha composition, clipping, damage, and stable
+  command identity.
+- Mesh is a tensor-product bicubic patch model. It is intentionally a separate
+  two-dimensional paint, not a pile of radial approximations.
 
-Weaver's Native pin has diverged from current official upstream. The fork has a
-rare retained metadata channel for text styles, shadows, icon paths, and
-interaction styles; official upstream does not. The spike uses that channel and
-is the right low-risk adapter for Weaver today, but it does not cherry-pick
-cleanly onto current `vercel-labs/native`. An official contribution needs the
-same sparse-paint idea expressed in upstream's current widget architecture.
+The original Windows CPU fallback was caused by Weaver's fork-specific D3D
+presenter. Official `vercel-labs/native` has a Direct2D linear-gradient brush;
+it does not contain Weaver's D3D presenter. Our packet renderer previously
+refused gradient packets and fell back to reference pixels. The implementation
+on this branch removes that restriction for linear, radial, conic, and mesh
+paints, including repeat/reflect and all three interpolation spaces.
 
-The best route is:
+That makes the work upstreamable in two different ways:
 
-1. Finish linear gradients as a small Native widget-paint contribution.
-2. Expose that primitive through Weaver's compiler, bridge, and retained tree.
-3. Make color interpolation explicit and consistent before claiming Tailwind
-   parity.
-4. Add radial and then conic gradients as new Native paint shapes, not as
-   Weaver-side approximations.
+1. The gradient model, reference semantics, serialization, resource bounds,
+   retained adapter, and conformance catalog are a focused Native contribution.
+2. The D3D shader is directly useful to Weaver's Native fork. It is only a
+   direct official-Native contribution if upstream wants this presenter as a
+   backend; otherwise its semantic tests should be applied to the existing
+   Direct2D backend instead.
 
-## What exists now
+## Upstream comparison
 
-| Layer | Linear | Radial | Conic | Important qualification |
-| --- | --- | --- | --- | --- |
-| Native canvas model | Yes | No | No | `Fill` has solid color and linear gradient arms. |
-| Native reference renderer | Yes | No | No | Linear-light RGB interpolation is implemented. |
-| Native macOS renderer | Yes | No | No | `NSGradient` fills clipped paths. Gradient strokes fall back to the first stop. |
-| Official Native Windows renderer | Yes | No | No | Direct2D creates a linear-gradient brush. |
-| Weaver fork Windows D3D presenter | CPU fallback | No | No | It deliberately rejects gradient GPU packets rather than flattening them to a color. |
-| Native retained `WidgetStyle` | No | No | No | The background channel is `?Color`, not a paint value. |
-| Weaver classes and bridge | No | No | No | `bg-gradient`, `from-`, `via-`, and `to-` currently check-error. |
+Current official `vercel-labs/native` `main` is
+`48629b3f15c5f6b9858e2f7d45c4c3074a1816f1`. At that revision:
 
-Native also ships gradient-heavy examples such as `deck` and `gpu-dashboard`.
-This is mature canvas capability that needs a retained-widget adapter, not a
-new renderer.
+| Capability | Official Native | Weaver branch |
+| --- | --- | --- |
+| Canvas linear model | yes | yes |
+| Reference linear renderer | yes | yes |
+| Windows linear GPU | Direct2D | D3D11 packet shader |
+| Retained widget gradient | no | yes, sparse metadata |
+| Radial and conic | no | yes |
+| Repeat and reflect | no | yes |
+| Explicit sRGB / linear-sRGB / Oklab | no | yes |
+| Layered backgrounds | no | yes, bottom-to-top |
+| Bicubic mesh | no | yes |
+| Deterministic gradient catalog | no | yes, 15 scenes |
 
-## Gradient families
+The official linear primitive was useful prior art, not a complete stack. The
+Weaver branch extends that primitive rather than installing a second rasterizer
+above Native.
 
-There are three core shape families:
+## Public authoring contract
 
-- Linear: color changes along a line. This covers directional backgrounds,
-  progress fills, fades, and most current Weaver preview art.
-- Radial: color radiates from a center as a circle or ellipse. This covers
-  spotlights, soft glows, and depth behind content.
-- Conic: color rotates around a center. This covers color wheels, rings, dials,
-  and angular progress.
-
-Repeating linear, radial, and conic gradients are spread behavior on those
-shapes, not three unrelated rendering models. Multiple background gradients
-are composition. Mesh and noise gradients are useful later, but they are not
-part of the core CSS gradient model and should not distort the first contract.
-
-## Recommended public contract
-
-Use current Tailwind v4 spellings as the canonical syntax:
+Container surfaces (`column`, `row`, `stack`, `panel`, and `button`) accept one
+typed gradient or a painter-ordered array:
 
 ```tsx
-<View className="bg-linear-to-r from-cyan-500 via-violet-500 to-fuchsia-500" />
-<View className="bg-linear-135 from-[#0891b2] to-[#d946ef]" />
-<View className="bg-radial-[at_30%_20%] from-white/40 to-transparent" />
-<View className="bg-conic-90 from-cyan-500 via-violet-500 to-cyan-500" />
+<panel background={[
+  {
+    type: "linear",
+    start: [0, 1],
+    end: [1, 0],
+    interpolation: "oklab",
+    stops: [
+      { offset: 0, color: "indigo-950" },
+      { offset: 1, color: "violet-500" },
+    ],
+  },
+  {
+    type: "radial",
+    center: [0.25, 0.2],
+    radius: [0.7, 0.8],
+    stops: [
+      { offset: 0, color: "#4DF4FFCC" },
+      { offset: 1, color: "#4DF4FF00" },
+    ],
+  },
+]} />
 ```
 
-Keep `bg-gradient-to-r` as a compatibility alias because Weaver's existing API
-backlog already names it. Do not make the old spelling the primary contract.
+The compact class path handles the common linear case:
 
-The internal model should be a paint union, even if the first Native bridge
-uses rare metadata to preserve the compact common widget shape:
-
-```text
-BackgroundPaint =
-  Solid(color)
-  Linear(line, stops, interpolation, spread)
-  Radial(center, radii, stops, interpolation, spread)
-  Conic(center, startAngle, stops, interpolation, spread)
+```tsx
+<panel class="bg-linear-to-tr from-cyan-400 via-violet-500 to-fuchsia-500" />
+<panel class="bg-repeating-linear-to-r from-amber-400 from-0% to-rose-500 to-25%" />
 ```
 
-Gradient coordinates stay box-relative until layout resolves the final frame.
-Cardinal and corner directions can use normalized endpoints. Arbitrary CSS
-angles need gradient-line geometry based on the final box aspect ratio. A
-fixed `(0, 0)` to `(1, 1)` diagonal is not equivalent on non-square widgets.
+Typed authoring is the canonical complete API. It keeps radial geometry,
+conic angle, interpolation, mesh control points, and painter order obvious
+instead of inventing a CSS parser. `bg-gradient-to-*` remains a compatibility
+alias for `bg-linear-to-*`.
 
-Stops should retain normalized offsets and RGBA color. Allocate their storage
-only for nodes that have a gradient. Weaver's retained `Node` is intentionally
-large and fixed-capacity, so an inline stop array on every node is the wrong
-tradeoff. A final stop limit must be justified with example and app data, not
-chosen by convenience.
+### Shapes and defaults
 
-## Color and alpha correctness
+| Shape | Geometry | Default |
+| --- | --- | --- |
+| Linear | normalized `start`, `end` | `[0,.5]` to `[1,.5]` |
+| Radial | normalized `center`, elliptical `radius` | center `[.5,.5]`, radius `[.5,.5]` |
+| Conic | normalized `center`, `from` angle | center `[.5,.5]`, CSS zero at twelve o'clock |
+| Mesh | 16 row-major bicubic control points and four clockwise corner colors per patch | none |
 
-This is the main unresolved design decision.
+Linear, radial, and conic take `spread: "pad" | "repeat" | "reflect"`.
+All shapes take `interpolation: "srgb" | "srgb-linear" | "oklab"`, defaulting
+to linear sRGB. Colors interpolate with premultiplied alpha. Mesh patches
+share boundary control points and colors for seamless joins; if patches
+overlap, the later patch wins deterministically.
 
-Current Tailwind v4 gradients default to Oklab interpolation. CSS gradient
-interpolation also requires premultiplied alpha handling. Native's reference
-renderer currently interpolates in linear-light RGB, while macOS delegates to
-`NSGradient` and Windows Direct2D requests gamma 2.2. Those paths can produce
-different midpoints.
+The boundary is intentionally finite: 8 layers, 64 total one-dimensional
+stops, 16 total mesh patches, 16 control points per patch, finite coordinates
+whose absolute value is at most 1,000,000, and a 16 KiB canonical wire value.
+The SDK rejects bad inputs before an operation is emitted and the Zig bridge
+validates the same document again before retained-tree mutation.
 
-The production model should carry an interpolation enum and all backends
-should share observable semantics. For Tailwind parity, use premultiplied Oklab
-as the default and map explicit modifiers such as `/srgb` to supported spaces.
-If Oklab is deferred, document linear sRGB as an intentional Weaver subset.
-Do not call the result exact Tailwind behavior until the pixels agree.
+## Native implementation
 
-## Exploratory Native implementation
+### One semantic model
 
-The spike adds `WidgetLinearGradient` to Native's existing rare retained
-metadata channel. This preserves the current `Widget` size and does not put a
-pointer or stop array on every widget. The panel renderer:
+Native's `Fill` union now carries linear, radial, conic, and mesh paints.
+Linear/radial/conic share:
 
-1. Resolves normalized start and end points against the laid-out frame.
-2. Emits the existing `Fill.linear_gradient` display-list value.
-3. Treats a gradient as opaque only when it has stops and every stop is opaque.
-4. Lets a solid pressed or hover background override the base gradient.
-5. Skips the metadata in the immediate-canvas paint walk.
+- arbitrary authored stop offsets, including hard stops;
+- pad, repeat, and reflect spread;
+- sRGB, linear-sRGB, and Oklab interpolation;
+- premultiplied-alpha mixing; and
+- deterministic degenerate behavior.
 
-The tests exercise post-layout endpoint resolution and the pressed-state
-override. This proves the adapter seam without adding a partial public Weaver
-API that silently does nothing.
+The reference mesh sampler solves the inverse bicubic mapping with bounded
+Newton iterations, rejects a patch miss, and interpolates its four corner
+colors in the selected space. That is the correctness oracle for tests and
+screenshots, not the production fast path.
 
-The metadata approach fits Native's existing treatment of rare text styles,
-shadows, icon paths, and interaction styles. A follow-up should generalize all
-widget background emitters to consume `widgetBackgroundFill`, not just panels.
+### Retained projection and layering
 
-The local Native spike is commit `6fc505d1`. `zig build test` passes on the
-unmodified official upstream head and, separately, on the Weaver-fork spike
-branch. A direct cherry-pick exposed conflicts in the fork-only metadata,
-interaction-style, and panel-shadow work, so the official adapter must be
-authored against upstream rather than presented as a clean backport. Native's
-test suite prints expected diagnostics from negative-path fixtures, but exits
-successfully.
+Weaver stores only the canonical bytes on a node. During frame projection it
+decodes into the frame arena. Geometry stays normalized until Native has the
+final laid-out box, avoiding wrong diagonals on non-square widgets and avoiding
+retained pointers into short-lived JS memory.
 
-## Delivery sequence
+Repeated `background_gradient` commands on a widget become bottom-to-top draw
+commands. A single layer retains the original command ID; additional layer IDs
+are stable hashes, so an unchanged stack does not manufacture damage. Solid
+hover or pressed backgrounds retain their existing override behavior.
 
-### 1. Native linear widget paint
+Mesh authoring uses a bounded builder-side patch store, also capped at 16 per
+view. This preserves the common `Widget` footprint and makes exhaustion an
+explicit `MeshPatchListFull` error.
 
-- Land the retained metadata in Weaver's fork. For official upstream, propose
-  an equivalent sparse paint channel or a reviewed `WidgetStyle` paint change
-  with an explicit retained-footprint receipt.
-- Cover every widget surface that authors can give a background.
-- Validate resizing, clipping, rounded corners, opacity, shadows, hover,
-  pressed, disabled, and display-list damage.
-- Decide the interpolation contract and make reference, macOS, and Windows
-  produce matching fixtures.
+### Platform behavior
 
-### 2. Weaver linear authoring
+- Reference: implements the complete model and produces deterministic RGBA8
+  screenshots and samples.
+- macOS: uses the native fast path only where its behavior matches the model.
+  Unsupported shape/spread/interpolation combinations refuse the native packet
+  and use deterministic reference pixels instead of silently changing colors.
+- Windows D3D11: decodes packet v9 into structured stop/mesh buffers and shades
+  linear, radial, conic, and bicubic mesh paints on the GPU. It applies spread,
+  interpolation, and output premultiplication in the shader.
 
-- Compile direction or angle plus `from`, `via`, and `to` colors and positions
-  into one normalized value.
-- Parse once at the bridge boundary.
-- Store gradient data sparsely in the retained tree.
-- Attach Native metadata only to painted nodes.
-- Preserve a solid background as the CSS-style fallback beneath the gradient.
-- Add one real example and screenshot fixtures on macOS and Windows.
+Refusing an unsupported packet is a correctness feature. It gives a slow but
+accurate frame rather than a fast, subtly different frame. The platform work
+can replace those refusals incrementally as each native path earns conformance.
 
-### 3. Windows D3D fast path
+## Verification loop
 
-The fallback belongs to Weaver's custom shared D3D renderer, not official
-Native. Git history traces it to the first Weaver D3D presenter commit. The
-official Windows renderer uses Direct2D and already creates linear-gradient
-brushes.
+The loop follows three independent evidence lanes. Passing one lane does not
+substitute for either of the others.
 
-The follow-up spike removes that fallback for the D3D presenter's supported
-shape set. It adds:
+### 1. Semantics
 
-- one structured stop buffer shared by the frame's gradient instances;
-- stop offset and count metadata on each instance, without duplicating stops
-  for a polyline's segments;
-- the full 64-stop per-view budget rather than a two-color shortcut;
-- linear-sRGB color interpolation followed by output premultiplication, which
-  matches Native's deterministic reference renderer for transparent stops;
-- retained-patch rebasing so a command's stop indices remain correct when the
-  host rebuilds draw order; and
-- a Windows test that decodes a three-stop packet command, rejects a hostile
-  65-stop paint, and compiles both HLSL stages with `D3DCompile`.
+`zig build test-canvas` covers the algebra directly: shape parameters, spread
+at positive and negative coordinates, hard and degenerate stops, premultiplied
+alpha, color-space midpoints, mesh inverse mapping, resource accounting,
+fingerprints, serialization, packet bytes, retained layering, and post-layout
+mesh resolution.
 
-Static gradients retain Weaver's idle-zero behavior. They do no work until a
-frame is already being presented. Unsupported clips, transforms, stroked
-rounded rectangles, curves, images, text, and effects still refuse the packet
-and use the existing pixel fallback.
+`zig build gradient-reference -- <output>` renders 15 named scenes to PNG plus
+a sample manifest:
 
-This exact D3D patch is a Weaver contribution because official Native does not
-use this presenter. The useful upstream contribution is a separate gradient
-conformance change. Official Native's reference renderer mixes in linear sRGB,
-while its Direct2D backend requests gamma 2.2. Start that contribution with
-cross-backend midpoint and transparent-stop fixtures, then change the Direct2D
-interpolation mode to satisfy those fixtures. Do not send Weaver's renderer
-code upstream as if it fixed an upstream fallback.
+- opaque and transparent linear;
+- Oklab and hard-stop linear;
+- arbitrary-angle and repeating linear;
+- elliptical and repeating radial;
+- conic and repeating conic;
+- layered linear plus radial;
+- bicubic mesh; and
+- degenerate line, one stop, and empty stops.
 
-### 4. Radial, then conic
+The catalog is a regression receipt. It is deliberately marked non-normative:
+the expected math and targeted tests remain independent from the renderer that
+produces the images.
 
-Radial needs a new Native paint arm, reference sampler, resource accounting,
-serialization and fingerprinting, plus native backend implementations. Conic
-needs the same model work and likely a shader-backed platform path. Build both
-in Native first so canvas and retained widgets share one implementation.
+### 2. Integration and portability
 
-### 5. Repeating and layered backgrounds
+- SDK tests pin serialization, painter order, aliases, repeating syntax,
+  malformed inputs, and resource ceilings.
+- Runtime tests pin sparse ownership, exact no-op generation behavior, bridge
+  validation, CSS conic-angle conversion, and end-to-end retained projection.
+- Desktop canvas-frame tests pin packet/resource behavior.
+- macOS Objective-C syntax checking compiles the AppKit decoder.
+- The Windows GNU cross-build compiles and links the D3D presenter tests and
+  calls `D3DCompile` on both HLSL stages. Hostile packets and over-budget stop
+  lists are rejected.
+- `examples/gradient-stack` passes both TypeScript and `weaver check`, then
+  captures through the real QuickJS bridge and Native reference renderer. The
+  current receipt is 760×460, one retained revision, 21 nodes, 30 commands,
+  349,294 non-clear pixels, two event-driven startup frames, and zero pending
+  timers, providers, fetches, images, or frame requests.
 
-Add a spread enum such as `pad` and `repeat` before creating repeating syntax.
-Add multiple background layers only after one gradient has stable geometry,
-interpolation, caching, and damage behavior.
+### 3. Performance
 
-## Acceptance receipts
+`mesh-grid-update` drives the maximum 16 retained mesh patches (256 control
+points and 64 corner colors) through rebuild, layout materialization, diff,
+binary encode, and packet present. The current Apple Silicon measurement is
+182, 206, and 277 microseconds across the three check passes: a 206-microsecond
+median p50 against a 500-microsecond regression gate.
 
-- Native full test suite is green.
-- `@sizeOf(Widget)` remains unchanged for the sparse metadata design.
-- Gradient resource counts and display-list fingerprints change only when
-  gradient data changes.
-- Transparent-stop and rounded-clip fixtures match on the reference renderer,
-  macOS, and Windows.
-- A resized arbitrary-angle gradient follows CSS gradient-line geometry.
-- A static gradient produces no timer, frame loop, or idle invalidation.
-- CPU and GPU frame timings are captured for a realistic dashboard rather than
-  a one-rectangle microbenchmark.
+That benchmark measures engine overhead, not shader time. On Windows, setting
+`NATIVE_SDK_D3D_GRADIENT_BENCH=1` enables a hardware-only D3D11 timestamp test:
 
-## Sources
+```powershell
+$env:NATIVE_SDK_D3D_GRADIENT_BENCH = "1"
+$env:NATIVE_SDK_D3D_GRADIENT_BUDGET_US = "<machine-specific-budget>"
+zig build test-windows-d3d-presenter
+```
 
-- [Native gradient paint model](https://github.com/vercel-labs/native/blob/48629b3f15c5f6b9858e2f7d45c4c3074a1816f1/src/primitives/canvas/drawing.zig)
-- [Native deterministic reference renderer](https://github.com/vercel-labs/native/blob/48629b3f15c5f6b9858e2f7d45c4c3074a1816f1/src/primitives/canvas/reference.zig)
-- [Native macOS canvas packet renderer](https://github.com/vercel-labs/native/blob/48629b3f15c5f6b9858e2f7d45c4c3074a1816f1/src/platform/macos/appkit_host.m)
-- [Native Windows Direct2D renderer](https://github.com/vercel-labs/native/blob/48629b3f15c5f6b9858e2f7d45c4c3074a1816f1/src/platform/windows/gpu_surface_renderer.cpp)
-- [Weaver fork D3D presenter](https://github.com/SunkenInTime/native/blob/df245eb82065ebddac66698829c0fc875b28257e/src/platform/windows/d3d_presenter.cpp)
-- [CSS Images Level 4 gradient model](https://drafts.csswg.org/css-images-4/#gradients)
-- [CSS Color Level 4 interpolation](https://drafts.csswg.org/css-color-4/#interpolation-space)
-- [Tailwind CSS background-image utilities](https://tailwindcss.com/docs/background-image)
+It renders a 512×512, 4×4, 16-patch Oklab mesh, warms up 8 draws, and timestamps
+64 draws with `D3D11_QUERY_TIMESTAMP` inside a disjoint query. It never uses
+WARP. There is no universal checked-in microsecond budget because GPU classes
+are not interchangeable; a known Windows runner should establish and own its
+budget. This lane compiles on macOS through the cross-build but cannot produce
+an honest hardware number there.
+
+Static gradients preserve idle-zero: they create no timer and schedule no
+frame. GPU work occurs only when a frame is already being presented.
+
+## Contribution sequence
+
+The clean upstream series is smaller and more reviewable than one giant port:
+
+1. Add shared spread/interpolation semantics and independent reference tests.
+   Bring the existing Direct2D linear path into conformance first.
+2. Add radial and conic model arms, resource/fingerprint/packet support, and
+   catalog scenes, followed by native platform fast paths.
+3. Add bicubic mesh model/reference/resource/packet support and the bounded
+   builder store.
+4. Add sparse retained background paints and bottom-to-top layer composition
+   against official Native's current widget architecture.
+5. Keep the Weaver D3D presenter patch in the fork, or propose it separately as
+   a new official backend. Do not claim it fixes official Direct2D code.
+
+Every contribution should carry its own semantic fixtures, visual catalog
+change, packet compatibility assertion, retained-footprint receipt, and focused
+benchmark. A backend is complete when it agrees with those receipts, not when
+it merely draws something gradient-like.
+
+## Primary sources
+
+- [Official Native repository](https://github.com/vercel-labs/native)
+- [Official linear paint model](https://github.com/vercel-labs/native/blob/48629b3f15c5f6b9858e2f7d45c4c3074a1816f1/src/primitives/canvas/drawing.zig)
+- [Official Direct2D renderer](https://github.com/vercel-labs/native/blob/48629b3f15c5f6b9858e2f7d45c4c3074a1816f1/src/platform/windows/gpu_surface_renderer.cpp)
+- [CSS Images gradient model](https://drafts.csswg.org/css-images-4/#gradients)
+- [CSS Color interpolation](https://drafts.csswg.org/css-color-4/#interpolation-space)
+- [Cairo mesh pattern model](https://www.cairographics.org/manual/cairo-cairo-pattern-t.html)
+- [Direct2D gradient meshes](https://learn.microsoft.com/en-us/windows/win32/api/d2d1_3/nf-d2d1_3-id2d1devicecontext2-creategradientmesh)
+- [D3D11 timestamp queries](https://learn.microsoft.com/en-us/windows/win32/api/d3d11/ne-d3d11-d3d11_query)

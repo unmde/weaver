@@ -1,5 +1,6 @@
 import "../sdk/test/class-compiler.test.mjs";
 import "../sdk/test/contract-tables.test.mjs";
+import "../sdk/test/gradients.test.mjs";
 import "../sdk/test/reconciler.test.mjs";
 import "../cli/test/dev-rebuild-loop.test.mjs";
 import "../cli/test/dev-registration.test.mjs";

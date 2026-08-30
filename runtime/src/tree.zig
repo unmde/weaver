@@ -1,5 +1,6 @@
 const std = @import("std");
 const native_sdk = @import("native_sdk");
+const gradient_mod = @import("gradients.zig");
 
 // Retained-tree receipt (2026-07-30): executing every shipped TSX example
 // measured 54 lowered nodes at worst (noro-shell). The Native SDK's realistic
@@ -39,6 +40,7 @@ pub const max_source_bytes: usize = 1024;
 // Paths allocate their exact length, so the unused allowance costs no memory.
 // Pinned by cli/src/icon-paths.ts MAX_ICON_PATH_BYTES.
 pub const max_icon_path_bytes: usize = 8 * 1024;
+pub const max_gradient_wire_bytes: usize = gradient_mod.max_wire_bytes;
 // Font discovery accepts 1..63-byte file stems and the longest shipped family
 // is 17 bytes. This is a cross-boundary format bound (not an OS path limit);
 // the inline bytes live only in lazily occupied Nodes. Pinned by
@@ -189,6 +191,10 @@ pub const Node = struct {
     /// Rare, independently-budgeted icon geometry. Keeping this heap-owned
     /// avoids adding 8 KiB to every retained node.
     icon_path: []u8 = &.{},
+    /// Canonical, validated gradient document. Rare and exact-sized so the
+    /// common retained node stays compact; decoded into the frame arena only
+    /// when the node is projected.
+    background_gradient: []u8 = &.{},
     icon_view_box: native_sdk.geometry.RectF = native_sdk.geometry.RectF.init(0, 0, 24, 24),
     icon_stroke: f32 = 0,
     image_fit: native_sdk.canvas.ImageFit = .stretch,
@@ -211,6 +217,10 @@ pub const Node = struct {
         return self.icon_path;
     }
 
+    pub fn backgroundGradientSlice(self: *const Node) []const u8 {
+        return self.background_gradient;
+    }
+
     pub fn fontFamilySlice(self: *const Node) []const u8 {
         return self.font_family[0..self.font_family_len];
     }
@@ -224,6 +234,8 @@ pub const Error = error{
     TextTooLong,
     AccessibilityLabelTooLong,
     IconPathTooLong,
+    GradientTooLong,
+    InvalidGradient,
     Cycle,
     InvalidProperty,
     CanvasLimit,
@@ -282,6 +294,7 @@ pub const Tree = struct {
             if (!self.occupied.isSet(index)) continue;
             if (entry.source.len > 0) allocator.free(entry.source);
             if (entry.icon_path.len > 0) allocator.free(entry.icon_path);
+            if (entry.background_gradient.len > 0) allocator.free(entry.background_gradient);
         }
         self.occupied = std.StaticBitSet(max_nodes).initEmpty();
     }
@@ -474,12 +487,16 @@ pub const Tree = struct {
             destination.nodes[index] = node_value.*;
             destination.nodes[index].source = &.{};
             destination.nodes[index].icon_path = &.{};
+            destination.nodes[index].background_gradient = &.{};
             destination.occupied.set(index);
             if (node_value.source.len > 0) {
                 destination.nodes[index].source = try self.allocator.dupe(u8, node_value.source);
             }
             if (node_value.icon_path.len > 0) {
                 destination.nodes[index].icon_path = try self.allocator.dupe(u8, node_value.icon_path);
+            }
+            if (node_value.background_gradient.len > 0) {
+                destination.nodes[index].background_gradient = try self.allocator.dupe(u8, node_value.background_gradient);
             }
         }
         for (&self.canvases, 0..) |*canvas, index| {
@@ -712,6 +729,17 @@ pub const Tree = struct {
         const target = try self.node(id);
         if (std.meta.eql(target.background, color)) return;
         target.background = color;
+        self.changed();
+    }
+
+    pub fn setBackgroundGradient(self: *Tree, id: NodeId, value: []const u8) Error!void {
+        if (value.len > max_gradient_wire_bytes) return error.GradientTooLong;
+        if (value.len > 0) gradient_mod.validate(value) catch return error.InvalidGradient;
+        const target = try self.node(id);
+        if (std.mem.eql(u8, target.backgroundGradientSlice(), value)) return;
+        const replacement = try self.allocator.dupe(u8, value);
+        if (target.background_gradient.len > 0) self.allocator.free(target.background_gradient);
+        target.background_gradient = replacement;
         self.changed();
     }
 
@@ -1131,6 +1159,7 @@ pub const Tree = struct {
         if (target.canvas_slot > 0) self.canvas_occupied.unset(target.canvas_slot - 1);
         if (target.source.len > 0) self.allocator.free(target.source);
         if (target.icon_path.len > 0) self.allocator.free(target.icon_path);
+        if (target.background_gradient.len > 0) self.allocator.free(target.background_gradient);
         self.occupied.unset(id - 1);
     }
 
