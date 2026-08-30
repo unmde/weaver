@@ -94,6 +94,7 @@ pub fn decode(allocator: std.mem.Allocator, bytes: []const u8) ![]const native_s
             } } };
         } else if (std.mem.eql(u8, layer.kind, "radial")) {
             const radii = try parsePoint(layer.radii orelse return error.InvalidGradient);
+            if (radii.x <= 0 or radii.y <= 0) return error.InvalidGradient;
             command.* = .{ .background_gradient = .{ .radial = .{
                 .center = try parsePoint(layer.center orelse return error.InvalidGradient),
                 .radii = .{ .width = radii.x, .height = radii.y },
@@ -179,5 +180,19 @@ test "decodes layered conic and mesh backgrounds into retained metadata" {
     switch (commands[1]) {
         .background_mesh_gradient => |mesh| try std.testing.expectEqual(@as(usize, 1), mesh.patches.len),
         else => return error.TestUnexpectedResult,
+    }
+}
+
+test "rejects non-positive radial radii before retained mutation" {
+    const invalid_documents = [_][]const u8{
+        \\{"v":1,"layers":[{"kind":"radial","center":[0.5,0.5],"radii":[0,1],"stops":[{"offset":0,"color":"#FF0000FF"},{"offset":1,"color":"#0000FFFF"}]}]}
+        ,
+        \\{"v":1,"layers":[{"kind":"radial","center":[0.5,0.5],"radii":[1,-1],"stops":[{"offset":0,"color":"#FF0000FF"},{"offset":1,"color":"#0000FFFF"}]}]}
+        ,
+    };
+    for (invalid_documents) |source| {
+        var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer arena_state.deinit();
+        try std.testing.expectError(error.InvalidGradient, decode(arena_state.allocator(), source));
     }
 }

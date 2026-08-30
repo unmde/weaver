@@ -25,6 +25,8 @@ test("typed backgrounds reject malformed and unbounded resources before native m
   assert.throws(() => serializeBackground({ type: "mesh", patches: [{ points: meshPoints.slice(0, 15), colors: ["#000", "#000", "#000", "#000"] }] }), /exactly 16 points/);
   assert.throws(() => serializeBackground(Array.from({ length: 9 }, () => ({ type: "linear", stops: [{ offset: 0, color: "#000" }, { offset: 1, color: "#fff" }] }))), /1-8 gradient layers/);
   assert.throws(() => serializeBackground({ type: "radial", radius: [Number.NaN, 1], stops: [{ offset: 0, color: "#000" }, { offset: 1, color: "#fff" }] }), /must be finite/);
+  assert.throws(() => serializeBackground({ type: "radial", radius: [0, 1], stops: [{ offset: 0, color: "#000" }, { offset: 1, color: "#fff" }] }), /greater than zero/);
+  assert.throws(() => serializeBackground({ type: "radial", radius: [1, -1], stops: [{ offset: 0, color: "#000" }, { offset: 1, color: "#fff" }] }), /greater than zero/);
 });
 
 test("gradient serialization has no browser Web API dependency", () => {

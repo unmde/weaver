@@ -106,7 +106,7 @@ alias for `bg-linear-to-*`.
 | Shape | Geometry | Default |
 | --- | --- | --- |
 | Linear | normalized `start`, `end` | `[0,.5]` to `[1,.5]` |
-| Radial | normalized `center`, elliptical `radius` | center `[.5,.5]`, radius `[.5,.5]` |
+| Radial | normalized `center`, strictly positive elliptical `radius` | center `[.5,.5]`, radius `[.5,.5]` |
 | Conic | normalized `center`, `from` angle | center `[.5,.5]`, CSS zero at twelve o'clock |
 | Mesh | 16 row-major bicubic control points and four clockwise corner colors per patch | none |
 
@@ -118,7 +118,9 @@ overlap, the later patch wins deterministically.
 
 The boundary is intentionally finite: 8 layers, 64 total one-dimensional
 stops, 16 total mesh patches, 16 control points per patch, finite coordinates
-whose absolute value is at most 1,000,000, and a 16 KiB canonical wire value.
+whose absolute value is at most 1,000,000, strictly positive radial radius
+components, and a 16 KiB canonical wire value. Zero-radius CSS degenerates are
+rejected until every backend can implement their special rendering identically.
 The SDK rejects bad inputs before an operation is emitted and the Zig bridge
 validates the same document again before retained-tree mutation.
 

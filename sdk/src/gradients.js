@@ -15,6 +15,11 @@ function point(value, fallback, label) {
   if (!Array.isArray(source) || source.length !== 2) throw new Error(`${label} must be [x, y]`);
   return [finite(source[0], `${label}[0]`), finite(source[1], `${label}[1]`)];
 }
+function positivePoint(value, fallback, label) {
+  const result = point(value, fallback, label);
+  if (result[0] <= 0 || result[1] <= 0) throw new Error(`${label} components must be greater than zero`);
+  return result;
+}
 function color(value, label) {
   if (typeof value !== "string") throw new Error(`${label} must be a hex or Tailwind color`);
   const named = tailwindColors[value];
@@ -67,7 +72,7 @@ function serializeBackground(background) {
         return {
           kind: "radial",
           center: point(layer.center, [0.5, 0.5], `${label}.center`),
-          radii: point(layer.radius, [0.5, 0.5], `${label}.radius`),
+          radii: positivePoint(layer.radius, [0.5, 0.5], `${label}.radius`),
           stops: stops(layer.stops, state, label),
           spread: spread(layer.spread),
           interpolation: interpolation(layer.interpolation)

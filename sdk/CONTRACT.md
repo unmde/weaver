@@ -223,7 +223,9 @@ The four shapes are:
 
 - `linear`: optional `start` and `end`; defaults to `[0, .5]` → `[1, .5]`.
 - `radial`: optional `center` and elliptical `radius`; defaults to `[.5, .5]`
-  and `[.5, .5]`.
+  and `[.5, .5]`. Both radius components must be greater than zero. Weaver
+  rejects CSS's zero-radius degenerate cases until every backend can render
+  those special cases identically.
 - `conic`: optional `center` and `from`; `from` is CSS-style clockwise degrees
   from twelve o'clock.
 - `mesh`: one or more bicubic patches. Each patch has sixteen row-major control
