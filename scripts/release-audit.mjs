@@ -7,7 +7,7 @@ import { dirname, extname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const expectedNativeCommit = "df245eb82065ebddac66698829c0fc875b28257e";
+const expectedNativeCommit = "8aa0e06e58a80d460f23fa45ecacf5c94d987426";
 
 function filesBelow(root) {
   const output = [];
@@ -130,9 +130,13 @@ assert.ok(
     windowsRuntime.indexOf("Build runtime (ReleaseFast)"),
   "Windows media runtime must be ready before native compilation",
 );
-assert.equal(
-  workflow.match(/-Dcpu=baseline/gu)?.length,
-  4,
+const windowsZigBuildLines = windowsRuntime.split(/\r?\n/u)
+  .map((line) => line.trim())
+  .filter((line) => line.startsWith("zig build"));
+assert.ok(windowsZigBuildLines.length > 0, "Windows CI has no native Zig build commands");
+assert.deepEqual(
+  windowsZigBuildLines.filter((line) => !line.includes("-Dcpu=baseline")),
+  [],
   "every Windows native Zig build and test must use the cross-runner cache CPU",
 );
 for (const required of ["actions/cache@v5", "ZIG_GLOBAL_CACHE_DIR", "zig-toolchain-0.16.0-"]) {

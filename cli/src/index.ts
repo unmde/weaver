@@ -315,7 +315,7 @@ async function bundleWidget(directory: string): Promise<BundleResult> {
     origins: project.config.origins ?? [],
     subscribe: project.config.subscribe ?? [],
     capabilities: project.config.capabilities ?? [],
-    renderBackend: sourceUsesCanvas(project.sourceFile) ? "gpu" : "software",
+    renderBackend: project.sourceFiles.some(sourceNeedsGpuSurface) ? "gpu" : "software",
     fonts: project.fonts,
   };
   writeAtomic(join(outputDirectory, "widget.json"), `${JSON.stringify(manifest, null, 2)}\n`);
@@ -813,11 +813,31 @@ function writeAtomic(path: string, data: string | Uint8Array): void {
   }
 }
 
-function sourceUsesCanvas(sourceFile: ts.SourceFile): boolean {
+function sourceNeedsGpuSurface(sourceFile: ts.SourceFile): boolean {
   let found = false;
   const visit = (node: ts.Node): void => {
     if (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) {
-      if (node.tagName.getText(sourceFile) === "canvas") found = true;
+      const tag = node.tagName.getText(sourceFile);
+      if (tag === "canvas") {
+        found = true;
+      } else if (["column", "row", "stack", "panel", "button"].includes(tag)) {
+        const background = node.attributes.properties.find((attribute): attribute is ts.JsxAttribute =>
+          ts.isJsxAttribute(attribute) && attribute.name.getText(sourceFile) === "background");
+        if (background) {
+          found = true;
+        } else {
+          const classAttribute = node.attributes.properties.find((attribute): attribute is ts.JsxAttribute =>
+            ts.isJsxAttribute(attribute) && attribute.name.getText(sourceFile) === "class");
+          const classText = classAttribute ? jsxStringValue(classAttribute.initializer) : "";
+          if (classText !== null) {
+            try {
+              found = compileClass(classText).backgroundGradient !== undefined;
+            } catch {
+              // The ordinary class validator reports malformed utilities.
+            }
+          }
+        }
+      }
     }
     if (!found) ts.forEachChild(node, visit);
   };

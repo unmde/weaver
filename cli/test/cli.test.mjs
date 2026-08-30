@@ -338,6 +338,30 @@ export default widget({ name: "System Card", size: [200, 100], subscribe: ["cpu"
   }
 });
 
+test("gradient-only widgets select the GPU renderer", () => {
+  const root = mkdtempSync(join(tmpdir(), "weaver-gradient-backend-"));
+  const cli = fileURLToPath(new URL("../dist/index.js", import.meta.url));
+  try {
+    assert.equal(spawnSync(process.execPath, [cli, "init", "widget"], { cwd: root, encoding: "utf8" }).status, 0);
+    const sourcePath = join(root, "widget", "widget.tsx");
+    const cases = [
+      `<panel background={{ type: "linear", stops: [{ offset: 0, color: "#000" }, { offset: 1, color: "#fff" }] }} />`,
+      `<panel class="bg-linear-to-r from-black to-white" />`,
+    ];
+    for (const body of cases) {
+      writeFileSync(sourcePath, `import { widget } from "@weaver/sdk";
+export default widget({ name: "Gradient Backend", size: [160, 80] }, () => ${body});
+`, "utf8");
+      const bundled = spawnSync(process.execPath, [cli, "bundle", join(root, "widget")], { encoding: "utf8" });
+      assert.equal(bundled.status, 0, bundled.stderr);
+      const manifest = JSON.parse(readFileSync(join(root, "widget", "dist", "widget.json"), "utf8"));
+      assert.equal(manifest.renderBackend, "gpu", body);
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("media transport capability gate follows SDK signatures through every binding form", () => {
   const root = mkdtempSync(join(tmpdir(), "weaver-media-capability-"));
   const widget = join(root, "transport");

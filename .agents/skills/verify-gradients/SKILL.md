@@ -33,6 +33,7 @@ PATH=/Users/dara/.cargo/bin:/opt/homebrew/bin:$PATH zig fmt <changed-zig-files>
 PATH=/Users/dara/.cargo/bin:/opt/homebrew/bin:$PATH zig build test
 PATH=/Users/dara/.cargo/bin:/opt/homebrew/bin:$PATH zig build gradient-reference -- /tmp/weaver-gradient-reference
 PATH=/Users/dara/.cargo/bin:/opt/homebrew/bin:$PATH zig build bench-render -Doptimize=ReleaseFast -- --scenario gradient-grid-update --check tools/bench-render-budgets.txt
+PATH=/Users/dara/.cargo/bin:/opt/homebrew/bin:$PATH zig build bench-render -Doptimize=ReleaseFast -- --scenario mesh-grid-update --check tools/bench-render-budgets.txt
 ```
 
 Open at least the changed catalog PNGs. Read `manifest.json`; it is a
@@ -68,9 +69,10 @@ test rather than in prose.
 - macOS live renderer: use automation profiling and GPU frame trace against a
   real gradient catalog window; record CPU encode, host decode/draw, command
   buffer GPU duration, upload bytes, and steady process memory.
-- Windows live renderer: run the matching catalog through `tools/windows-truth`
-  and record D3D timestamp/disjoint GPU duration, CPU present time, upload
-  bytes, and process memory.
+- Windows live renderer: run `scripts/verify-gradient-gpu.ps1` from the Weaver
+  root. Keep its result ZIP. It records the D3D timestamp/disjoint duration,
+  selected hardware adapter, live GPU backend, screenshot, settled CPU, and
+  process memory.
 - Run trunk and candidate interleaved at least three times. Report medians and
   p90; do not infer host GPU cost from the null-platform macrobenchmark.
 - Leave the catalog static for an idle observation. It must schedule no timer,

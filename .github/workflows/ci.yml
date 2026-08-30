@@ -233,6 +233,21 @@ jobs:
           zig build -Dcpu=baseline -Doptimize=ReleaseFast
           zig build test -Dcpu=baseline -Doptimize=ReleaseFast
 
+      - name: Parse Windows gradient verification handoff
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path '.\scripts\verify-gradient-gpu.ps1'),
+            [ref]$tokens,
+            [ref]$errors
+          ) | Out-Null
+          if ($errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Error $_.Message }
+            exit 1
+          }
+
       - name: Portable install ownership smoke
         shell: pwsh
         run: .\cli\test\install-smoke.ps1
