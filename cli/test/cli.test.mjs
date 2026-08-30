@@ -389,6 +389,26 @@ export default widget({ name: "Barrel Gradient Backend", size: [160, 80] }, () =
     assert.equal(barrel.status, 0, barrel.stderr);
     const barrelManifest = JSON.parse(readFileSync(join(root, "widget", "dist", "widget.json"), "utf8"));
     assert.equal(barrelManifest.renderBackend, "gpu", "barrel-re-exported gradient source");
+
+    const hCases = [
+      [`import { h, widget } from "@weaver/sdk";
+export default widget({ name: "h Background", size: [160, 80] }, () => h("panel", { background: { type: "linear", stops: [{ offset: 0, color: "#000" }, { offset: 1, color: "#fff" }] } }));
+`, "h() typed gradient background"],
+      [`import { h as create, widget } from "@weaver/sdk";
+export default widget({ name: "h Class", size: [160, 80] }, () => create("panel", { class: "bg-linear-to-r from-black to-white" }));
+`, "aliased h() gradient class"],
+      [`import { widget } from "@weaver/sdk";
+import * as Weaver from "@weaver/sdk";
+export default widget({ name: "h Canvas", size: [160, 80] }, () => Weaver.h("canvas", { class: "w-[160px] h-[80px]" }));
+`, "namespace h() canvas"],
+    ];
+    for (const [source, label] of hCases) {
+      writeFileSync(sourcePath, source, "utf8");
+      const bundled = spawnSync(process.execPath, [cli, "bundle", join(root, "widget")], { encoding: "utf8" });
+      assert.equal(bundled.status, 0, bundled.stderr);
+      const manifest = JSON.parse(readFileSync(join(root, "widget", "dist", "widget.json"), "utf8"));
+      assert.equal(manifest.renderBackend, "gpu", label);
+    }
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

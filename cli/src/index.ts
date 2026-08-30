@@ -814,6 +814,58 @@ function writeAtomic(path: string, data: string | Uint8Array): void {
 }
 
 function sourceNeedsGpuSurface(sourceFile: ts.SourceFile): boolean {
+  const hIdentifiers = new Set(["h"]);
+  const hNamespaces = new Set<string>();
+  for (const statement of sourceFile.statements) {
+    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier) ||
+      statement.moduleSpecifier.text !== "@weaver/sdk" || !statement.importClause) continue;
+    const bindings = statement.importClause.namedBindings;
+    if (bindings && ts.isNamedImports(bindings)) {
+      for (const binding of bindings.elements) {
+        if ((binding.propertyName?.text ?? binding.name.text) === "h") hIdentifiers.add(binding.name.text);
+      }
+    } else if (bindings && ts.isNamespaceImport(bindings)) {
+      hNamespaces.add(bindings.name.text);
+    }
+  }
+  const isHCall = (node: ts.CallExpression): boolean => {
+    if (ts.isIdentifier(node.expression)) return hIdentifiers.has(node.expression.text);
+    if (ts.isPropertyAccessExpression(node.expression)) {
+      return ts.isIdentifier(node.expression.expression) &&
+        hNamespaces.has(node.expression.expression.text) && node.expression.name.text === "h";
+    }
+    if (ts.isElementAccessExpression(node.expression)) {
+      return ts.isIdentifier(node.expression.expression) &&
+        hNamespaces.has(node.expression.expression.text) &&
+        node.expression.argumentExpression !== undefined &&
+        ts.isStringLiteral(node.expression.argumentExpression) &&
+        node.expression.argumentExpression.text === "h";
+    }
+    return false;
+  };
+  const propertyName = (name: ts.PropertyName): string | null => {
+    if (ts.isIdentifier(name) || ts.isStringLiteral(name) || ts.isNumericLiteral(name)) return name.text;
+    if (ts.isComputedPropertyName(name) && ts.isStringLiteral(name.expression)) return name.expression.text;
+    return null;
+  };
+  const hPropsNeedGpu = (tag: string, props: ts.Expression | undefined): boolean => {
+    if (tag === "canvas") return true;
+    if (!["column", "row", "stack", "panel", "button"].includes(tag) ||
+      !props || !ts.isObjectLiteralExpression(props)) return false;
+    if (props.properties.some((property) =>
+      (ts.isPropertyAssignment(property) || ts.isShorthandPropertyAssignment(property)) &&
+      propertyName(property.name) === "background")) return true;
+    const classProperty = props.properties.find((property): property is ts.PropertyAssignment =>
+      ts.isPropertyAssignment(property) && propertyName(property.name) === "class");
+    if (!classProperty ||
+      (!ts.isStringLiteral(classProperty.initializer) && !ts.isNoSubstitutionTemplateLiteral(classProperty.initializer))) return false;
+    try {
+      return compileClass(classProperty.initializer.text).backgroundGradient !== undefined;
+    } catch {
+      // The ordinary class validator reports malformed utilities.
+      return false;
+    }
+  };
   let found = false;
   const visit = (node: ts.Node): void => {
     if (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) {
@@ -837,6 +889,12 @@ function sourceNeedsGpuSurface(sourceFile: ts.SourceFile): boolean {
             }
           }
         }
+      }
+    }
+    if (!found && ts.isCallExpression(node) && isHCall(node)) {
+      const tag = node.arguments[0];
+      if (tag && (ts.isStringLiteral(tag) || ts.isNoSubstitutionTemplateLiteral(tag))) {
+        found = hPropsNeedGpu(tag.text, node.arguments[1]);
       }
     }
     if (!found) ts.forEachChild(node, visit);
