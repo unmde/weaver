@@ -41,22 +41,34 @@ both PR heads are pushed. Do not stop after compilation or `backend=gpu`.
 
 ## Current Windows work
 
-The 2026-08-30 v1 receipt proved that the RTX 4070 created and presented a
-shared D3D11 surface, but it also exposed two verifier defects that v2 now
-rejects:
+The previous v2 receipt passed on an RTX 4070 after the Windows implementation
+fixed D3D bootstrap, transformed conic axes, hybrid presentation invalidation,
+the standalone hardware benchmark, and DirectComposition capture through
+Windows Graphics Capture. Preserve those fixes; do not return to desktop
+`CopyFromScreen`, WARP, a CPU widget backend, or ambiguous build-run steps.
 
-- `zig build test-windows-d3d-presenter` returned exit code zero while its log
-  ended with `failed command:`. Give the hardware benchmark an unambiguous
-  execution path and preserve the decoder and shader tests.
-- `Graphics.CopyFromScreen` captured the desktop behind the
-  `WS_EX_NOREDIRECTIONBITMAP` DirectComposition window. Implement a capture
-  path that sees the composed window, most likely Windows Graphics Capture or
-  another DWM-backed API. Do not remove the production no-redirection style,
-  demote the widget to CPU, or lower the new reference-similarity gate to make
-  the receipt pass.
+This rerun closes the two changes made after that receipt:
 
-Treat those as starting diagnoses, not prescribed patches. Prove the actual
-cause on the Windows machine before choosing the implementation.
+- Native moved large renderer scratch buffers out of static TLS. Confirm the
+  Windows host still starts cleanly and record the settled working set.
+- Asymmetric corner overrides moved from every hot `WidgetStyle` into rare
+  retained metadata. Confirm the complete mixed-content showcase still renders
+  correctly and the receipt remains 57/57.
+
+Start from the pushed branch heads, not hashes copied from an older receipt.
+Before every full run, require both diff checks to exit zero, the two Weaver
+heads to match, and all three Native heads to match. If another agent pushed a
+fix, fetch and repeat them:
+
+```powershell
+git diff --exit-code
+git -C runtime/native-sdk diff --exit-code
+git rev-parse HEAD
+git rev-parse origin/agent/gradient-exploration
+git -C runtime/native-sdk rev-parse HEAD
+git -C runtime/native-sdk rev-parse origin/agent/windows-gradient-gpu-spike
+git rev-parse HEAD:runtime/native-sdk
+```
 
 ## What the run proves
 
