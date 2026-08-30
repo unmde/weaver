@@ -57,10 +57,12 @@ $Example = Join-Path $RepoRoot "examples\gradient-stack"
 $StateRoot = Join-Path $OutputDirectory "state"
 $ResultPath = Join-Path $OutputDirectory "results.json"
 $ArchivePath = "$OutputDirectory.zip"
+$DpiLogPath = Join-Path $OutputDirectory "windows-dpi.log"
 $priorLocalAppData = [Environment]::GetEnvironmentVariable("LOCALAPPDATA", "Process")
 $priorForceSoftware = [Environment]::GetEnvironmentVariable("WEAVER_FORCE_SOFTWARE", "Process")
 $priorGradientBench = [Environment]::GetEnvironmentVariable("NATIVE_SDK_D3D_GRADIENT_BENCH", "Process")
 $priorGradientBudget = [Environment]::GetEnvironmentVariable("NATIVE_SDK_D3D_GRADIENT_BUDGET_US", "Process")
+$priorDpiLog = [Environment]::GetEnvironmentVariable("WEAVER_DPI_LOG", "Process")
 $failure = $null
 $widgetStarted = $false
 
@@ -281,6 +283,7 @@ try {
     Invoke-Recorded "gradient-reference-capture" $RepoRoot "node" @($Cli, "capture", $Example, "--out", (Join-Path $OutputDirectory $referenceName)) | Out-Null
     [IO.Directory]::CreateDirectory($StateRoot) | Out-Null
     $env:LOCALAPPDATA = $StateRoot
+    $env:WEAVER_DPI_LOG = $DpiLogPath
     Remove-Item Env:WEAVER_FORCE_SOFTWARE -ErrorAction SilentlyContinue
     Invoke-Recorded "gradient-example-install" $RepoRoot "node" @($Cli, "install", $Example) | Out-Null
     $widgetStarted = $true
@@ -288,12 +291,16 @@ try {
         $status = Read-Status
         if ($null -eq $status) { return $false }
         $widget = @($status.widgets | Where-Object { $_.name -eq "Gradient Stack" }) | Select-Object -First 1
-        return $null -ne $widget -and $widget.pid -gt 0 -and $widget.state -eq "running" -and $widget.backend -eq "gpu"
-    } "Gradient Stack running on the GPU"
+        if ($null -eq $widget -or $widget.pid -le 0 -or $widget.state -ne "running" -or $widget.backend -ne "gpu" -or -not (Test-Path $DpiLogPath)) { return $false }
+        $dpiLog = Get-Content $DpiLogPath -Raw
+        return $dpiLog -match "renderer-surface .* widget=$([int]$widget.pid) .* action=(created|resized-recreated|resized-reused|geometry-reused)"
+    } "Gradient Stack completing a shared D3D11 presentation"
     $status = Read-Status
     $widget = @($status.widgets | Where-Object { $_.name -eq "Gradient Stack" }) | Select-Object -First 1
     $renderer = @($status.widgets | Where-Object { $_.name -eq "renderer" }) | Select-Object -First 1
     Add-Check "gradient-live-backend" ($widget.backend -eq "gpu") "pid=$($widget.pid) backend=$($widget.backend)"
+    $dpiEvidence = Get-Content $DpiLogPath -Raw
+    Add-Check "gradient-live-d3d-completion" ($dpiEvidence -match "renderer-surface .* widget=$([int]$widget.pid) .* action=(created|resized-recreated|resized-reused|geometry-reused)") "windows-dpi.log contains the widget's completed shared surface"
     $rendererPid = if ($null -eq $renderer) { 0 } else { [int]$renderer.pid }
     Add-Check "gradient-shared-renderer" ($rendererPid -gt 0) "rendererPid=$rendererPid"
     $hwnd = [WeaverGradientWin32]::FindWindow([uint32]$widget.pid, "Gradient Stack")
@@ -308,6 +315,7 @@ try {
         reference = $referenceName
         screenshot = $screenshotName
         capture = $capture
+        dpiLog = "windows-dpi.log"
         idleProcessSample = $processSample
         status = $status
     }
@@ -332,6 +340,7 @@ try {
     Restore-ProcessEnvironment "WEAVER_FORCE_SOFTWARE" $priorForceSoftware
     Restore-ProcessEnvironment "NATIVE_SDK_D3D_GRADIENT_BENCH" $priorGradientBench
     Restore-ProcessEnvironment "NATIVE_SDK_D3D_GRADIENT_BUDGET_US" $priorGradientBudget
+    Restore-ProcessEnvironment "WEAVER_DPI_LOG" $priorDpiLog
     $results.finishedUtc = [DateTime]::UtcNow.ToString("o")
     [IO.File]::WriteAllText($ResultPath, ($results | ConvertTo-Json -Depth 12))
     if (Test-Path $ArchivePath) { Remove-Item -LiteralPath $ArchivePath -Force }

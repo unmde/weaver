@@ -12,9 +12,10 @@ independent GPU timestamp samples for the worst current paint, a 512 by 512
 Oklab mesh with 16 patches. It also installs the complete gradient showcase,
 requires the live status to report `backend=gpu`, captures both the reference
 renderer and the real window, and records a ten-second settled CPU and memory
-sample. Every showcase panel also carries retained label text and a text
-shadow above its gradient, so `backend: "gpu"` proves the mixed-content path
-did not demote the frame.
+sample. It does not accept the status marker alone: `windows-dpi.log` must also
+record the widget's completed shared D3D11 surface. Every showcase panel also
+carries retained label text and a text shadow above its gradient, so the pair
+of receipts proves the mixed-content path did not demote the frame.
 
 The D3D test calls `D3D11CreateDevice` with `D3D_DRIVER_TYPE_HARDWARE` and
 rejects adapters marked `DXGI_ADAPTER_FLAG_SOFTWARE`. WARP is not an accepted
@@ -63,9 +64,9 @@ The final console line prints a ZIP path like:
 ```
 
 Return that ZIP without unpacking or editing it. It contains `results.json`,
-the real GPU window capture, and each command log. A failed run still writes a
-ZIP, so return it as-is instead of retrying blindly. The failure evidence is
-usually more useful than a clean second attempt.
+the real GPU window capture, `windows-dpi.log`, and each command log. A failed
+run still writes a ZIP, so return it as-is instead of retrying blindly. The
+failure evidence is usually more useful than a clean second attempt.
 
 The acceptance gate is:
 
@@ -74,7 +75,9 @@ The acceptance gate is:
 - all timestamp samples name one stable hardware adapter and contain finite
   microseconds per draw;
 - the bundled showcase selects `renderBackend: "gpu"`;
-- the live widget reports `backend: "gpu"`; and
+- the live widget reports `backend: "gpu"`;
+- `windows-dpi.log` records a completed shared-renderer surface for that exact
+  widget PID;
 - every panel label and text shadow remains visible above its GPU gradient;
 - `gradient-stack-gpu.png` visibly agrees with
   `gradient-stack-reference.png` for the linear, radial, conic, repeating,
