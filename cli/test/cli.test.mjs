@@ -373,6 +373,22 @@ export default widget({ name: "Nested Gradient Backend", size: [160, 80] }, () =
     assert.equal(nested.status, 0, nested.stderr);
     const nestedManifest = JSON.parse(readFileSync(join(root, "widget", "dist", "widget.json"), "utf8"));
     assert.equal(nestedManifest.renderBackend, "gpu", "transitively imported gradient source");
+
+    mkdirSync(join(root, "widget", "components"));
+    writeFileSync(join(root, "widget", "components", "Gradient.tsx"), `export function Gradient() {
+  return <panel class="bg-linear-to-r from-black to-white" />;
+}
+`, "utf8");
+    writeFileSync(join(root, "widget", "components", "index.ts"), `export { Gradient } from "./Gradient";
+`, "utf8");
+    writeFileSync(sourcePath, `import { widget } from "@weaver/sdk";
+import { Gradient } from "./components";
+export default widget({ name: "Barrel Gradient Backend", size: [160, 80] }, () => <Gradient />);
+`, "utf8");
+    const barrel = spawnSync(process.execPath, [cli, "bundle", join(root, "widget")], { encoding: "utf8" });
+    assert.equal(barrel.status, 0, barrel.stderr);
+    const barrelManifest = JSON.parse(readFileSync(join(root, "widget", "dist", "widget.json"), "utf8"));
+    assert.equal(barrelManifest.renderBackend, "gpu", "barrel-re-exported gradient source");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

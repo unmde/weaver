@@ -1517,7 +1517,8 @@ function loadLocalImports(directory: string, entry: ts.SourceFile): ts.SourceFil
   for (let index = 0; index < files.length; index += 1) {
     const importer = files[index]!;
     for (const statement of importer.statements) {
-      if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)) continue;
+      if ((!ts.isImportDeclaration(statement) && !ts.isExportDeclaration(statement)) ||
+        !statement.moduleSpecifier || !ts.isStringLiteral(statement.moduleSpecifier)) continue;
       const path = localImportPath(directory, importer, statement.moduleSpecifier.text);
       if (!path || loaded.has(resolve(path))) continue;
       loaded.add(resolve(path));
