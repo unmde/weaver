@@ -734,7 +734,9 @@ fn projectSameViewUpdate(
         // the batch API carries a composed metadata tail, keep their exact
         // semantics by taking the ordinary rebuild path.
         if (!node.hover_style.isEmpty() or !node.pressed_style.isEmpty() or
-            node.shadow != null or node.text_shadow != null or node.iconPathSlice().len != 0)
+            node.shadow != null or node.text_shadow != null or node.iconPathSlice().len != 0 or
+            node.radius_top_left >= 0 or node.radius_top_right >= 0 or
+            node.radius_bottom_right >= 0 or node.radius_bottom_left >= 0)
         {
             return false;
         }
@@ -796,6 +798,12 @@ fn nativeInteractionStyle(style: tree_mod.InteractionStyle) ?native_sdk.canvas.W
 
 fn attachEffects(ui: *WidgetUi, retained: *const tree_mod.Node, font_id: ?native_sdk.canvas.FontId, source: WidgetUi.Node) WidgetUi.Node {
     var icon_elements: ?[]const native_sdk.canvas.PathElement = null;
+    const corner_radii: native_sdk.canvas.WidgetCornerRadii = .{
+        .top_left = nativeCornerRadius(retained.radius_top_left),
+        .top_right = nativeCornerRadius(retained.radius_top_right),
+        .bottom_right = nativeCornerRadius(retained.radius_bottom_right),
+        .bottom_left = nativeCornerRadius(retained.radius_bottom_left),
+    };
     const gradient_commands = gradient_mod.decode(ui.arena, retained.backgroundGradientSlice()) catch |err| block: {
         if (retained.backgroundGradientSlice().len > 0) noteProjectionFailure("widget gradient projection failed: cause={s}", .{@errorName(err)});
         break :block &.{};
@@ -820,6 +828,7 @@ fn attachEffects(ui: *WidgetUi, retained: *const tree_mod.Node, font_id: ?native
         @as(usize, @intFromBool(retained.text_shadow != null)) +
         @as(usize, @intFromBool(font_id != null)) +
         @as(usize, @intFromBool(icon_elements != null)) +
+        @as(usize, @intFromBool(!corner_radii.isDefault())) +
         gradient_commands.len;
     if (count == 0) return source;
     const existing = source.widget.immediate_commands;
@@ -849,13 +858,19 @@ fn attachEffects(ui: *WidgetUi, retained: *const tree_mod.Node, font_id: ?native
         combined[cursor] = .{ .text_font = id };
         cursor += 1;
     }
+    if (!corner_radii.isDefault()) {
+        combined[cursor] = .{ .corner_radii = corner_radii };
+        cursor += 1;
+    }
     if (icon_elements) |elements| {
         combined[cursor] = .{ .icon_path = .{
             .view_box = retained.icon_view_box,
             .elements = elements,
             .stroke_width = retained.icon_stroke,
         } };
+        cursor += 1;
     }
+    std.debug.assert(cursor == combined.len);
     var result = source;
     result.widget.immediate_commands = combined;
     return result;
@@ -925,10 +940,6 @@ fn buildNode(ui: *WidgetUi, model: *const Model, id: tree_mod.NodeId, is_root: b
             .background = retained.background,
             .foreground = retained.text_color,
             .radius = if (retained.radius > 0) retained.radius else null,
-            .radius_top_left = nativeCornerRadius(retained.radius_top_left),
-            .radius_top_right = nativeCornerRadius(retained.radius_top_right),
-            .radius_bottom_right = nativeCornerRadius(retained.radius_bottom_right),
-            .radius_bottom_left = nativeCornerRadius(retained.radius_bottom_left),
             .border = retained.border_color,
             .stroke_width = retained.border_width,
             .quiet_hover = true,
@@ -1108,8 +1119,8 @@ fn loadFonts(io: std.Io, allocator: std.mem.Allocator, directory: []const u8, fo
     return registrations;
 }
 
-fn nativeCornerRadius(retained: f32) f32 {
-    return if (retained >= 0) retained else -std.math.inf(f32);
+fn nativeCornerRadius(retained: f32) ?f32 {
+    return if (retained >= 0) retained else null;
 }
 
 fn loadLocalImages(io: std.Io, allocator: std.mem.Allocator, directory: []const u8, model: *Model) !void {
@@ -2146,9 +2157,9 @@ test "media command deadline one-shot is exactly three seconds" {
     try std.testing.expectEqual(@as(u64, 1), mediaDeadlineDelay(3100, 3100));
 }
 
-test "corner radius projection preserves authored values and maps retained unset in-band" {
-    try std.testing.expectEqual(@as(f32, 12.5), nativeCornerRadius(12.5));
-    try std.testing.expect(nativeCornerRadius(-1) == -std.math.inf(f32));
+test "corner radius projection preserves authored values and omits retained unset" {
+    try std.testing.expectEqual(@as(?f32, 12.5), nativeCornerRadius(12.5));
+    try std.testing.expectEqual(@as(?f32, null), nativeCornerRadius(-1));
 }
 
 test "painted row lowering preserves flex wrap on the inner layout node" {
@@ -2417,10 +2428,14 @@ test "painted retained stack keeps overlay children under rounded inset shadow" 
     try std.testing.expectEqual(native_sdk.canvas.WidgetKind.panel, built.root.kind);
     try std.testing.expect(built.root.layout.flags.clip_content);
     try std.testing.expectEqual(@as(?f32, 14), built.root.style.radius);
-    try std.testing.expectEqual(@as(?f32, 3), built.root.style.radius_bottom_left);
-    try std.testing.expectEqual(@as(usize, 1), built.root.immediate_commands.len);
+    try std.testing.expectEqual(@as(?f32, 3), built.root.cornerRadii().bottom_left);
+    try std.testing.expectEqual(@as(usize, 2), built.root.immediate_commands.len);
     switch (built.root.immediate_commands[0]) {
         .box_shadow => |shadow| try std.testing.expect(shadow.inset),
+        else => return error.TestExpectedEqual,
+    }
+    switch (built.root.immediate_commands[1]) {
+        .corner_radii => |radii| try std.testing.expectEqual(@as(?f32, 3), radii.bottom_left),
         else => return error.TestExpectedEqual,
     }
     try std.testing.expectEqual(@as(usize, 1), built.root.children.len);
@@ -2510,5 +2525,5 @@ test "retained image projects fit tiling and class corner radii" {
     try std.testing.expectEqual(native_sdk.canvas.ImageFit.contain, projected.widget.image_fit);
     try std.testing.expect(projected.widget.image_tile);
     try std.testing.expectEqual(@as(?f32, 12), projected.widget.style.radius);
-    try std.testing.expectEqual(@as(?f32, 3), projected.widget.style.radius_top_right);
+    try std.testing.expectEqual(@as(?f32, 3), projected.widget.cornerRadii().top_right);
 }
