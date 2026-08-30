@@ -227,6 +227,12 @@ jobs:
           zig build -Dcpu=baseline -Doptimize=ReleaseFast
           zig build test -Dcpu=baseline -Doptimize=ReleaseFast
 
+      - name: Build and test shared renderer
+        working-directory: renderer
+        run: |
+          zig build -Dcpu=baseline -Doptimize=ReleaseFast
+          zig build test -Dcpu=baseline -Doptimize=ReleaseFast
+
       - name: Portable install ownership smoke
         shell: pwsh
         run: .\cli\test\install-smoke.ps1

@@ -167,11 +167,37 @@ successfully.
 
 ### 3. Windows D3D fast path
 
-The Weaver fork currently routes gradient packets through the correct CPU
-fallback. Keep that correctness fallback, but add gradient parameters and a
-real shader or brush path before treating gradients as performance-complete.
-Static gradients must retain Weaver's idle-zero behavior and should only
-invalidate on paint, size, or interaction-state changes.
+The fallback belongs to Weaver's custom shared D3D renderer, not official
+Native. Git history traces it to the first Weaver D3D presenter commit. The
+official Windows renderer uses Direct2D and already creates linear-gradient
+brushes.
+
+The follow-up spike removes that fallback for the D3D presenter's supported
+shape set. It adds:
+
+- one structured stop buffer shared by the frame's gradient instances;
+- stop offset and count metadata on each instance, without duplicating stops
+  for a polyline's segments;
+- the full 64-stop per-view budget rather than a two-color shortcut;
+- linear-sRGB color interpolation followed by output premultiplication, which
+  matches Native's deterministic reference renderer for transparent stops;
+- retained-patch rebasing so a command's stop indices remain correct when the
+  host rebuilds draw order; and
+- a Windows test that decodes a three-stop packet command, rejects a hostile
+  65-stop paint, and compiles both HLSL stages with `D3DCompile`.
+
+Static gradients retain Weaver's idle-zero behavior. They do no work until a
+frame is already being presented. Unsupported clips, transforms, stroked
+rounded rectangles, curves, images, text, and effects still refuse the packet
+and use the existing pixel fallback.
+
+This exact D3D patch is a Weaver contribution because official Native does not
+use this presenter. The useful upstream contribution is a separate gradient
+conformance change. Official Native's reference renderer mixes in linear sRGB,
+while its Direct2D backend requests gamma 2.2. Start that contribution with
+cross-backend midpoint and transparent-stop fixtures, then change the Direct2D
+interpolation mode to satisfy those fixtures. Do not send Weaver's renderer
+code upstream as if it fixed an upstream fallback.
 
 ### 4. Radial, then conic
 
