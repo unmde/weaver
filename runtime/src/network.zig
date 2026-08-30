@@ -116,12 +116,13 @@ pub fn perform(request: *const Request, allocator: std.mem.Allocator) Result {
 
 fn performWithTimeout(request: *const Request, allocator: std.mem.Allocator, exchange_timeout_ms: c_int) Result {
     if (!requestWithinCap(request.url.len, request.headers.len, request.body.len)) return .{ .failure = .request_too_large };
+    // The Linux null-backend lane verifies parsing, bounds, and ownership;
+    // it must never grow an accidental production transport.
+    if (builtin.os.tag != .windows and builtin.os.tag != .macos) return .{ .failure = .request_failed };
     const result = if (builtin.os.tag == .windows)
         performWindowsFallible(request, allocator, exchange_timeout_ms)
-    else if (builtin.os.tag == .macos)
-        performMacFallible(request, allocator, exchange_timeout_ms)
     else
-        error.RequestFailed;
+        performMacFallible(request, allocator, exchange_timeout_ms);
     return result catch |err| .{ .failure = failureFromError(err) };
 }
 

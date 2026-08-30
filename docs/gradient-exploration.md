@@ -208,6 +208,12 @@ produces the images.
   malformed inputs, and resource ceilings.
 - Runtime tests pin sparse ownership, exact no-op generation behavior, bridge
   validation, CSS conic-angle conversion, and end-to-end retained projection.
+- Linux CI executes that complete runtime suite with `-Dplatform=null`. This is
+  a portable verification host, not a shipped Linux runtime: the build rejects
+  Linux unless the null backend is explicit, links no GTK/window system, and
+  fails network transport closed. Cross-target reviewers can compile the same
+  test artifact with `zig build test-compile -Dtarget=x86_64-linux-gnu
+  -Dplatform=null` without trying to execute a foreign binary.
 - Desktop canvas-frame tests pin packet/resource behavior.
 - macOS Objective-C syntax checking compiles the AppKit decoder.
 - The Windows GNU cross-build compiles and links the D3D presenter tests and

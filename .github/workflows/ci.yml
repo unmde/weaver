@@ -10,6 +10,29 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  linux-runtime-contracts:
+    name: Linux portable runtime contracts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      # Linux is a test executor, not a shipped Weaver host. The explicit
+      # null backend runs the retained tree, gradient projection, QuickJS,
+      # provider framing, and ownership tests without GTK or a window server.
+      - name: Runtime platform-service seam
+        working-directory: runtime
+        run: zig build test-platform-services -Dplatform=null
+
+      - name: Runtime retained contracts
+        working-directory: runtime
+        run: zig build test -Dplatform=null -Dweb-layer=exclude -Dtrace=off
+
   windows-cli:
     name: Windows CLI and portable contracts
     runs-on: blacksmith-4vcpu-windows-2025

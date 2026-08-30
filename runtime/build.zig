@@ -33,8 +33,13 @@ pub fn build(b: *std.Build) void {
     }
     const target = artifacts.exe.root_module.resolved_target.?;
     const os_tag = target.result.os.tag;
-    if (os_tag != .windows and os_tag != .macos) {
-        @panic("weaver-widget currently supports only Windows and macOS targets");
+    // Linux is a verification host only. Requiring the Native SDK's null
+    // backend keeps this lane honest: it can execute the complete retained
+    // tree/gradient suite without quietly presenting Linux as a shipped
+    // Weaver runtime or pulling GTK into the portable contract.
+    const portable_verification_host = os_tag == .linux and artifacts.backend == .null;
+    if (os_tag != .windows and os_tag != .macos and !portable_verification_host) {
+        @panic("weaver-widget ships only on Windows and macOS; use -Dplatform=null for portable Linux verification");
     }
     const c_flags: []const []const u8 = switch (os_tag) {
         .windows => &.{
@@ -48,6 +53,11 @@ pub fn build(b: *std.Build) void {
         .macos => &.{
             "-std=c11",
             "-funsigned-char",
+        },
+        .linux => &.{
+            "-std=c11",
+            "-funsigned-char",
+            "-D_GNU_SOURCE",
         },
         else => unreachable,
     };
@@ -63,6 +73,11 @@ pub fn build(b: *std.Build) void {
         addQuickJs(b, artifacts.tests, sources, c_flags);
         addPlatformLinkage(b, artifacts.tests, os_tag, true);
     }
+    // Cross-target reviewers can compile the complete test artifact without
+    // trying to execute a foreign binary. Native Linux CI uses the ordinary
+    // `test` step; this step is the local proof that the same graph builds.
+    const test_compile_step = b.step("test-compile", "Compile tests without running them");
+    test_compile_step.dependOn(&artifacts.tests.step);
 
     const platform_tests = b.addTest(.{
         .root_module = b.createModule(.{
@@ -108,6 +123,10 @@ fn addPlatformLinkage(b: *std.Build, compile: *std.Build.Step.Compile, os_tag: s
             compile.root_module.linkFramework("Foundation", .{});
             compile.root_module.linkFramework("Security", .{});
         },
+        // The only admitted Linux configuration is the null-backend
+        // verification lane above. QuickJS still links libc in addQuickJs;
+        // there is deliberately no window-system or web-layer linkage.
+        .linux => {},
         else => unreachable,
     }
 }

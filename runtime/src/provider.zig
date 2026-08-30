@@ -4,8 +4,10 @@ const provider_protocol = @import("provider_protocol.zig");
 
 const implementation = switch (builtin.os.tag) {
     .windows => @import("provider_windows.zig"),
-    .macos => @import("provider_macos.zig"),
-    else => @compileError("Weaver providers support only Windows and macOS"),
+    // provider_macos is the POSIX Unix-domain-socket transport; the Linux
+    // null-backend verification host exercises the same framing and queues.
+    .macos, .linux => @import("provider_macos.zig"),
+    else => @compileError("Weaver providers support Windows, macOS, and the Linux null-backend verification host"),
 };
 
 pub const Client = implementation.Client;
