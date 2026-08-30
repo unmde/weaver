@@ -1477,7 +1477,7 @@ function loadProject(directory: string): SourceProject {
   const extractionErrors: string[] = [];
   const config = extractConfig(sourceFile, extractionErrors);
   if (extractionErrors.length > 0 || !config) throw new WeaverFailure(extractionErrors);
-  const sourceFiles = loadDirectLocalImports(directory, sourceFile);
+  const sourceFiles = loadLocalImports(directory, sourceFile);
   const usesIcons = sourceFiles.some(sourceUsesIcon);
   return {
     directory,
@@ -1508,16 +1508,22 @@ function localImportPath(directory: string, importer: ts.SourceFile, specifier: 
   return null;
 }
 
-function loadDirectLocalImports(directory: string, entry: ts.SourceFile): ts.SourceFile[] {
+function loadLocalImports(directory: string, entry: ts.SourceFile): ts.SourceFile[] {
   const files = [entry];
   const loaded = new Set([resolve(entry.fileName)]);
-  for (const statement of entry.statements) {
-    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)) continue;
-    const path = localImportPath(directory, entry, statement.moduleSpecifier.text);
-    if (!path || loaded.has(resolve(path))) continue;
-    loaded.add(resolve(path));
-    const source = readFileSync(path, "utf8");
-    files.push(ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true, path.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS));
+  // Walking the growing array keeps the complete local graph deterministic
+  // without recursive call-stack depth. The loaded set also makes cycles and
+  // diamond imports cost one parse per source file.
+  for (let index = 0; index < files.length; index += 1) {
+    const importer = files[index]!;
+    for (const statement of importer.statements) {
+      if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)) continue;
+      const path = localImportPath(directory, importer, statement.moduleSpecifier.text);
+      if (!path || loaded.has(resolve(path))) continue;
+      loaded.add(resolve(path));
+      const source = readFileSync(path, "utf8");
+      files.push(ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true, path.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS));
+    }
   }
   return files;
 }

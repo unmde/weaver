@@ -357,6 +357,22 @@ export default widget({ name: "Gradient Backend", size: [160, 80] }, () => ${bod
       const manifest = JSON.parse(readFileSync(join(root, "widget", "dist", "widget.json"), "utf8"));
       assert.equal(manifest.renderBackend, "gpu", body);
     }
+
+    writeFileSync(join(root, "widget", "Gradient.tsx"), `export function Gradient() {
+  return <panel class="bg-linear-to-r from-black to-white" />;
+}
+`, "utf8");
+    writeFileSync(join(root, "widget", "Outer.tsx"), `import { Gradient } from "./Gradient";
+export function Outer() { return <Gradient />; }
+`, "utf8");
+    writeFileSync(sourcePath, `import { widget } from "@weaver/sdk";
+import { Outer } from "./Outer";
+export default widget({ name: "Nested Gradient Backend", size: [160, 80] }, () => <Outer />);
+`, "utf8");
+    const nested = spawnSync(process.execPath, [cli, "bundle", join(root, "widget")], { encoding: "utf8" });
+    assert.equal(nested.status, 0, nested.stderr);
+    const nestedManifest = JSON.parse(readFileSync(join(root, "widget", "dist", "widget.json"), "utf8"));
+    assert.equal(nestedManifest.renderBackend, "gpu", "transitively imported gradient source");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
