@@ -875,43 +875,91 @@ function sourceNeedsGpuSurface(sourceFile: ts.SourceFile): boolean {
   };
   const staticString = (expression: ts.Expression, seen: Set<ts.Expression>): string | null => {
     const current = unwrapExpression(expression);
-    if (ts.isStringLiteral(current) || ts.isNoSubstitutionTemplateLiteral(current)) return current.text;
-    if (!ts.isIdentifier(current) || seen.has(current)) return null;
-    const bound = boundExpression(current.text);
-    if (!bound) return null;
-    seen.add(current);
-    return staticString(bound, seen);
+    if (ts.isStringLiteral(current) || ts.isNoSubstitutionTemplateLiteral(current) || ts.isNumericLiteral(current)) {
+      return current.text;
+    }
+    if (ts.isIdentifier(current)) {
+      if (seen.has(current)) return null;
+      const bound = boundExpression(current.text);
+      if (!bound) return null;
+      const nextSeen = new Set(seen);
+      nextSeen.add(current);
+      return staticString(bound, nextSeen);
+    }
+    if (ts.isBinaryExpression(current) && current.operatorToken.kind === ts.SyntaxKind.PlusToken) {
+      const left = staticString(current.left, new Set(seen));
+      const right = staticString(current.right, new Set(seen));
+      if (left === null || right === null) return null;
+      return `${left}${right}`;
+    }
+    if (ts.isTemplateExpression(current)) {
+      let value = current.head.text;
+      for (const span of current.templateSpans) {
+        const substitution = staticString(span.expression, new Set(seen));
+        if (substitution === null) return null;
+        value += `${substitution}${span.literal.text}`;
+      }
+      return value;
+    }
+    return null;
+  };
+  const classExpressionNeedsGpu = (expression: ts.Expression, seen: Set<ts.Expression>): boolean => {
+    const current = unwrapExpression(expression);
+    if (seen.has(current)) return true;
+    if (ts.isIdentifier(current)) {
+      const bound = boundExpression(current.text);
+      if (!bound) return true;
+      const nextSeen = new Set(seen);
+      nextSeen.add(current);
+      return classExpressionNeedsGpu(bound, nextSeen);
+    }
+    if (ts.isConditionalExpression(current)) {
+      return classExpressionNeedsGpu(current.whenTrue, new Set(seen)) ||
+        classExpressionNeedsGpu(current.whenFalse, new Set(seen));
+    }
+    const classText = staticString(current, new Set(seen));
+    if (classText === null) return true;
+    try {
+      return compileClass(classText).backgroundGradient !== undefined;
+    } catch {
+      // The ordinary class validator reports malformed utilities.
+      return false;
+    }
   };
   const hPropsNeedGpu = (tag: string, props: ts.Expression | undefined): boolean => {
     if (tag === "canvas") return true;
     if (!["column", "row", "stack", "panel", "button"].includes(tag) || !props) return false;
-    const seen = new Set<ts.Expression>();
-    const objectNeedsGpu = (expression: ts.Expression): boolean => {
+    const objectNeedsGpu = (expression: ts.Expression, seen: Set<ts.Expression>): boolean => {
       const current = unwrapExpression(expression);
       if (seen.has(current)) return false;
       seen.add(current);
       if (ts.isIdentifier(current)) {
         const bound = boundExpression(current.text);
-        return bound ? objectNeedsGpu(bound) : false;
+        if (!bound) return current.text !== "undefined";
+        return objectNeedsGpu(bound, seen);
       }
-      if (!ts.isObjectLiteralExpression(current)) return false;
+      if (current.kind === ts.SyntaxKind.NullKeyword) return false;
+      if (ts.isConditionalExpression(current)) {
+        return objectNeedsGpu(current.whenTrue, new Set(seen)) || objectNeedsGpu(current.whenFalse, new Set(seen));
+      }
+      // A runtime-computed props object may contain a background or gradient
+      // class, and the manifest cannot promote a live software surface later.
+      if (!ts.isObjectLiteralExpression(current)) return true;
       if (current.properties.some((property) =>
         (ts.isPropertyAssignment(property) || ts.isShorthandPropertyAssignment(property)) &&
         propertyName(property.name) === "background")) return true;
       for (const property of current.properties) {
-        if (ts.isSpreadAssignment(property) && objectNeedsGpu(property.expression)) return true;
-        if (!ts.isPropertyAssignment(property) || propertyName(property.name) !== "class") continue;
-        const classText = staticString(property.initializer, new Set());
-        if (classText === null) continue;
-        try {
-          if (compileClass(classText).backgroundGradient !== undefined) return true;
-        } catch {
-          // The ordinary class validator reports malformed utilities.
+        if (ts.isSpreadAssignment(property)) {
+          if (objectNeedsGpu(property.expression, new Set(seen))) return true;
+          continue;
         }
+        if (ts.isComputedPropertyName(property.name) && propertyName(property.name) === null) return true;
+        if (!ts.isPropertyAssignment(property) || propertyName(property.name) !== "class") continue;
+        if (classExpressionNeedsGpu(property.initializer, new Set())) return true;
       }
       return false;
     };
-    return objectNeedsGpu(props);
+    return objectNeedsGpu(props, new Set());
   };
   let found = false;
   const visit = (node: ts.Node): void => {

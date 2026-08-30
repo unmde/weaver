@@ -415,6 +415,12 @@ export default widget({ name: "h Spread Class", size: [160, 80] }, () => {
   return h("panel", props);
 });
 `, "h() transitively bound gradient class"],
+      [`import { h, widget } from "@weaver/sdk";
+export default widget({ name: "h Conditional Class", size: [160, 80] }, () => {
+  const enabled = true;
+  return h("panel", { class: enabled ? "bg-linear-to-r from-black to-white" : "bg-black" });
+});
+`, "h() conditional gradient class"],
     ];
     for (const [source, label] of hCases) {
       writeFileSync(sourcePath, source, "utf8");
@@ -435,6 +441,17 @@ export default widget({ name: "h Scoped Props", size: [160, 80] }, () => {
     assert.equal(scoped.status, 0, scoped.stderr);
     const scopedManifest = JSON.parse(readFileSync(join(root, "widget", "dist", "widget.json"), "utf8"));
     assert.equal(scopedManifest.renderBackend, "software", "h() bound props respect lexical shadowing");
+
+    writeFileSync(sourcePath, `import { h, widget } from "@weaver/sdk";
+export default widget({ name: "h Conditional Solid", size: [160, 80] }, () => {
+  const enabled = true;
+  return h("panel", { class: enabled ? "bg-black" : "bg-white" });
+});
+`, "utf8");
+    const conditionalSolid = spawnSync(process.execPath, [cli, "bundle", join(root, "widget")], { encoding: "utf8" });
+    assert.equal(conditionalSolid.status, 0, conditionalSolid.stderr);
+    const conditionalSolidManifest = JSON.parse(readFileSync(join(root, "widget", "dist", "widget.json"), "utf8"));
+    assert.equal(conditionalSolidManifest.renderBackend, "software", "h() statically solid conditional stays software");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
