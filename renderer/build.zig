@@ -33,6 +33,30 @@ pub fn build(b: *std.Build) void {
 
     const test_step = b.step("test", "Test the Windows D3D packet presenter");
     if (target.result.os.tag == .windows) {
+        const capture = b.addExecutable(.{
+            .name = "weaver-window-capture",
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("src/window_capture_main.zig"),
+                .target = target,
+                .optimize = optimize,
+            }),
+        });
+        capture.root_module.addCSourceFile(.{
+            .file = b.path("src/window_capture.cpp"),
+            .flags = &.{"-std=c++17"},
+        });
+        capture.root_module.addIncludePath(b.path("../runtime/native-sdk/src/platform/windows"));
+        capture.root_module.linkSystemLibrary("c++", .{});
+        capture.root_module.linkSystemLibrary("c", .{});
+        capture.root_module.linkSystemLibrary("d3d11", .{});
+        capture.root_module.linkSystemLibrary("dxgi", .{});
+        capture.root_module.linkSystemLibrary("dcomp", .{});
+        capture.root_module.linkSystemLibrary("dwmapi", .{});
+        capture.root_module.linkSystemLibrary("shell32", .{});
+        capture.root_module.linkSystemLibrary("user32", .{});
+        const capture_step = b.step("window-capture", "Build the composed-window capture helper");
+        capture_step.dependOn(&b.addInstallArtifact(capture, .{}).step);
+
         const tests = b.addTest(.{
             .root_module = b.createModule(.{
                 .root_source_file = b.path("src/d3d_presenter_test_runner.zig"),

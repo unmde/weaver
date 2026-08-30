@@ -22,12 +22,10 @@ using System.Text;
 public static class WeaverGradientWin32 {
     public delegate bool EnumWindowsProc(IntPtr hwnd, IntPtr parameter);
     [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
-    [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X, Y; }
     [DllImport("user32.dll")] static extern bool EnumWindows(EnumWindowsProc callback, IntPtr parameter);
     [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr hwnd, StringBuilder text, int length);
     [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr hwnd, out RECT rect);
-    [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr hwnd, ref POINT point);
     [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr hwnd);
     [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr hwnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
     [DllImport("dwmapi.dll")] public static extern int DwmFlush();
@@ -54,13 +52,13 @@ $OutputDirectory = [IO.Path]::GetFullPath($OutputDirectory)
 $NativeRoot = Join-Path $RepoRoot "runtime\native-sdk"
 $Cli = Join-Path $RepoRoot "cli\dist\index.js"
 $Example = Join-Path $RepoRoot "examples\gradient-stack"
+$CaptureHelper = Join-Path $RepoRoot "renderer\zig-out\bin\weaver-window-capture.exe"
 $StateRoot = Join-Path $OutputDirectory "state"
 $ResultPath = Join-Path $OutputDirectory "results.json"
 $ArchivePath = "$OutputDirectory.zip"
 $DpiLogPath = Join-Path $OutputDirectory "windows-dpi.log"
 $priorLocalAppData = [Environment]::GetEnvironmentVariable("LOCALAPPDATA", "Process")
 $priorForceSoftware = [Environment]::GetEnvironmentVariable("WEAVER_FORCE_SOFTWARE", "Process")
-$priorGradientBench = [Environment]::GetEnvironmentVariable("NATIVE_SDK_D3D_GRADIENT_BENCH", "Process")
 $priorGradientBudget = [Environment]::GetEnvironmentVariable("NATIVE_SDK_D3D_GRADIENT_BUDGET_US", "Process")
 $priorDpiLog = [Environment]::GetEnvironmentVariable("WEAVER_DPI_LOG", "Process")
 $failure = $null
@@ -144,26 +142,26 @@ function Read-Status {
 
 function Capture-Window([IntPtr]$hwnd, [string]$path, [string]$referencePath) {
     $rect = New-Object WeaverGradientWin32+RECT
-    $origin = New-Object WeaverGradientWin32+POINT
     Add-Check "gradient-window-client-rect" ([WeaverGradientWin32]::GetClientRect($hwnd, [ref]$rect)) "hwnd=0x$('{0:x}' -f $hwnd.ToInt64())"
-    Add-Check "gradient-window-screen-origin" ([WeaverGradientWin32]::ClientToScreen($hwnd, [ref]$origin)) "hwnd=0x$('{0:x}' -f $hwnd.ToInt64())"
     $width = $rect.Right - $rect.Left
     $height = $rect.Bottom - $rect.Top
     Add-Check "gradient-window-positive-size" ($width -gt 0 -and $height -gt 0) "${width}x${height}"
     $hwndTopmost = [IntPtr](-1)
     $hwndNotTopmost = [IntPtr](-2)
     $flags = 0x0001 -bor 0x0002 -bor 0x0010
-    [WeaverGradientWin32]::SetWindowPos($hwnd, $hwndTopmost, 0, 0, 0, 0, $flags) | Out-Null
-    [WeaverGradientWin32]::DwmFlush() | Out-Null
-    Start-Sleep -Milliseconds 250
-    $bitmap = [Drawing.Bitmap]::new($width, $height)
-    $graphics = [Drawing.Graphics]::FromImage($bitmap)
+    $bitmapPath = "$path.desktop-duplication.bmp"
+    $bitmap = $null
     try {
-        $graphics.CopyFromScreen($origin.X, $origin.Y, 0, 0, [Drawing.Size]::new($width, $height))
+        Add-Check "gradient-window-topmost" ([WeaverGradientWin32]::SetWindowPos($hwnd, $hwndTopmost, 0, 0, 0, 0, $flags)) "hwnd=0x$('{0:x}' -f $hwnd.ToInt64())"
+        $flushResult = [WeaverGradientWin32]::DwmFlush()
+        Add-Check "gradient-window-dwm-flush" ($flushResult -ge 0) "hresult=0x$('{0:x8}' -f ([uint32]$flushResult))"
+        Invoke-Recorded "gradient-window-capture" $RepoRoot $CaptureHelper @("--hwnd", "0x$('{0:x}' -f $hwnd.ToInt64())", "--out", $bitmapPath) | Out-Null
     } finally {
-        $graphics.Dispose()
         [WeaverGradientWin32]::SetWindowPos($hwnd, $hwndNotTopmost, 0, 0, 0, 0, $flags) | Out-Null
     }
+    Add-Check "gradient-window-capture-bitmap" (Test-Path $bitmapPath) $bitmapPath
+    $bitmap = [Drawing.Bitmap]::new($bitmapPath)
+    Add-Check "gradient-window-capture-size" ($bitmap.Width -eq $width -and $bitmap.Height -eq $height) "helper=$($bitmap.Width)x$($bitmap.Height) client=${width}x${height}"
     $bitmap.Save($path, [Drawing.Imaging.ImageFormat]::Png)
     Add-Check "gradient-reference-image-exists" (Test-Path $referencePath) $referencePath
     $reference = [Drawing.Bitmap]::new($referencePath)
@@ -193,6 +191,7 @@ function Capture-Window([IntPtr]$hwnd, [string]$path, [string]$referencePath) {
     } finally {
         $reference.Dispose()
         $bitmap.Dispose()
+        Remove-Item -LiteralPath $bitmapPath -Force -ErrorAction SilentlyContinue
     }
     $meanAbsoluteChannelError = if ($sampleCount -eq 0) { [double]::PositiveInfinity } else { $absoluteChannelError / (3.0 * $sampleCount) }
     $closeSamplePercent = if ($sampleCount -eq 0) { 0.0 } else { 100.0 * $closeSampleCount / $sampleCount }
@@ -266,16 +265,18 @@ try {
     Invoke-Recorded "npm-typecheck" $RepoRoot "npm" @("run", "typecheck") | Out-Null
     Invoke-Recorded "release-audit" $RepoRoot "npm" @("run", "audit:release") | Out-Null
     Invoke-Recorded "native-gradient-semantics" $NativeRoot "zig" @("build", "test-canvas", "-Doptimize=ReleaseFast") | Out-Null
+    Invoke-Recorded "native-d3d-decoder-shader" $NativeRoot "zig" @("build", "test-windows-d3d-presenter", "-Doptimize=ReleaseFast") | Out-Null
     Invoke-Recorded "runtime-build" (Join-Path $RepoRoot "runtime") "zig" @("build", "-Dcpu=baseline", "-Doptimize=ReleaseFast", "-Dweb-layer=exclude", "-Dtrace=off") | Out-Null
     Invoke-Recorded "host-build" (Join-Path $RepoRoot "host") "zig" @("build", "-Dcpu=baseline", "-Doptimize=ReleaseFast") | Out-Null
     Invoke-Recorded "renderer-build" (Join-Path $RepoRoot "renderer") "zig" @("build", "-Dcpu=baseline", "-Doptimize=ReleaseFast") | Out-Null
+    Invoke-Recorded "renderer-capture-build" (Join-Path $RepoRoot "renderer") "zig" @("build", "window-capture", "-Dcpu=baseline", "-Doptimize=ReleaseFast") | Out-Null
+    Add-Check "gradient-capture-helper" (Test-Path $CaptureHelper) $CaptureHelper
 
-    $env:NATIVE_SDK_D3D_GRADIENT_BENCH = "1"
     Remove-Item Env:NATIVE_SDK_D3D_GRADIENT_BUDGET_US -ErrorAction SilentlyContinue
     $timings = @()
     $selectedAdapter = $null
     for ($sample = 1; $sample -le $Samples; $sample++) {
-        $run = Invoke-Recorded "d3d-gradient-sample-$('{0:d2}' -f $sample)" $NativeRoot "zig" @("build", "test-windows-d3d-presenter", "-Doptimize=ReleaseFast")
+        $run = Invoke-Recorded "d3d-gradient-sample-$('{0:d2}' -f $sample)" $NativeRoot "zig" @("build", "bench-windows-d3d-gradient", "-Doptimize=ReleaseFast")
         $joined = $run.Lines -join "`n"
         Add-Check "d3d-clean-command-report-$sample" ($joined -notmatch '(?m)^failed command:') $joined
         $timingMatch = [regex]::Match($joined, 'mesh-gradient 512x512 16-patch Oklab GPU ([0-9]+(?:\.[0-9]+)?)us/draw')
@@ -292,7 +293,6 @@ try {
         if ($null -eq $selectedAdapter) { $selectedAdapter = $sampleAdapter }
         else { Add-Check "d3d-stable-adapter-$sample" (($selectedAdapter | ConvertTo-Json -Compress) -eq ($sampleAdapter | ConvertTo-Json -Compress)) ($sampleAdapter | ConvertTo-Json -Compress) }
     }
-    Remove-Item Env:NATIVE_SDK_D3D_GRADIENT_BENCH -ErrorAction SilentlyContinue
     $orderedTimings = @($timings | Sort-Object)
     $median = if (($orderedTimings.Count % 2) -eq 1) {
         $orderedTimings[[Math]::Floor($orderedTimings.Count / 2)]
@@ -372,7 +372,6 @@ try {
     }
     Restore-ProcessEnvironment "LOCALAPPDATA" $priorLocalAppData
     Restore-ProcessEnvironment "WEAVER_FORCE_SOFTWARE" $priorForceSoftware
-    Restore-ProcessEnvironment "NATIVE_SDK_D3D_GRADIENT_BENCH" $priorGradientBench
     Restore-ProcessEnvironment "NATIVE_SDK_D3D_GRADIENT_BUDGET_US" $priorGradientBudget
     Restore-ProcessEnvironment "WEAVER_DPI_LOG" $priorDpiLog
     $results.finishedUtc = [DateTime]::UtcNow.ToString("o")

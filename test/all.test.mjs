@@ -12,3 +12,4 @@ import "../cli/test/lowered-budget.test.mjs";
 import "../cli/test/canvas-size.test.mjs";
 import "../cli/test/visual-bounds.test.mjs";
 import "../cli/test/image-budget.test.mjs";
+import "./windows-gradient-gpu.test.mjs";
