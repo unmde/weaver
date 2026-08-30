@@ -1,0 +1,4 @@
+{
+  "ignorePatterns": "runtime/native-sdk/**",
+  "instructions": "runtime/native-sdk is a pinned Git submodule whose implementation is reviewed in SunkenInTime/native. Treat the gitlink as dependency metadata and review Weaver-owned integration code plus the exact-pin audit. Do not report implementation findings from a Native checkout whose HEAD differs from the commit recorded by git rev-parse HEAD:runtime/native-sdk."
+}
