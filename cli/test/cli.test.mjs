@@ -401,6 +401,20 @@ export default widget({ name: "h Class", size: [160, 80] }, () => create("panel"
 import * as Weaver from "@weaver/sdk";
 export default widget({ name: "h Canvas", size: [160, 80] }, () => Weaver.h("canvas", { class: "w-[160px] h-[80px]" }));
 `, "namespace h() canvas"],
+      [`import { h, widget } from "@weaver/sdk";
+export default widget({ name: "h Bound Background", size: [160, 80] }, () => {
+  const props = { background: { type: "linear" as const, stops: [{ offset: 0, color: "#000" }, { offset: 1, color: "#fff" }] } };
+  return h("panel", props);
+});
+`, "h() bound typed gradient background"],
+      [`import { h, widget } from "@weaver/sdk";
+export default widget({ name: "h Spread Class", size: [160, 80] }, () => {
+  const gradientClass = "bg-linear-to-r from-black to-white";
+  const base = { class: gradientClass };
+  const props = { ...base };
+  return h("panel", props);
+});
+`, "h() transitively bound gradient class"],
     ];
     for (const [source, label] of hCases) {
       writeFileSync(sourcePath, source, "utf8");
@@ -409,6 +423,18 @@ export default widget({ name: "h Canvas", size: [160, 80] }, () => Weaver.h("can
       const manifest = JSON.parse(readFileSync(join(root, "widget", "dist", "widget.json"), "utf8"));
       assert.equal(manifest.renderBackend, "gpu", label);
     }
+
+    writeFileSync(sourcePath, `import { h, widget } from "@weaver/sdk";
+const props = { class: "bg-linear-to-r from-black to-white" };
+export default widget({ name: "h Scoped Props", size: [160, 80] }, () => {
+  const props = { class: "p-2" };
+  return h("panel", props);
+});
+`, "utf8");
+    const scoped = spawnSync(process.execPath, [cli, "bundle", join(root, "widget")], { encoding: "utf8" });
+    assert.equal(scoped.status, 0, scoped.stderr);
+    const scopedManifest = JSON.parse(readFileSync(join(root, "widget", "dist", "widget.json"), "utf8"));
+    assert.equal(scopedManifest.renderBackend, "software", "h() bound props respect lexical shadowing");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

@@ -848,26 +848,94 @@ function sourceNeedsGpuSurface(sourceFile: ts.SourceFile): boolean {
     if (ts.isComputedPropertyName(name) && ts.isStringLiteral(name.expression)) return name.expression.text;
     return null;
   };
+  const bindingScopes: Array<Map<string, ts.Expression | null>> = [new Map()];
+  const bindName = (name: ts.BindingName, value: ts.Expression | null): void => {
+    if (ts.isIdentifier(name)) {
+      bindingScopes[bindingScopes.length - 1].set(name.text, value);
+      return;
+    }
+    for (const element of name.elements) {
+      if (!ts.isOmittedExpression(element)) bindName(element.name, null);
+    }
+  };
+  const boundExpression = (name: string): ts.Expression | null | undefined => {
+    for (let index = bindingScopes.length - 1; index >= 0; index -= 1) {
+      const scope = bindingScopes[index];
+      if (scope.has(name)) return scope.get(name);
+    }
+    return undefined;
+  };
+  const unwrapExpression = (expression: ts.Expression): ts.Expression => {
+    let current = expression;
+    while (ts.isParenthesizedExpression(current) || ts.isAsExpression(current) ||
+      ts.isTypeAssertionExpression(current) || ts.isNonNullExpression(current) || ts.isSatisfiesExpression(current)) {
+      current = current.expression;
+    }
+    return current;
+  };
+  const staticString = (expression: ts.Expression, seen: Set<ts.Expression>): string | null => {
+    const current = unwrapExpression(expression);
+    if (ts.isStringLiteral(current) || ts.isNoSubstitutionTemplateLiteral(current)) return current.text;
+    if (!ts.isIdentifier(current) || seen.has(current)) return null;
+    const bound = boundExpression(current.text);
+    if (!bound) return null;
+    seen.add(current);
+    return staticString(bound, seen);
+  };
   const hPropsNeedGpu = (tag: string, props: ts.Expression | undefined): boolean => {
     if (tag === "canvas") return true;
-    if (!["column", "row", "stack", "panel", "button"].includes(tag) ||
-      !props || !ts.isObjectLiteralExpression(props)) return false;
-    if (props.properties.some((property) =>
-      (ts.isPropertyAssignment(property) || ts.isShorthandPropertyAssignment(property)) &&
-      propertyName(property.name) === "background")) return true;
-    const classProperty = props.properties.find((property): property is ts.PropertyAssignment =>
-      ts.isPropertyAssignment(property) && propertyName(property.name) === "class");
-    if (!classProperty ||
-      (!ts.isStringLiteral(classProperty.initializer) && !ts.isNoSubstitutionTemplateLiteral(classProperty.initializer))) return false;
-    try {
-      return compileClass(classProperty.initializer.text).backgroundGradient !== undefined;
-    } catch {
-      // The ordinary class validator reports malformed utilities.
+    if (!["column", "row", "stack", "panel", "button"].includes(tag) || !props) return false;
+    const seen = new Set<ts.Expression>();
+    const objectNeedsGpu = (expression: ts.Expression): boolean => {
+      const current = unwrapExpression(expression);
+      if (seen.has(current)) return false;
+      seen.add(current);
+      if (ts.isIdentifier(current)) {
+        const bound = boundExpression(current.text);
+        return bound ? objectNeedsGpu(bound) : false;
+      }
+      if (!ts.isObjectLiteralExpression(current)) return false;
+      if (current.properties.some((property) =>
+        (ts.isPropertyAssignment(property) || ts.isShorthandPropertyAssignment(property)) &&
+        propertyName(property.name) === "background")) return true;
+      for (const property of current.properties) {
+        if (ts.isSpreadAssignment(property) && objectNeedsGpu(property.expression)) return true;
+        if (!ts.isPropertyAssignment(property) || propertyName(property.name) !== "class") continue;
+        const classText = staticString(property.initializer, new Set());
+        if (classText === null) continue;
+        try {
+          if (compileClass(classText).backgroundGradient !== undefined) return true;
+        } catch {
+          // The ordinary class validator reports malformed utilities.
+        }
+      }
       return false;
-    }
+    };
+    return objectNeedsGpu(props);
   };
   let found = false;
   const visit = (node: ts.Node): void => {
+    if (ts.isVariableDeclaration(node)) {
+      if (node.initializer) visit(node.initializer);
+      bindName(node.name, node.initializer ?? null);
+      return;
+    }
+    if (ts.isFunctionDeclaration(node) && node.name) bindName(node.name, null);
+    if (ts.isClassDeclaration(node) && node.name) bindName(node.name, null);
+    if (ts.isFunctionLike(node)) {
+      bindingScopes.push(new Map());
+      for (const parameter of node.parameters) bindName(parameter.name, null);
+      ts.forEachChild(node, visit);
+      bindingScopes.pop();
+      return;
+    }
+    if (ts.isBlock(node) || ts.isModuleBlock(node) || ts.isCatchClause(node)) {
+      bindingScopes.push(new Map());
+      if (ts.isCatchClause(node) && node.variableDeclaration) bindName(node.variableDeclaration.name, null);
+      ts.forEachChild(node, visit);
+      bindingScopes.pop();
+      return;
+    }
     if (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) {
       const tag = node.tagName.getText(sourceFile);
       if (tag === "canvas") {
