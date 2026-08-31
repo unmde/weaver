@@ -835,6 +835,15 @@ function walkSourceWithStaticExpressions(
       if (!ts.isOmittedExpression(element)) bindName(element.name, null);
     }
   };
+  const predeclareStatements = (statements: ts.NodeArray<ts.Statement>): void => {
+    for (const statement of statements) {
+      if ((ts.isFunctionDeclaration(statement) || ts.isClassDeclaration(statement)) && statement.name) {
+        bindName(statement.name, null);
+      } else if (ts.isVariableStatement(statement)) {
+        for (const declaration of statement.declarationList.declarations) bindName(declaration.name, null);
+      }
+    }
+  };
   const boundExpression = (name: string): ts.Expression | null | undefined => {
     for (let index = bindingScopes.length - 1; index >= 0; index -= 1) {
       const scope = bindingScopes[index];
@@ -931,15 +940,23 @@ function walkSourceWithStaticExpressions(
       bindingScopes.pop();
       return stopped;
     }
-    if (ts.isBlock(node) || ts.isModuleBlock(node) || ts.isCatchClause(node)) {
+    if (ts.isBlock(node) || ts.isModuleBlock(node)) {
       bindingScopes.push(new Map());
-      if (ts.isCatchClause(node) && node.variableDeclaration) bindName(node.variableDeclaration.name, null);
+      predeclareStatements(node.statements);
+      const stopped = visitChildren(node);
+      bindingScopes.pop();
+      return stopped;
+    }
+    if (ts.isCatchClause(node)) {
+      bindingScopes.push(new Map());
+      if (node.variableDeclaration) bindName(node.variableDeclaration.name, null);
       const stopped = visitChildren(node);
       bindingScopes.pop();
       return stopped;
     }
     return visitChildren(node);
   };
+  predeclareStatements(sourceFile.statements);
   return walk(sourceFile);
 }
 

@@ -580,6 +580,18 @@ export default widget({ name: "h Shadowed Factory", size: [160, 80] }, () => {
     const shadowedFactoryManifest = JSON.parse(readFileSync(join(root, "widget", "dist", "widget.json"), "utf8"));
     assert.equal(shadowedFactoryManifest.renderBackend, "software", "h() factory aliases respect lexical shadowing");
 
+    writeFileSync(sourcePath, `import { widget } from "@weaver/sdk";
+export default widget({ name: "Hoisted Local h", size: [160, 80] }, () =>
+  h("panel", { class: "bg-linear-to-r from-black to-white" }));
+function h(_type: string, _props: Record<string, unknown>) {
+  return <panel class="bg-black" />;
+}
+`, "utf8");
+    const hoistedFactory = spawnSync(process.execPath, [cli, "bundle", join(root, "widget")], { encoding: "utf8" });
+    assert.equal(hoistedFactory.status, 0, hoistedFactory.stderr);
+    const hoistedFactoryManifest = JSON.parse(readFileSync(join(root, "widget", "dist", "widget.json"), "utf8"));
+    assert.equal(hoistedFactoryManifest.renderBackend, "software", "hoisted local h() stays software regardless of declaration order");
+
     writeFileSync(sourcePath, `import { h, widget } from "@weaver/sdk";
 export default widget({ name: "h Conditional Solid", size: [160, 80] }, () => {
   const enabled = true;
