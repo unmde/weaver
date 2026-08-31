@@ -1,4 +1,4 @@
-import { compileClass, type ClassProps } from "./class-compiler.js";
+import { classUsesGradientBackground, compileClass, type ClassProps } from "./class-compiler.js";
 import { serializeBackground, type BackgroundGradientStack } from "./gradients.js";
 
 // Storage receipt (2026-07-29): serializing a realistic good notes fixture
@@ -251,7 +251,9 @@ export function h(type: ElementType, props: Record<string, unknown> | null, ...c
       (typeof source.accessibilityLabel !== "string" || source.accessibilityLabel.trim().length === 0)) {
     throw new Error(`<${type}> accessibilityLabel must be a non-empty string naming the action`);
   }
-  if (typeof type === "string" && source.background !== undefined && !supportsGradientBackground(type)) {
+  if (typeof type === "string" && !supportsGradientBackground(type) &&
+      (source.background !== undefined ||
+        (typeof source.class === "string" && classUsesGradientBackground(source.class)))) {
     throw new Error(`gradient backgrounds are supported on <column>, <row>, <stack>, <panel>, and <button>; received <${type}>`);
   }
   return {

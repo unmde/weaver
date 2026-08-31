@@ -338,6 +338,25 @@ test("styling 10 image props reject invalid fit and tile before native mutation"
   assert.equal(operations.length, operationCount);
 });
 
+test("gradient classes on unsupported leaves reject before native mutation", () => {
+  const operationCount = operations.length;
+  const gradientClass = "p-2 bg-linear-to-r from-black to-white";
+  for (const [type, props] of [
+    ["text", { class: gradientClass }],
+    ["icon", { class: gradientClass, iconPath: "M 0 0", iconViewBox: "0 0 24 24", iconStroke: 0 }],
+    ["slider", { class: gradientClass, value: 1, max: 10, onChange() {} }],
+    ["image", { class: gradientClass, src: "./cover.png" }],
+    ["canvas", { class: gradientClass, onFrame() {} }],
+  ]) {
+    assert.throws(
+      () => sdk.h(type, props),
+      new RegExp(`gradient backgrounds are supported on <column>, <row>, <stack>, <panel>, and <button>; received <${type}>`),
+      type,
+    );
+  }
+  assert.equal(operations.length, operationCount);
+});
+
 test("styling 11 button handlers reject invalid callbacks before native mutation", () => {
   const operationCount = operations.length;
   assert.throws(() => sdk.h("button", { onPress: () => {}, onDoublePress: true }), /onDoublePress must be a function/);

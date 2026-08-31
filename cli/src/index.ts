@@ -315,7 +315,7 @@ async function bundleWidget(directory: string): Promise<BundleResult> {
     origins: project.config.origins ?? [],
     subscribe: project.config.subscribe ?? [],
     capabilities: project.config.capabilities ?? [],
-    renderBackend: project.sourceFiles.some(sourceNeedsGpuSurface) ? "gpu" : "software",
+    renderBackend: projectNeedsGpuSurface(project) ? "gpu" : "software",
     fonts: project.fonts,
   };
   writeAtomic(join(outputDirectory, "widget.json"), `${JSON.stringify(manifest, null, 2)}\n`);
@@ -951,33 +951,97 @@ function jsxClassVariants(attribute: ts.JsxAttribute, context: StaticExpressionC
   return null;
 }
 
-function sourceNeedsGpuSurface(sourceFile: ts.SourceFile): boolean {
-  const hIdentifiers = new Set(["h"]);
-  const hNamespaces = new Set<string>();
-  for (const statement of sourceFile.statements) {
-    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier) ||
-      statement.moduleSpecifier.text !== "@weaver/sdk" || !statement.importClause) continue;
-    const bindings = statement.importClause.namedBindings;
-    if (bindings && ts.isNamedImports(bindings)) {
-      for (const binding of bindings.elements) {
-        if ((binding.propertyName?.text ?? binding.name.text) === "h") hIdentifiers.add(binding.name.text);
+interface HFactoryBindings {
+  identifiers: ReadonlySet<string>;
+  namespaces: ReadonlyMap<string, ReadonlySet<string>>;
+}
+
+function projectNeedsGpuSurface(project: SourceProject): boolean {
+  const bindings = hFactoryBindings(project.directory, project.sourceFiles);
+  return project.sourceFiles.some((sourceFile) =>
+    sourceNeedsGpuSurface(sourceFile, bindings.get(resolve(sourceFile.fileName))));
+}
+
+function hFactoryBindings(directory: string, sourceFiles: readonly ts.SourceFile[]): ReadonlyMap<string, HFactoryBindings> {
+  const filesByPath = new Map(sourceFiles.map((sourceFile) => [resolve(sourceFile.fileName), sourceFile]));
+  const exportedNames = new Map([...filesByPath.keys()].map((path) => [path, new Set<string>()]));
+  const targetExports = (sourceFile: ts.SourceFile, specifier: string): ReadonlySet<string> => {
+    if (specifier === "@weaver/sdk") return new Set(["h"]);
+    const path = localImportPath(directory, sourceFile, specifier);
+    return path ? exportedNames.get(resolve(path)) ?? new Set() : new Set();
+  };
+  const localBindings = (sourceFile: ts.SourceFile): HFactoryBindings => {
+    const identifiers = new Set<string>();
+    const namespaces = new Map<string, ReadonlySet<string>>();
+    for (const statement of sourceFile.statements) {
+      if (!ts.isImportDeclaration(statement) || !statement.importClause || !ts.isStringLiteral(statement.moduleSpecifier)) continue;
+      const exports = targetExports(sourceFile, statement.moduleSpecifier.text);
+      if (statement.importClause.name && exports.has("default")) identifiers.add(statement.importClause.name.text);
+      const imported = statement.importClause.namedBindings;
+      if (imported && ts.isNamedImports(imported)) {
+        for (const binding of imported.elements) {
+          if (exports.has(binding.propertyName?.text ?? binding.name.text)) identifiers.add(binding.name.text);
+        }
+      } else if (imported && ts.isNamespaceImport(imported)) {
+        namespaces.set(imported.name.text, exports);
       }
-    } else if (bindings && ts.isNamespaceImport(bindings)) {
-      hNamespaces.add(bindings.name.text);
+    }
+    return { identifiers, namespaces };
+  };
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const [path, sourceFile] of filesByPath) {
+      const exports = exportedNames.get(path)!;
+      const local = localBindings(sourceFile);
+      const add = (name: string): void => {
+        if (exports.has(name)) return;
+        exports.add(name);
+        changed = true;
+      };
+      for (const statement of sourceFile.statements) {
+        if (ts.isExportAssignment(statement) && !statement.isExportEquals &&
+          ts.isIdentifier(statement.expression) && local.identifiers.has(statement.expression.text)) {
+          add("default");
+          continue;
+        }
+        if (!ts.isExportDeclaration(statement)) continue;
+        if (statement.moduleSpecifier && ts.isStringLiteral(statement.moduleSpecifier)) {
+          const sourceExports = targetExports(sourceFile, statement.moduleSpecifier.text);
+          if (!statement.exportClause) {
+            for (const name of sourceExports) add(name);
+          } else if (ts.isNamedExports(statement.exportClause)) {
+            for (const binding of statement.exportClause.elements) {
+              if (sourceExports.has(binding.propertyName?.text ?? binding.name.text)) add(binding.name.text);
+            }
+          }
+          continue;
+        }
+        if (statement.exportClause && ts.isNamedExports(statement.exportClause)) {
+          for (const binding of statement.exportClause.elements) {
+            if (local.identifiers.has(binding.propertyName?.text ?? binding.name.text)) add(binding.name.text);
+          }
+        }
+      }
     }
   }
+  return new Map([...filesByPath].map(([path, sourceFile]) => [path, localBindings(sourceFile)]));
+}
+
+function sourceNeedsGpuSurface(sourceFile: ts.SourceFile, bindings?: HFactoryBindings): boolean {
+  const hIdentifiers = new Set(["h", ...(bindings?.identifiers ?? [])]);
+  const hNamespaces = bindings?.namespaces ?? new Map<string, ReadonlySet<string>>();
   const isHCall = (node: ts.CallExpression): boolean => {
     if (ts.isIdentifier(node.expression)) return hIdentifiers.has(node.expression.text);
     if (ts.isPropertyAccessExpression(node.expression)) {
       return ts.isIdentifier(node.expression.expression) &&
-        hNamespaces.has(node.expression.expression.text) && node.expression.name.text === "h";
+        hNamespaces.get(node.expression.expression.text)?.has(node.expression.name.text) === true;
     }
     if (ts.isElementAccessExpression(node.expression)) {
       return ts.isIdentifier(node.expression.expression) &&
-        hNamespaces.has(node.expression.expression.text) &&
         node.expression.argumentExpression !== undefined &&
         ts.isStringLiteral(node.expression.argumentExpression) &&
-        node.expression.argumentExpression.text === "h";
+        hNamespaces.get(node.expression.expression.text)?.has(node.expression.argumentExpression.text) === true;
     }
     return false;
   };

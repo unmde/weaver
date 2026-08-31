@@ -518,6 +518,18 @@ export default widget({ name: "h Conditional Class", size: [160, 80] }, () => {
       assert.equal(manifest.renderBackend, "gpu", label);
     }
 
+    writeFileSync(join(root, "widget", "factory.ts"), `export { h as create } from "@weaver/sdk";
+`, "utf8");
+    writeFileSync(sourcePath, `import { widget } from "@weaver/sdk";
+import { create } from "./factory";
+export default widget({ name: "Local h Re-export", size: [160, 80] }, () =>
+  create("panel", { class: "bg-linear-to-r from-black to-white" }));
+`, "utf8");
+    const localFactory = spawnSync(process.execPath, [cli, "bundle", join(root, "widget")], { encoding: "utf8" });
+    assert.equal(localFactory.status, 0, localFactory.stderr);
+    const localFactoryManifest = JSON.parse(readFileSync(join(root, "widget", "dist", "widget.json"), "utf8"));
+    assert.equal(localFactoryManifest.renderBackend, "gpu", "locally re-exported h() gradient class");
+
     writeFileSync(sourcePath, `import { h, widget } from "@weaver/sdk";
 const props = { class: "bg-linear-to-r from-black to-white" };
 export default widget({ name: "h Scoped Props", size: [160, 80] }, () => {

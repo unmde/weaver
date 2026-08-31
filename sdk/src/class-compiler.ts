@@ -177,6 +177,7 @@ const radii: Readonly<Record<string, number>> = {
 };
 
 const maxUtilityNumber = 1_000_000;
+const gradientDirectionPattern = /^bg-(repeating-)?(?:gradient|linear)-to-(r|tr|t|tl|l|bl|b|br)$/;
 
 function utilityNumber(raw: string, utility: string, multiplier = 1): number {
   const value = Number(raw) * multiplier;
@@ -269,6 +270,11 @@ export function compileClass(className: string): ClassProps {
   return output;
 }
 
+export function classUsesGradientBackground(className: string): boolean {
+  if (!className.includes("bg-")) return false;
+  return className.trim().split(/\s+/).some((utility) => gradientDirectionPattern.test(utility));
+}
+
 function applyUtility(output: CompileOutput, utility: string): void {
   const stateMatch = /^(hover|pressed):(.+)$/.exec(utility);
   if (stateMatch) {
@@ -280,7 +286,7 @@ function applyUtility(output: CompileOutput, utility: string): void {
   }
 
   let match: RegExpExecArray | null;
-  if ((match = /^bg-(repeating-)?(?:gradient|linear)-to-(r|tr|t|tl|l|bl|b|br)$/.exec(utility))) {
+  if ((match = gradientDirectionPattern.exec(utility))) {
     const directions: Record<string, readonly [number, number, number, number]> = {
       r: [0, 0.5, 1, 0.5], tr: [0, 1, 1, 0], t: [0.5, 1, 0.5, 0], tl: [1, 1, 0, 0],
       l: [1, 0.5, 0, 0.5], bl: [1, 0, 0, 1], b: [0.5, 0, 0.5, 1], br: [0, 0, 1, 1],

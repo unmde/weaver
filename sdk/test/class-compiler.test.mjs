@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test from "node:test";
-import { compileClass } from "../src/class-compiler.ts";
+import { classUsesGradientBackground, compileClass } from "../src/class-compiler.ts";
 import { tailwindColors } from "../src/tailwind-colors.js";
 
 test("class compiler maps the frozen M1 utility surface", () => {
@@ -21,6 +21,9 @@ test("class compiler maps the frozen M1 utility surface", () => {
 });
 
 test("linear gradient utilities compile to the canonical retained wire", () => {
+  assert.equal(classUsesGradientBackground("p-2 bg-linear-to-r from-black to-white"), true);
+  assert.equal(classUsesGradientBackground("bg-repeating-gradient-to-b from-black to-white"), true);
+  assert.equal(classUsesGradientBackground("bg-black from-black to-white"), false);
   const compiled = compileClass("bg-gradient-to-tr from-red-500 from-10% via-white/50 via-[45%] to-blue-500 to-90%");
   const document = JSON.parse(compiled.backgroundGradient);
   assert.equal(document.v, 1);
