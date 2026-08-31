@@ -338,6 +338,296 @@ export default widget({ name: "System Card", size: [200, 100], subscribe: ["cpu"
   }
 });
 
+test("gradient-only widgets select the GPU renderer", () => {
+  const root = mkdtempSync(join(tmpdir(), "weaver-gradient-backend-"));
+  const cli = fileURLToPath(new URL("../dist/index.js", import.meta.url));
+  try {
+    assert.equal(spawnSync(process.execPath, [cli, "init", "widget"], { cwd: root, encoding: "utf8" }).status, 0);
+    const sourcePath = join(root, "widget", "widget.tsx");
+    const cases = [
+      `<panel background={{ type: "linear", stops: [{ offset: 0, color: "#000" }, { offset: 1, color: "#fff" }] }} />`,
+      `<panel class="bg-linear-to-r from-black to-white" />`,
+    ];
+    for (const body of cases) {
+      writeFileSync(sourcePath, `import { widget } from "@weaver/sdk";
+export default widget({ name: "Gradient Backend", size: [160, 80] }, () => ${body});
+`, "utf8");
+      const bundled = spawnSync(process.execPath, [cli, "bundle", join(root, "widget")], { encoding: "utf8" });
+      assert.equal(bundled.status, 0, bundled.stderr);
+      const manifest = JSON.parse(readFileSync(join(root, "widget", "dist", "widget.json"), "utf8"));
+      assert.equal(manifest.renderBackend, "gpu", body);
+    }
+
+    const jsxConditionalCases = [
+      [`import { widget } from "@weaver/sdk";
+const enabled = true;
+export default widget({ name: "JSX Conditional Gradient", size: [160, 80] }, () => (
+  <panel class={enabled ? "bg-linear-to-r from-black to-white" : "bg-black"} />
+));
+`, "direct conditional JSX class"],
+      [`import { widget } from "@weaver/sdk";
+export default widget({ name: "JSX Bound Gradient", size: [160, 80] }, () => {
+  const enabled = true;
+  const base = "p-2 ";
+  const surface = enabled ? "bg-linear-to-r from-black to-white" : "bg-black";
+  const classes = base + surface;
+  return <panel class={classes} />;
+});
+`, "bound concatenated JSX class"],
+      [`import { widget } from "@weaver/sdk";
+export default widget({ name: "JSX Template Gradient", size: [160, 80] }, () => {
+  const enabled = true;
+  const direction = enabled ? "r" : "l";
+  return <panel class={\`bg-linear-to-\${direction} from-black to-white\`} />;
+});
+`, "static template JSX class"],
+      [`import { widget } from "@weaver/sdk";
+export default widget({ name: "JSX Spread Gradient", size: [160, 80] }, () => (
+  <panel {...{ class: "bg-linear-to-r from-black to-white" }} />
+));
+`, "inline JSX props spread"],
+      [`import { widget } from "@weaver/sdk";
+const surface = { class: "bg-linear-to-r from-black to-white" };
+const props = { ...surface };
+export default widget({ name: "JSX Bound Spread Gradient", size: [160, 80] }, () => (
+  <panel {...props} />
+));
+`, "bound nested JSX props spread"],
+    ];
+    for (const [source, label] of jsxConditionalCases) {
+      writeFileSync(sourcePath, source, "utf8");
+      const bundled = spawnSync(process.execPath, [cli, "bundle", join(root, "widget")], { encoding: "utf8" });
+      assert.equal(bundled.status, 0, bundled.stderr);
+      const manifest = JSON.parse(readFileSync(join(root, "widget", "dist", "widget.json"), "utf8"));
+      assert.equal(manifest.renderBackend, "gpu", label);
+    }
+
+    writeFileSync(sourcePath, `import { widget } from "@weaver/sdk";
+const enabled = true;
+export default widget({ name: "JSX Conditional Solid", size: [160, 80] }, () => (
+  <panel class={enabled ? "bg-black" : "bg-white"} />
+));
+`, "utf8");
+    const jsxConditionalSolid = spawnSync(process.execPath, [cli, "bundle", join(root, "widget")], { encoding: "utf8" });
+    assert.equal(jsxConditionalSolid.status, 0, jsxConditionalSolid.stderr);
+    const jsxConditionalSolidManifest = JSON.parse(readFileSync(join(root, "widget", "dist", "widget.json"), "utf8"));
+    assert.equal(jsxConditionalSolidManifest.renderBackend, "software", "statically solid JSX conditional stays software");
+
+    writeFileSync(sourcePath, `import { widget } from "@weaver/sdk";
+const props = { class: "bg-black" };
+export default widget({ name: "JSX Solid Spread", size: [160, 80] }, () => <panel {...props} />);
+`, "utf8");
+    const jsxSolidSpread = spawnSync(process.execPath, [cli, "bundle", join(root, "widget")], { encoding: "utf8" });
+    assert.equal(jsxSolidSpread.status, 0, jsxSolidSpread.stderr);
+    const jsxSolidSpreadManifest = JSON.parse(readFileSync(join(root, "widget", "dist", "widget.json"), "utf8"));
+    assert.equal(jsxSolidSpreadManifest.renderBackend, "software", "statically solid JSX spread stays software");
+
+    const rejectedJsxClasses = [
+      [`import { widget } from "@weaver/sdk";
+const enabled = true;
+export default widget({ name: "JSX Invalid Branch", size: [160, 80] }, () => (
+  <panel class={enabled ? "bg-black" : "pad-13"} />
+));
+`, /Unknown class utility "pad-13"/, "invalid conditional branch"],
+      [`import { widget } from "@weaver/sdk";
+const enabled = true;
+export default widget({ name: "JSX Unsupported Gradient", size: [160, 80] }, () => (
+  <text class={enabled ? "bg-linear-to-r from-black to-white" : "bg-black"}>Nope</text>
+));
+`, /GradientBackgroundElementUnsupported/, "gradient branch on an unsupported leaf"],
+      [`import { widget } from "@weaver/sdk";
+const dynamicClass = ["bg-black"].join(" ");
+export default widget({ name: "JSX Dynamic Class", size: [160, 80] }, () => (
+  <panel class={dynamicClass} />
+));
+`, /class must resolve to at most 32 literal strings/, "unbounded runtime class"],
+      [`import { widget } from "@weaver/sdk";
+let mutableClass = "bg-linear-to-r from-black to-white";
+export default widget({ name: "JSX Mutable Class", size: [160, 80] }, () => (
+  <panel class={mutableClass} />
+));
+`, /class must resolve to at most 32 literal strings/, "mutable class binding"],
+    ];
+    for (const [source, expected, label] of rejectedJsxClasses) {
+      writeFileSync(sourcePath, source, "utf8");
+      const checked = spawnSync(process.execPath, [cli, "check", join(root, "widget")], { encoding: "utf8" });
+      assert.equal(checked.status, 1, label);
+      assert.match(checked.stderr, expected, label);
+    }
+
+    const tooManyVariants = Array.from({ length: 33 }, (_, index) =>
+      `choice === ${index} ? "bg-[#${index.toString(16).padStart(6, "0")}]" : `,
+    ).join("") + '"bg-black"';
+    writeFileSync(sourcePath, `import { widget } from "@weaver/sdk";
+const choice = 0;
+const classes = ${tooManyVariants};
+export default widget({ name: "JSX Variant Cap", size: [160, 80] }, () => <panel class={classes} />);
+`, "utf8");
+    const capped = spawnSync(process.execPath, [cli, "check", join(root, "widget")], { encoding: "utf8" });
+    assert.equal(capped.status, 1);
+    assert.match(capped.stderr, /class must resolve to at most 32 literal strings/);
+
+    writeFileSync(join(root, "widget", "Gradient.tsx"), `export function Gradient() {
+  return <panel class="bg-linear-to-r from-black to-white" />;
+}
+`, "utf8");
+    writeFileSync(join(root, "widget", "Outer.tsx"), `import { Gradient } from "./Gradient";
+export function Outer() { return <Gradient />; }
+`, "utf8");
+    writeFileSync(sourcePath, `import { widget } from "@weaver/sdk";
+import { Outer } from "./Outer";
+export default widget({ name: "Nested Gradient Backend", size: [160, 80] }, () => <Outer />);
+`, "utf8");
+    const nested = spawnSync(process.execPath, [cli, "bundle", join(root, "widget")], { encoding: "utf8" });
+    assert.equal(nested.status, 0, nested.stderr);
+    const nestedManifest = JSON.parse(readFileSync(join(root, "widget", "dist", "widget.json"), "utf8"));
+    assert.equal(nestedManifest.renderBackend, "gpu", "transitively imported gradient source");
+
+    mkdirSync(join(root, "widget", "components"));
+    writeFileSync(join(root, "widget", "components", "Gradient.tsx"), `export function Gradient() {
+  return <panel class="bg-linear-to-r from-black to-white" />;
+}
+`, "utf8");
+    writeFileSync(join(root, "widget", "components", "index.ts"), `export { Gradient } from "./Gradient";
+`, "utf8");
+    writeFileSync(sourcePath, `import { widget } from "@weaver/sdk";
+import { Gradient } from "./components";
+export default widget({ name: "Barrel Gradient Backend", size: [160, 80] }, () => <Gradient />);
+`, "utf8");
+    const barrel = spawnSync(process.execPath, [cli, "bundle", join(root, "widget")], { encoding: "utf8" });
+    assert.equal(barrel.status, 0, barrel.stderr);
+    const barrelManifest = JSON.parse(readFileSync(join(root, "widget", "dist", "widget.json"), "utf8"));
+    assert.equal(barrelManifest.renderBackend, "gpu", "barrel-re-exported gradient source");
+
+    const hCases = [
+      [`import { h, widget } from "@weaver/sdk";
+export default widget({ name: "h Background", size: [160, 80] }, () => h("panel", { background: { type: "linear", stops: [{ offset: 0, color: "#000" }, { offset: 1, color: "#fff" }] } }));
+`, "h() typed gradient background"],
+      [`import { h as create, widget } from "@weaver/sdk";
+export default widget({ name: "h Class", size: [160, 80] }, () => create("panel", { class: "bg-linear-to-r from-black to-white" }));
+`, "aliased h() gradient class"],
+      [`import { widget } from "@weaver/sdk";
+import * as Weaver from "@weaver/sdk";
+export default widget({ name: "h Canvas", size: [160, 80] }, () => Weaver.h("canvas", { class: "w-[160px] h-[80px]" }));
+`, "namespace h() canvas"],
+      [`import { h, widget } from "@weaver/sdk";
+export default widget({ name: "h Bound Background", size: [160, 80] }, () => {
+  const props = { background: { type: "linear" as const, stops: [{ offset: 0, color: "#000" }, { offset: 1, color: "#fff" }] } };
+  return h("panel", props);
+});
+`, "h() bound typed gradient background"],
+      [`import { h, widget } from "@weaver/sdk";
+export default widget({ name: "h Spread Class", size: [160, 80] }, () => {
+  const gradientClass = "bg-linear-to-r from-black to-white";
+  const base = { class: gradientClass };
+  const props = { ...base };
+  return h("panel", props);
+});
+`, "h() transitively bound gradient class"],
+      [`import { h, widget } from "@weaver/sdk";
+export default widget({ name: "h Conditional Class", size: [160, 80] }, () => {
+  const enabled = true;
+  return h("panel", { class: enabled ? "bg-linear-to-r from-black to-white" : "bg-black" });
+});
+`, "h() conditional gradient class"],
+      [`import { h, widget } from "@weaver/sdk";
+const create = h;
+export default widget({ name: "h Local Alias", size: [160, 80] }, () =>
+  create("panel", { class: "bg-linear-to-r from-black to-white" }));
+`, "h() immutable local alias"],
+      [`import { widget } from "@weaver/sdk";
+import * as Weaver from "@weaver/sdk";
+const Factory = Weaver;
+const create = Factory.h;
+export default widget({ name: "h Namespace Alias", size: [160, 80] }, () =>
+  create("panel", { class: "bg-linear-to-r from-black to-white" }));
+`, "h() chained namespace alias"],
+    ];
+    for (const [source, label] of hCases) {
+      writeFileSync(sourcePath, source, "utf8");
+      const bundled = spawnSync(process.execPath, [cli, "bundle", join(root, "widget")], { encoding: "utf8" });
+      assert.equal(bundled.status, 0, bundled.stderr);
+      const manifest = JSON.parse(readFileSync(join(root, "widget", "dist", "widget.json"), "utf8"));
+      assert.equal(manifest.renderBackend, "gpu", label);
+    }
+
+    writeFileSync(join(root, "widget", "factory.ts"), `export { h as create } from "@weaver/sdk";
+`, "utf8");
+    writeFileSync(sourcePath, `import { widget } from "@weaver/sdk";
+import { create } from "./factory";
+export default widget({ name: "Local h Re-export", size: [160, 80] }, () =>
+  create("panel", { class: "bg-linear-to-r from-black to-white" }));
+`, "utf8");
+    const localFactory = spawnSync(process.execPath, [cli, "bundle", join(root, "widget")], { encoding: "utf8" });
+    assert.equal(localFactory.status, 0, localFactory.stderr);
+    const localFactoryManifest = JSON.parse(readFileSync(join(root, "widget", "dist", "widget.json"), "utf8"));
+    assert.equal(localFactoryManifest.renderBackend, "gpu", "locally re-exported h() gradient class");
+
+    writeFileSync(join(root, "widget", "aliased-factory.ts"), `import { h } from "@weaver/sdk";
+const create = h;
+export { create };
+`, "utf8");
+    writeFileSync(sourcePath, `import { widget } from "@weaver/sdk";
+import { create } from "./aliased-factory";
+export default widget({ name: "Exported h Alias", size: [160, 80] }, () =>
+  create("panel", { class: "bg-linear-to-r from-black to-white" }));
+`, "utf8");
+    const exportedAlias = spawnSync(process.execPath, [cli, "bundle", join(root, "widget")], { encoding: "utf8" });
+    assert.equal(exportedAlias.status, 0, exportedAlias.stderr);
+    const exportedAliasManifest = JSON.parse(readFileSync(join(root, "widget", "dist", "widget.json"), "utf8"));
+    assert.equal(exportedAliasManifest.renderBackend, "gpu", "locally exported immutable h() alias");
+
+    writeFileSync(sourcePath, `import { h, widget } from "@weaver/sdk";
+const props = { class: "bg-linear-to-r from-black to-white" };
+export default widget({ name: "h Scoped Props", size: [160, 80] }, () => {
+  const props = { class: "p-2" };
+  return h("panel", props);
+});
+`, "utf8");
+    const scoped = spawnSync(process.execPath, [cli, "bundle", join(root, "widget")], { encoding: "utf8" });
+    assert.equal(scoped.status, 0, scoped.stderr);
+    const scopedManifest = JSON.parse(readFileSync(join(root, "widget", "dist", "widget.json"), "utf8"));
+    assert.equal(scopedManifest.renderBackend, "software", "h() bound props respect lexical shadowing");
+
+    writeFileSync(sourcePath, `import { h, widget } from "@weaver/sdk";
+const create = h;
+export default widget({ name: "h Shadowed Factory", size: [160, 80] }, () => {
+  const create = (_type: string, _props: Record<string, unknown>) => h("panel", { class: "bg-black" });
+  return create("panel", { class: "bg-linear-to-r from-black to-white" });
+});
+`, "utf8");
+    const shadowedFactory = spawnSync(process.execPath, [cli, "bundle", join(root, "widget")], { encoding: "utf8" });
+    assert.equal(shadowedFactory.status, 0, shadowedFactory.stderr);
+    const shadowedFactoryManifest = JSON.parse(readFileSync(join(root, "widget", "dist", "widget.json"), "utf8"));
+    assert.equal(shadowedFactoryManifest.renderBackend, "software", "h() factory aliases respect lexical shadowing");
+
+    writeFileSync(sourcePath, `import { widget } from "@weaver/sdk";
+export default widget({ name: "Hoisted Local h", size: [160, 80] }, () =>
+  h("panel", { class: "bg-linear-to-r from-black to-white" }));
+function h(_type: string, _props: Record<string, unknown>) {
+  return <panel class="bg-black" />;
+}
+`, "utf8");
+    const hoistedFactory = spawnSync(process.execPath, [cli, "bundle", join(root, "widget")], { encoding: "utf8" });
+    assert.equal(hoistedFactory.status, 0, hoistedFactory.stderr);
+    const hoistedFactoryManifest = JSON.parse(readFileSync(join(root, "widget", "dist", "widget.json"), "utf8"));
+    assert.equal(hoistedFactoryManifest.renderBackend, "software", "hoisted local h() stays software regardless of declaration order");
+
+    writeFileSync(sourcePath, `import { h, widget } from "@weaver/sdk";
+export default widget({ name: "h Conditional Solid", size: [160, 80] }, () => {
+  const enabled = true;
+  return h("panel", { class: enabled ? "bg-black" : "bg-white" });
+});
+`, "utf8");
+    const conditionalSolid = spawnSync(process.execPath, [cli, "bundle", join(root, "widget")], { encoding: "utf8" });
+    assert.equal(conditionalSolid.status, 0, conditionalSolid.stderr);
+    const conditionalSolidManifest = JSON.parse(readFileSync(join(root, "widget", "dist", "widget.json"), "utf8"));
+    assert.equal(conditionalSolidManifest.renderBackend, "software", "h() statically solid conditional stays software");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("media transport capability gate follows SDK signatures through every binding form", () => {
   const root = mkdtempSync(join(tmpdir(), "weaver-media-capability-"));
   const widget = join(root, "transport");
@@ -625,6 +915,23 @@ export default widget({ name: "State Test", size: [160, 80] }, () =>
     const rejected = spawnSync(process.execPath, ["cli/dist/index.js", "check", widget], { encoding: "utf8" });
     assert.equal(rejected.status, 1);
     assert.match(rejected.stderr, /NearestPressableAncestor: state variants on non-pressable <icon> require a nearest <button> or <slider> ancestor/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("check rejects gradient classes on non-container leaves", () => {
+  const root = mkdtempSync(join(tmpdir(), "weaver-gradient-element-"));
+  const cli = fileURLToPath(new URL("../dist/index.js", import.meta.url));
+  try {
+    assert.equal(spawnSync(process.execPath, [cli, "init", "widget"], { cwd: root, encoding: "utf8" }).status, 0);
+    writeFileSync(join(root, "widget", "widget.tsx"), `import { widget } from "@weaver/sdk";
+export default widget({ name: "Gradient Element", size: [160, 80] }, () =>
+  <canvas class="w-[40px] h-[40px] bg-linear-to-r from-red-500 to-blue-500" onFrame={() => {}} />);
+`);
+    const checked = spawnSync(process.execPath, [cli, "check", join(root, "widget")], { encoding: "utf8" });
+    assert.equal(checked.status, 1);
+    assert.match(checked.stderr, /GradientBackgroundElementUnsupported: gradient backgrounds are supported on <column>, <row>, <stack>, <panel>, and <button>; received <canvas>/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

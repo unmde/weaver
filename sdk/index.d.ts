@@ -85,6 +85,24 @@ export interface CanvasCtx {
   polyline(points: number[], width: number, color: string): void;
 }
 
+export type GradientPoint = readonly [x: number, y: number];
+export type GradientInterpolation = "srgb" | "srgb-linear" | "oklab";
+export type GradientSpread = "pad" | "repeat" | "reflect";
+export interface GradientStop { offset: number; color: string }
+interface GradientOptions { interpolation?: GradientInterpolation }
+interface AxisGradientOptions extends GradientOptions { spread?: GradientSpread; stops: readonly GradientStop[] }
+export interface LinearGradient extends AxisGradientOptions { type: "linear"; start?: GradientPoint; end?: GradientPoint }
+export interface RadialGradient extends AxisGradientOptions { type: "radial"; center?: GradientPoint; radius?: GradientPoint }
+export interface ConicGradient extends AxisGradientOptions { type: "conic"; center?: GradientPoint; from?: number }
+export interface MeshPatch {
+  points: readonly GradientPoint[];
+  colors: readonly [string, string, string, string];
+}
+export interface MeshGradient extends GradientOptions { type: "mesh"; patches: readonly MeshPatch[] }
+export type BackgroundGradient = LinearGradient | RadialGradient | ConicGradient | MeshGradient;
+export type BackgroundGradientStack = BackgroundGradient | readonly BackgroundGradient[];
+export function serializeBackground(background: BackgroundGradientStack): string;
+
 export function widget(config: WidgetConfig, component: () => JSX.Element): WidgetModule;
 export function useState<T>(initial: T | (() => T)): [T, (next: T | ((prev: T) => T)) => void];
 export function useRef<T>(initial: T): { current: T };
@@ -126,6 +144,11 @@ declare global {
       children?: WidgetChild | WidgetChild[];
     }
 
+    interface GradientBoxProps extends BoxProps {
+      /** One gradient or a bottom-to-top painter-ordered gradient stack. */
+      background?: BackgroundGradientStack;
+    }
+
     interface TextProps {
       class?: string;
       children?: string | number | Signal<string | number> | (string | number)[];
@@ -136,14 +159,14 @@ declare global {
       | { class?: string; d: string; viewBox?: string; stroke?: number; name?: never };
 
     interface IntrinsicElements {
-      column: BoxProps;
-      row: BoxProps;
-      stack: BoxProps;
-      panel: BoxProps;
+      column: GradientBoxProps;
+      row: GradientBoxProps;
+      stack: GradientBoxProps;
+      panel: GradientBoxProps;
       text: TextProps;
       icon: IconProps;
       image: BoxProps & { src: string; fit?: "cover" | "contain" | "stretch"; tile?: boolean };
-      button: BoxProps & {
+      button: GradientBoxProps & {
         accessibilityLabel?: string;
         onPress: (event?: PressEvent) => void;
         onDoublePress?: (event: PressEvent) => void;

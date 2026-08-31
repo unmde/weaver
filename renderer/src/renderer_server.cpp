@@ -152,6 +152,7 @@ static void serveWidget(HANDLE pipe, NativeSdkD3DSharedRenderer *renderer) {
             frame.source_texture_width_px, frame.source_texture_height_px,
             frame.geometry_generation, frame.clear_r, frame.clear_g,
             frame.clear_b, frame.clear_a, packet.data(), packet.size(),
+            frame.retained_above_packet != 0,
             frame.retained_generation, frame.retained_width, frame.retained_height,
             reinterpret_cast<const float *>(frame.retained_dirty_rects),
             frame.retained_dirty_rect_count,

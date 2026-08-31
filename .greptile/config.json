@@ -1,0 +1,5 @@
+{
+  "ignorePatterns": "runtime/native-sdk\nruntime/native-sdk/**",
+  "instructions": "runtime/native-sdk is a pinned external Git submodule whose implementation is reviewed and executable-tested in SunkenInTime/native. Treat its gitlink as dependency metadata; do not inspect, execute, or score a cached Native checkout. Review Weaver-owned integration code and its exact-pin contract. The required GitHub check named Linux portable runtime contracts performs a recursive submodule checkout at the recorded gitlink and runs the complete retained tree and gradient projection suite with zig build test -Dplatform=null -Dweb-layer=exclude -Dtrace=off. Treat that passing exact-pin check as the authoritative retained-runtime execution result. A reviewer sandbox that cannot align the external submodule or exceeds its execution window is an infrastructure limitation, not a Weaver defect or missing verification.",
+  "triggerOnUpdates": true
+}

@@ -160,11 +160,12 @@ fn primaryMonitorGeometry() MonitorGeometry {
 /// physical anchor position back once at the target monitor's scale; the
 /// Native SDK converts it to physical pixels once during HWND creation.
 pub fn desktopFrame(value: Manifest) native_sdk.geometry.RectF {
-    if (builtin.os.tag == .macos) {
+    if (builtin.os.tag != .windows) {
         // AppKit resolves `primaryDisplayAnchor` against the live primary
         // visible frame. This frame contributes size only; keeping the
         // placeholder origin out of the placement math prevents a second
-        // platform coordinate conversion from appearing here.
+        // platform coordinate conversion from appearing here. The Linux
+        // null-backend verification host likewise has no physical desktop.
         return native_sdk.geometry.RectF.init(0, 0, value.size[0], value.size[1]);
     }
     const monitor = primaryMonitorGeometry();

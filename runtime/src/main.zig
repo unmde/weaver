@@ -4,6 +4,7 @@ const weaver_build_options = @import("weaver_build_options");
 const runner = @import("runner");
 const native_sdk = @import("native_sdk");
 const geometry_mod = @import("geometry.zig");
+const gradient_mod = @import("gradients.zig");
 const dev_reload = @import("dev_reload.zig");
 const image_paths = @import("image_paths.zig");
 const js_engine = @import("js_engine.zig");
@@ -733,7 +734,9 @@ fn projectSameViewUpdate(
         // the batch API carries a composed metadata tail, keep their exact
         // semantics by taking the ordinary rebuild path.
         if (!node.hover_style.isEmpty() or !node.pressed_style.isEmpty() or
-            node.shadow != null or node.text_shadow != null or node.iconPathSlice().len != 0)
+            node.shadow != null or node.text_shadow != null or node.iconPathSlice().len != 0 or
+            node.radius_top_left >= 0 or node.radius_top_right >= 0 or
+            node.radius_bottom_right >= 0 or node.radius_bottom_left >= 0)
         {
             return false;
         }
@@ -768,7 +771,7 @@ fn projectionFailurePanel(ui: *WidgetUi, is_root: bool) WidgetUi.Node {
 fn hasPaintStyle(node: *const tree_mod.Node) bool {
     return node.background != null or node.border_color != null or node.border_width > 0 or node.radius > 0 or
         node.radius_top_left >= 0 or node.radius_top_right >= 0 or node.radius_bottom_right >= 0 or node.radius_bottom_left >= 0 or node.shadow != null or
-        !node.hover_style.isEmpty() or !node.pressed_style.isEmpty();
+        node.backgroundGradientSlice().len > 0 or !node.hover_style.isEmpty() or !node.pressed_style.isEmpty();
 }
 
 fn nativeInteractionStyle(style: tree_mod.InteractionStyle) ?native_sdk.canvas.WidgetInteractionStyle {
@@ -795,6 +798,16 @@ fn nativeInteractionStyle(style: tree_mod.InteractionStyle) ?native_sdk.canvas.W
 
 fn attachEffects(ui: *WidgetUi, retained: *const tree_mod.Node, font_id: ?native_sdk.canvas.FontId, source: WidgetUi.Node) WidgetUi.Node {
     var icon_elements: ?[]const native_sdk.canvas.PathElement = null;
+    const corner_radii: native_sdk.canvas.WidgetCornerRadii = .{
+        .top_left = nativeCornerRadius(retained.radius_top_left),
+        .top_right = nativeCornerRadius(retained.radius_top_right),
+        .bottom_right = nativeCornerRadius(retained.radius_bottom_right),
+        .bottom_left = nativeCornerRadius(retained.radius_bottom_left),
+    };
+    const gradient_commands = gradient_mod.decode(ui.arena, retained.backgroundGradientSlice()) catch |err| block: {
+        if (retained.backgroundGradientSlice().len > 0) noteProjectionFailure("widget gradient projection failed: cause={s}", .{@errorName(err)});
+        break :block &.{};
+    };
     if (retained.iconPathSlice().len > 0) {
         const element_count = native_sdk.canvas.normalized_path.countElements(retained.iconPathSlice()) catch |err| block: {
             std.log.err("bundle emitted invalid normalized icon path: {s}", .{@errorName(err)});
@@ -814,7 +827,9 @@ fn attachEffects(ui: *WidgetUi, retained: *const tree_mod.Node, font_id: ?native
     const count = @as(usize, @intFromBool(retained.shadow != null)) +
         @as(usize, @intFromBool(retained.text_shadow != null)) +
         @as(usize, @intFromBool(font_id != null)) +
-        @as(usize, @intFromBool(icon_elements != null));
+        @as(usize, @intFromBool(icon_elements != null)) +
+        @as(usize, @intFromBool(!corner_radii.isDefault())) +
+        gradient_commands.len;
     if (count == 0) return source;
     const existing = source.widget.immediate_commands;
     const combined = ui.arena.alloc(native_sdk.canvas.ImmediateCanvasCommand, existing.len + count) catch |err| {
@@ -823,6 +838,8 @@ fn attachEffects(ui: *WidgetUi, retained: *const tree_mod.Node, font_id: ?native
     };
     @memcpy(combined[0..existing.len], existing);
     var cursor: usize = existing.len;
+    @memcpy(combined[cursor .. cursor + gradient_commands.len], gradient_commands);
+    cursor += gradient_commands.len;
     if (retained.shadow) |shadow| {
         combined[cursor] = .{ .box_shadow = .{
             .offset = shadow.offset,
@@ -841,13 +858,19 @@ fn attachEffects(ui: *WidgetUi, retained: *const tree_mod.Node, font_id: ?native
         combined[cursor] = .{ .text_font = id };
         cursor += 1;
     }
+    if (!corner_radii.isDefault()) {
+        combined[cursor] = .{ .corner_radii = corner_radii };
+        cursor += 1;
+    }
     if (icon_elements) |elements| {
         combined[cursor] = .{ .icon_path = .{
             .view_box = retained.icon_view_box,
             .elements = elements,
             .stroke_width = retained.icon_stroke,
         } };
+        cursor += 1;
     }
+    std.debug.assert(cursor == combined.len);
     var result = source;
     result.widget.immediate_commands = combined;
     return result;
@@ -917,10 +940,6 @@ fn buildNode(ui: *WidgetUi, model: *const Model, id: tree_mod.NodeId, is_root: b
             .background = retained.background,
             .foreground = retained.text_color,
             .radius = if (retained.radius > 0) retained.radius else null,
-            .radius_top_left = nativeCornerRadius(retained.radius_top_left),
-            .radius_top_right = nativeCornerRadius(retained.radius_top_right),
-            .radius_bottom_right = nativeCornerRadius(retained.radius_bottom_right),
-            .radius_bottom_left = nativeCornerRadius(retained.radius_bottom_left),
             .border = retained.border_color,
             .stroke_width = retained.border_width,
             .quiet_hover = true,
@@ -1100,8 +1119,8 @@ fn loadFonts(io: std.Io, allocator: std.mem.Allocator, directory: []const u8, fo
     return registrations;
 }
 
-fn nativeCornerRadius(retained: f32) f32 {
-    return if (retained >= 0) retained else -std.math.inf(f32);
+fn nativeCornerRadius(retained: f32) ?f32 {
+    return if (retained >= 0) retained else null;
 }
 
 fn loadLocalImages(io: std.Io, allocator: std.mem.Allocator, directory: []const u8, model: *Model) !void {
@@ -2138,9 +2157,9 @@ test "media command deadline one-shot is exactly three seconds" {
     try std.testing.expectEqual(@as(u64, 1), mediaDeadlineDelay(3100, 3100));
 }
 
-test "corner radius projection preserves authored values and maps retained unset in-band" {
-    try std.testing.expectEqual(@as(f32, 12.5), nativeCornerRadius(12.5));
-    try std.testing.expect(nativeCornerRadius(-1) == -std.math.inf(f32));
+test "corner radius projection preserves authored values and omits retained unset" {
+    try std.testing.expectEqual(@as(?f32, 12.5), nativeCornerRadius(12.5));
+    try std.testing.expectEqual(@as(?f32, null), nativeCornerRadius(-1));
 }
 
 test "painted row lowering preserves flex wrap on the inner layout node" {
@@ -2194,6 +2213,46 @@ test "attached effects combine builder metadata with box and text shadows" {
     }
     switch (built.root.immediate_commands[2]) {
         .text_shadow => |shadow| try std.testing.expectEqual(@as(f32, 3), shadow.blur),
+        else => return error.TestExpectedEqual,
+    }
+}
+
+test "gradient-only layout lowers through a painted wrapper and preserves painter order" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    var model: Model = .{ .tree = .{ .allocator = std.testing.allocator } };
+    defer model.tree.deinit();
+    const row = try model.tree.createNode(.row);
+    const child = try model.tree.createNode(.panel);
+    try model.tree.appendChild(row, child);
+    try model.tree.setBackgroundGradient(row,
+        \\{"v":1,"layers":[{"kind":"linear","start":[0,0.5],"end":[1,0.5],"stops":[{"offset":0,"color":"#FF0000FF"},{"offset":1,"color":"#0000FFFF"}],"spread":"repeat","interpolation":"srgb"},{"kind":"radial","center":[0.25,0.5],"radii":[0.75,1],"stops":[{"offset":0,"color":"#FFFFFFFF"},{"offset":1,"color":"#FFFFFF00"}],"spread":"pad","interpolation":"oklab"}]}
+    );
+
+    var ui = WidgetUi.init(arena_state.allocator());
+    const built = try ui.finalize(buildNodeForTest(&ui, &model, row, true));
+    try std.testing.expectEqual(native_sdk.canvas.WidgetKind.panel, built.root.kind);
+    try std.testing.expectEqual(@as(usize, 1), built.root.children.len);
+    try std.testing.expectEqual(native_sdk.canvas.WidgetKind.row, built.root.children[0].kind);
+    try std.testing.expectEqual(@as(usize, 2), built.root.immediate_commands.len);
+    switch (built.root.immediate_commands[0]) {
+        .background_gradient => |gradient| switch (gradient) {
+            .linear => |linear| {
+                try std.testing.expectEqual(native_sdk.canvas.GradientSpread.repeat, linear.spread);
+                try std.testing.expectEqual(native_sdk.canvas.GradientInterpolation.srgb, linear.interpolation);
+            },
+            else => return error.TestExpectedEqual,
+        },
+        else => return error.TestExpectedEqual,
+    }
+    switch (built.root.immediate_commands[1]) {
+        .background_gradient => |gradient| switch (gradient) {
+            .radial => |radial| {
+                try std.testing.expectEqual(native_sdk.geometry.PointF.init(0.25, 0.5), radial.center);
+                try std.testing.expectEqual(native_sdk.canvas.GradientInterpolation.oklab, radial.interpolation);
+            },
+            else => return error.TestExpectedEqual,
+        },
         else => return error.TestExpectedEqual,
     }
 }
@@ -2369,10 +2428,14 @@ test "painted retained stack keeps overlay children under rounded inset shadow" 
     try std.testing.expectEqual(native_sdk.canvas.WidgetKind.panel, built.root.kind);
     try std.testing.expect(built.root.layout.flags.clip_content);
     try std.testing.expectEqual(@as(?f32, 14), built.root.style.radius);
-    try std.testing.expectEqual(@as(?f32, 3), built.root.style.radius_bottom_left);
-    try std.testing.expectEqual(@as(usize, 1), built.root.immediate_commands.len);
+    try std.testing.expectEqual(@as(?f32, 3), built.root.cornerRadii().bottom_left);
+    try std.testing.expectEqual(@as(usize, 2), built.root.immediate_commands.len);
     switch (built.root.immediate_commands[0]) {
         .box_shadow => |shadow| try std.testing.expect(shadow.inset),
+        else => return error.TestExpectedEqual,
+    }
+    switch (built.root.immediate_commands[1]) {
+        .corner_radii => |radii| try std.testing.expectEqual(@as(?f32, 3), radii.bottom_left),
         else => return error.TestExpectedEqual,
     }
     try std.testing.expectEqual(@as(usize, 1), built.root.children.len);
@@ -2462,5 +2525,5 @@ test "retained image projects fit tiling and class corner radii" {
     try std.testing.expectEqual(native_sdk.canvas.ImageFit.contain, projected.widget.image_fit);
     try std.testing.expect(projected.widget.image_tile);
     try std.testing.expectEqual(@as(?f32, 12), projected.widget.style.radius);
-    try std.testing.expectEqual(@as(?f32, 3), projected.widget.style.radius_top_right);
+    try std.testing.expectEqual(@as(?f32, 3), projected.widget.cornerRadii().top_right);
 }

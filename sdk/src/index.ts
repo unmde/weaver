@@ -28,3 +28,18 @@ export {
   type WidgetConfig,
   type WidgetModule,
 } from "./reconciler.js";
+
+export {
+  serializeBackground,
+  type BackgroundGradient,
+  type BackgroundGradientStack,
+  type ConicGradient,
+  type GradientInterpolation,
+  type GradientPoint,
+  type GradientSpread,
+  type GradientStop,
+  type LinearGradient,
+  type MeshGradient,
+  type MeshPatch,
+  type RadialGradient,
+} from "./gradients.js";

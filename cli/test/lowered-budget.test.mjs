@@ -68,6 +68,25 @@ test("check rejects depth after painted layout lowering", () => {
   }
 });
 
+test("check budgets the painted branch of a finite class expression", () => {
+  let tree = "<text>leaf</text>";
+  for (let index = 0; index < 16; index += 1) {
+    tree = `<row class={painted ? "border" : ""}>${tree}</row>`;
+  }
+  const widgetSource = `import { widget } from "@weaver/sdk";
+const painted = true;
+export default widget({ name: "Conditional Painted Budget", size: [320, 200] }, () => (${tree}));
+`;
+  const { root, widget } = fixture(widgetSource);
+  try {
+    const checked = runCli(root, "check", widget);
+    assert.equal(checked.status, 1);
+    assert.match(checked.stderr, /LoweredWidgetDepthLimit: this tree lowers to depth 33 \(Native limit 32\)/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("check budgets only the exported widget's reachable tree", () => {
   const dead = `<column>${Array.from({ length: 1024 }, () => "<row />").join("")}</column>`;
   const widgetSource = `import { widget } from "@weaver/sdk";

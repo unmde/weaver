@@ -1,0 +1,1 @@
+fix: **Run retained gradient contracts on a portable host**: Linux CI now executes the complete runtime suite against the explicit Native null backend, while production Linux builds remain rejected and Windows/macOS stay the only shipped runtime targets.

@@ -550,6 +550,14 @@ fn setProp(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c.JSVal
             ),
             else => failProp(js, id, key.bytes, err),
         };
+    } else if (std.mem.eql(u8, key.bytes, "backgroundGradient")) {
+        const value = stringArg(js, argv[2]) catch return fail(js, "backgroundGradient must be a canonical gradient document");
+        defer c.JS_FreeCString(js, value.raw);
+        state(js).tree.setBackgroundGradient(id, value.bytes) catch |err| return switch (err) {
+            error.GradientTooLong => failFmt(js, "background gradient capacity exhausted: max_gradient_wire_bytes={d}, asked for {d}", .{ tree_mod.max_gradient_wire_bytes, value.bytes.len }),
+            error.InvalidGradient => fail(js, "backgroundGradient is malformed or exceeds gradient resource limits"),
+            else => failProp(js, id, key.bytes, err),
+        };
     } else if (std.mem.eql(u8, key.bytes, "source")) {
         const value = stringArg(js, argv[2]) catch return fail(js, "source must be a string");
         defer c.JS_FreeCString(js, value.raw);

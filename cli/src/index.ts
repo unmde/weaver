@@ -315,7 +315,7 @@ async function bundleWidget(directory: string): Promise<BundleResult> {
     origins: project.config.origins ?? [],
     subscribe: project.config.subscribe ?? [],
     capabilities: project.config.capabilities ?? [],
-    renderBackend: sourceUsesCanvas(project.sourceFile) ? "gpu" : "software",
+    renderBackend: projectNeedsGpuSurface(project) ? "gpu" : "software",
     fonts: project.fonts,
   };
   writeAtomic(join(outputDirectory, "widget.json"), `${JSON.stringify(manifest, null, 2)}\n`);
@@ -813,15 +813,417 @@ function writeAtomic(path: string, data: string | Uint8Array): void {
   }
 }
 
-function sourceUsesCanvas(sourceFile: ts.SourceFile): boolean {
-  let found = false;
-  const visit = (node: ts.Node): void => {
-    if (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) {
-      if (node.tagName.getText(sourceFile) === "canvas") found = true;
+const maxStaticClassVariants = 32;
+
+interface StaticExpressionContext {
+  unwrap(expression: ts.Expression): ts.Expression;
+  boundExpression(name: string): ts.Expression | null | undefined;
+  stringVariants(expression: ts.Expression): readonly string[] | null;
+}
+
+function walkSourceWithStaticExpressions(
+  sourceFile: ts.SourceFile,
+  visitor: (node: ts.Node, context: StaticExpressionContext) => boolean,
+): boolean {
+  const bindingScopes: Array<Map<string, ts.Expression | null>> = [new Map()];
+  const bindName = (name: ts.BindingName, value: ts.Expression | null): void => {
+    if (ts.isIdentifier(name)) {
+      bindingScopes[bindingScopes.length - 1].set(name.text, value);
+      return;
     }
-    if (!found) ts.forEachChild(node, visit);
+    for (const element of name.elements) {
+      if (!ts.isOmittedExpression(element)) bindName(element.name, null);
+    }
   };
-  visit(sourceFile);
+  const predeclareStatements = (statements: ts.NodeArray<ts.Statement>): void => {
+    for (const statement of statements) {
+      if ((ts.isFunctionDeclaration(statement) || ts.isClassDeclaration(statement)) && statement.name) {
+        bindName(statement.name, null);
+      } else if (ts.isVariableStatement(statement)) {
+        for (const declaration of statement.declarationList.declarations) bindName(declaration.name, null);
+      }
+    }
+  };
+  const boundExpression = (name: string): ts.Expression | null | undefined => {
+    for (let index = bindingScopes.length - 1; index >= 0; index -= 1) {
+      const scope = bindingScopes[index];
+      if (scope.has(name)) return scope.get(name);
+    }
+    return undefined;
+  };
+  const unwrap = (expression: ts.Expression): ts.Expression => {
+    let current = expression;
+    while (ts.isParenthesizedExpression(current) || ts.isAsExpression(current) ||
+      ts.isTypeAssertionExpression(current) || ts.isNonNullExpression(current) || ts.isSatisfiesExpression(current)) {
+      current = current.expression;
+    }
+    return current;
+  };
+  const merge = (groups: readonly (readonly string[])[]): readonly string[] | null => {
+    const values = new Set<string>();
+    for (const group of groups) {
+      for (const value of group) {
+        values.add(value);
+        if (values.size > maxStaticClassVariants) return null;
+      }
+    }
+    return [...values];
+  };
+  const combine = (left: readonly string[], right: readonly string[]): readonly string[] | null => {
+    const values = new Set<string>();
+    for (const prefix of left) {
+      for (const suffix of right) {
+        values.add(`${prefix}${suffix}`);
+        if (values.size > maxStaticClassVariants) return null;
+      }
+    }
+    return [...values];
+  };
+  const stringVariants = (expression: ts.Expression, seen = new Set<ts.Expression>()): readonly string[] | null => {
+    const current = unwrap(expression);
+    if (ts.isStringLiteral(current) || ts.isNoSubstitutionTemplateLiteral(current) || ts.isNumericLiteral(current)) {
+      return [current.text];
+    }
+    if (seen.has(current)) return null;
+    if (ts.isIdentifier(current)) {
+      const bound = boundExpression(current.text);
+      if (!bound) return null;
+      const nextSeen = new Set(seen);
+      nextSeen.add(current);
+      return stringVariants(bound, nextSeen);
+    }
+    if (ts.isConditionalExpression(current)) {
+      const whenTrue = stringVariants(current.whenTrue, new Set(seen));
+      const whenFalse = stringVariants(current.whenFalse, new Set(seen));
+      return whenTrue && whenFalse ? merge([whenTrue, whenFalse]) : null;
+    }
+    if (ts.isBinaryExpression(current) && current.operatorToken.kind === ts.SyntaxKind.PlusToken) {
+      const left = stringVariants(current.left, new Set(seen));
+      const right = stringVariants(current.right, new Set(seen));
+      return left && right ? combine(left, right) : null;
+    }
+    if (ts.isTemplateExpression(current)) {
+      let values: readonly string[] = [current.head.text];
+      for (const span of current.templateSpans) {
+        const substitution = stringVariants(span.expression, new Set(seen));
+        if (!substitution) return null;
+        const expanded = combine(values, substitution);
+        if (!expanded) return null;
+        values = expanded.map((value) => `${value}${span.literal.text}`);
+      }
+      return values;
+    }
+    return null;
+  };
+  const context: StaticExpressionContext = { unwrap, boundExpression, stringVariants };
+  const visitChildren = (node: ts.Node): boolean => {
+    let stopped = false;
+    ts.forEachChild(node, (child) => {
+      if (!stopped) stopped = walk(child);
+    });
+    return stopped;
+  };
+  const walk = (node: ts.Node): boolean => {
+    if (visitor(node, context)) return true;
+    if (ts.isVariableDeclaration(node)) {
+      if (node.initializer && walk(node.initializer)) return true;
+      const immutable = ts.isVariableDeclarationList(node.parent) && (node.parent.flags & ts.NodeFlags.Const) !== 0;
+      bindName(node.name, immutable ? node.initializer ?? null : null);
+      return false;
+    }
+    if (ts.isFunctionDeclaration(node) && node.name) bindName(node.name, null);
+    if (ts.isClassDeclaration(node) && node.name) bindName(node.name, null);
+    if (ts.isFunctionLike(node)) {
+      bindingScopes.push(new Map());
+      for (const parameter of node.parameters) bindName(parameter.name, null);
+      const stopped = visitChildren(node);
+      bindingScopes.pop();
+      return stopped;
+    }
+    if (ts.isBlock(node) || ts.isModuleBlock(node)) {
+      bindingScopes.push(new Map());
+      predeclareStatements(node.statements);
+      const stopped = visitChildren(node);
+      bindingScopes.pop();
+      return stopped;
+    }
+    if (ts.isCatchClause(node)) {
+      bindingScopes.push(new Map());
+      if (node.variableDeclaration) bindName(node.variableDeclaration.name, null);
+      const stopped = visitChildren(node);
+      bindingScopes.pop();
+      return stopped;
+    }
+    return visitChildren(node);
+  };
+  predeclareStatements(sourceFile.statements);
+  return walk(sourceFile);
+}
+
+function jsxClassVariants(attribute: ts.JsxAttribute, context: StaticExpressionContext): readonly string[] | null {
+  const initializer = attribute.initializer;
+  if (!initializer) return null;
+  if (ts.isStringLiteral(initializer)) return [initializer.text];
+  if (ts.isJsxExpression(initializer) && initializer.expression) return context.stringVariants(initializer.expression);
+  return null;
+}
+
+interface HFactoryBindings {
+  identifiers: ReadonlySet<string>;
+  namespaces: ReadonlyMap<string, ReadonlySet<string>>;
+}
+
+function projectNeedsGpuSurface(project: SourceProject): boolean {
+  const bindings = hFactoryBindings(project.directory, project.sourceFiles);
+  return project.sourceFiles.some((sourceFile) =>
+    sourceNeedsGpuSurface(sourceFile, bindings.get(resolve(sourceFile.fileName))));
+}
+
+function hFactoryBindings(directory: string, sourceFiles: readonly ts.SourceFile[]): ReadonlyMap<string, HFactoryBindings> {
+  const filesByPath = new Map(sourceFiles.map((sourceFile) => [resolve(sourceFile.fileName), sourceFile]));
+  const exportedNames = new Map([...filesByPath.keys()].map((path) => [path, new Set<string>()]));
+  const targetExports = (sourceFile: ts.SourceFile, specifier: string): ReadonlySet<string> => {
+    if (specifier === "@weaver/sdk") return new Set(["h"]);
+    const path = localImportPath(directory, sourceFile, specifier);
+    return path ? exportedNames.get(resolve(path)) ?? new Set() : new Set();
+  };
+  const localBindings = (sourceFile: ts.SourceFile): HFactoryBindings => {
+    const identifiers = new Set<string>();
+    const namespaces = new Map<string, ReadonlySet<string>>();
+    for (const statement of sourceFile.statements) {
+      if (!ts.isImportDeclaration(statement) || !statement.importClause || !ts.isStringLiteral(statement.moduleSpecifier)) continue;
+      const exports = targetExports(sourceFile, statement.moduleSpecifier.text);
+      if (statement.importClause.name && exports.has("default")) identifiers.add(statement.importClause.name.text);
+      const imported = statement.importClause.namedBindings;
+      if (imported && ts.isNamedImports(imported)) {
+        for (const binding of imported.elements) {
+          if (exports.has(binding.propertyName?.text ?? binding.name.text)) identifiers.add(binding.name.text);
+        }
+      } else if (imported && ts.isNamespaceImport(imported)) {
+        namespaces.set(imported.name.text, exports);
+      }
+    }
+    const unwrap = (expression: ts.Expression): ts.Expression => {
+      let current = expression;
+      while (ts.isParenthesizedExpression(current) || ts.isAsExpression(current) ||
+        ts.isTypeAssertionExpression(current) || ts.isNonNullExpression(current) || ts.isSatisfiesExpression(current)) {
+        current = current.expression;
+      }
+      return current;
+    };
+    const namespaceBinding = (expression: ts.Expression): ReadonlySet<string> | undefined => {
+      const current = unwrap(expression);
+      return ts.isIdentifier(current) ? namespaces.get(current.text) : undefined;
+    };
+    const factoryBinding = (expression: ts.Expression): boolean => {
+      const current = unwrap(expression);
+      if (ts.isIdentifier(current)) return identifiers.has(current.text);
+      if (ts.isPropertyAccessExpression(current)) {
+        return namespaceBinding(current.expression)?.has(current.name.text) === true;
+      }
+      return ts.isElementAccessExpression(current) && current.argumentExpression !== undefined &&
+        ts.isStringLiteral(current.argumentExpression) &&
+        namespaceBinding(current.expression)?.has(current.argumentExpression.text) === true;
+    };
+    let aliasesChanged = true;
+    while (aliasesChanged) {
+      aliasesChanged = false;
+      for (const statement of sourceFile.statements) {
+        if (!ts.isVariableStatement(statement) ||
+          (statement.declarationList.flags & ts.NodeFlags.Const) === 0) continue;
+        for (const declaration of statement.declarationList.declarations) {
+          if (!ts.isIdentifier(declaration.name) || !declaration.initializer) continue;
+          const namespace = namespaceBinding(declaration.initializer);
+          if (namespace && !namespaces.has(declaration.name.text)) {
+            namespaces.set(declaration.name.text, namespace);
+            aliasesChanged = true;
+          }
+          if (factoryBinding(declaration.initializer) && !identifiers.has(declaration.name.text)) {
+            identifiers.add(declaration.name.text);
+            aliasesChanged = true;
+          }
+        }
+      }
+    }
+    return { identifiers, namespaces };
+  };
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const [path, sourceFile] of filesByPath) {
+      const exports = exportedNames.get(path)!;
+      const local = localBindings(sourceFile);
+      const add = (name: string): void => {
+        if (exports.has(name)) return;
+        exports.add(name);
+        changed = true;
+      };
+      for (const statement of sourceFile.statements) {
+        if (ts.isExportAssignment(statement) && !statement.isExportEquals &&
+          ts.isIdentifier(statement.expression) && local.identifiers.has(statement.expression.text)) {
+          add("default");
+          continue;
+        }
+        if (ts.isVariableStatement(statement) &&
+          statement.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword)) {
+          for (const declaration of statement.declarationList.declarations) {
+            if (ts.isIdentifier(declaration.name) && local.identifiers.has(declaration.name.text)) add(declaration.name.text);
+          }
+          continue;
+        }
+        if (!ts.isExportDeclaration(statement)) continue;
+        if (statement.moduleSpecifier && ts.isStringLiteral(statement.moduleSpecifier)) {
+          const sourceExports = targetExports(sourceFile, statement.moduleSpecifier.text);
+          if (!statement.exportClause) {
+            for (const name of sourceExports) add(name);
+          } else if (ts.isNamedExports(statement.exportClause)) {
+            for (const binding of statement.exportClause.elements) {
+              if (sourceExports.has(binding.propertyName?.text ?? binding.name.text)) add(binding.name.text);
+            }
+          }
+          continue;
+        }
+        if (statement.exportClause && ts.isNamedExports(statement.exportClause)) {
+          for (const binding of statement.exportClause.elements) {
+            if (local.identifiers.has(binding.propertyName?.text ?? binding.name.text)) add(binding.name.text);
+          }
+        }
+      }
+    }
+  }
+  return new Map([...filesByPath].map(([path, sourceFile]) => [path, localBindings(sourceFile)]));
+}
+
+function sourceNeedsGpuSurface(sourceFile: ts.SourceFile, bindings?: HFactoryBindings): boolean {
+  const hIdentifiers = new Set(["h", ...(bindings?.identifiers ?? [])]);
+  const hNamespaces = bindings?.namespaces ?? new Map<string, ReadonlySet<string>>();
+  const namespaceExports = (
+    expression: ts.Expression,
+    context: StaticExpressionContext,
+    seen: Set<ts.Expression>,
+  ): ReadonlySet<string> | undefined => {
+    const current = context.unwrap(expression);
+    if (seen.has(current) || !ts.isIdentifier(current)) return undefined;
+    const bound = context.boundExpression(current.text);
+    if (bound !== undefined) {
+      if (bound === null) return undefined;
+      seen.add(current);
+      return namespaceExports(bound, context, seen);
+    }
+    return hNamespaces.get(current.text);
+  };
+  const isHExpression = (
+    expression: ts.Expression,
+    context: StaticExpressionContext,
+    seen = new Set<ts.Expression>(),
+  ): boolean => {
+    const current = context.unwrap(expression);
+    if (seen.has(current)) return false;
+    if (ts.isIdentifier(current)) {
+      const bound = context.boundExpression(current.text);
+      if (bound !== undefined) {
+        if (bound === null) return false;
+        seen.add(current);
+        return isHExpression(bound, context, seen);
+      }
+      return hIdentifiers.has(current.text);
+    }
+    if (ts.isPropertyAccessExpression(current)) {
+      return namespaceExports(current.expression, context, new Set(seen))?.has(current.name.text) === true;
+    }
+    if (ts.isElementAccessExpression(current) && current.argumentExpression && ts.isStringLiteral(current.argumentExpression)) {
+      return namespaceExports(current.expression, context, new Set(seen))?.has(current.argumentExpression.text) === true;
+    }
+    return false;
+  };
+  const propertyName = (name: ts.PropertyName): string | null => {
+    if (ts.isIdentifier(name) || ts.isStringLiteral(name) || ts.isNumericLiteral(name)) return name.text;
+    if (ts.isComputedPropertyName(name) && ts.isStringLiteral(name.expression)) return name.expression.text;
+    return null;
+  };
+  const classExpressionNeedsGpu = (expression: ts.Expression, context: StaticExpressionContext): boolean => {
+    const variants = context.stringVariants(expression);
+    if (!variants) return true;
+    return variants.some((classText) => {
+      try {
+        return compileClass(classText).backgroundGradient !== undefined;
+      } catch {
+        // The ordinary class validator reports malformed utilities.
+        return false;
+      }
+    });
+  };
+  const hPropsNeedGpu = (tag: string, props: ts.Expression | undefined, context: StaticExpressionContext): boolean => {
+    if (tag === "canvas") return true;
+    if (!["column", "row", "stack", "panel", "button"].includes(tag) || !props) return false;
+    const objectNeedsGpu = (expression: ts.Expression, seen: Set<ts.Expression>): boolean => {
+      const current = context.unwrap(expression);
+      if (seen.has(current)) return false;
+      seen.add(current);
+      if (ts.isIdentifier(current)) {
+        const bound = context.boundExpression(current.text);
+        if (!bound) return current.text !== "undefined";
+        return objectNeedsGpu(bound, seen);
+      }
+      if (current.kind === ts.SyntaxKind.NullKeyword) return false;
+      if (ts.isConditionalExpression(current)) {
+        return objectNeedsGpu(current.whenTrue, new Set(seen)) || objectNeedsGpu(current.whenFalse, new Set(seen));
+      }
+      // A runtime-computed props object may contain a background or gradient
+      // class, and the manifest cannot promote a live software surface later.
+      if (!ts.isObjectLiteralExpression(current)) return true;
+      if (current.properties.some((property) =>
+        (ts.isPropertyAssignment(property) || ts.isShorthandPropertyAssignment(property)) &&
+        propertyName(property.name) === "background")) return true;
+      for (const property of current.properties) {
+        if (ts.isSpreadAssignment(property)) {
+          if (objectNeedsGpu(property.expression, new Set(seen))) return true;
+          continue;
+        }
+        if (ts.isComputedPropertyName(property.name) && propertyName(property.name) === null) return true;
+        if (!ts.isPropertyAssignment(property) || propertyName(property.name) !== "class") continue;
+        if (classExpressionNeedsGpu(property.initializer, context)) return true;
+      }
+      return false;
+    };
+    return objectNeedsGpu(props, new Set());
+  };
+  let found = false;
+  walkSourceWithStaticExpressions(sourceFile, (node, context) => {
+    if (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) {
+      const tag = node.tagName.getText(sourceFile);
+      if (tag === "canvas") {
+        found = true;
+      } else if (["column", "row", "stack", "panel", "button"].includes(tag)) {
+        const background = node.attributes.properties.find((attribute): attribute is ts.JsxAttribute =>
+          ts.isJsxAttribute(attribute) && attribute.name.getText(sourceFile) === "background");
+        const spreadNeedsGpu = node.attributes.properties.some((attribute) =>
+          ts.isJsxSpreadAttribute(attribute) && hPropsNeedGpu(tag, attribute.expression, context));
+        if (background || spreadNeedsGpu) {
+          found = true;
+        } else {
+          const classAttribute = node.attributes.properties.find((attribute): attribute is ts.JsxAttribute =>
+            ts.isJsxAttribute(attribute) && attribute.name.getText(sourceFile) === "class");
+          const variants = classAttribute ? jsxClassVariants(classAttribute, context) : [""];
+          found = variants === null || variants.some((classText) => {
+            try {
+              return compileClass(classText).backgroundGradient !== undefined;
+            } catch {
+              // The ordinary class validator reports malformed utilities.
+              return false;
+            }
+          });
+        }
+      }
+    }
+    if (!found && ts.isCallExpression(node) && isHExpression(node.expression, context)) {
+      const tag = node.arguments[0];
+      if (tag && (ts.isStringLiteral(tag) || ts.isNoSubstitutionTemplateLiteral(tag))) {
+        found = hPropsNeedGpu(tag.text, node.arguments[1], context);
+      }
+    }
+    return found;
+  });
   return found;
 }
 
@@ -1457,7 +1859,7 @@ function loadProject(directory: string): SourceProject {
   const extractionErrors: string[] = [];
   const config = extractConfig(sourceFile, extractionErrors);
   if (extractionErrors.length > 0 || !config) throw new WeaverFailure(extractionErrors);
-  const sourceFiles = loadDirectLocalImports(directory, sourceFile);
+  const sourceFiles = loadLocalImports(directory, sourceFile);
   const usesIcons = sourceFiles.some(sourceUsesIcon);
   return {
     directory,
@@ -1488,16 +1890,23 @@ function localImportPath(directory: string, importer: ts.SourceFile, specifier: 
   return null;
 }
 
-function loadDirectLocalImports(directory: string, entry: ts.SourceFile): ts.SourceFile[] {
+function loadLocalImports(directory: string, entry: ts.SourceFile): ts.SourceFile[] {
   const files = [entry];
   const loaded = new Set([resolve(entry.fileName)]);
-  for (const statement of entry.statements) {
-    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)) continue;
-    const path = localImportPath(directory, entry, statement.moduleSpecifier.text);
-    if (!path || loaded.has(resolve(path))) continue;
-    loaded.add(resolve(path));
-    const source = readFileSync(path, "utf8");
-    files.push(ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true, path.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS));
+  // Walking the growing array keeps the complete local graph deterministic
+  // without recursive call-stack depth. The loaded set also makes cycles and
+  // diamond imports cost one parse per source file.
+  for (let index = 0; index < files.length; index += 1) {
+    const importer = files[index]!;
+    for (const statement of importer.statements) {
+      if ((!ts.isImportDeclaration(statement) && !ts.isExportDeclaration(statement)) ||
+        !statement.moduleSpecifier || !ts.isStringLiteral(statement.moduleSpecifier)) continue;
+      const path = localImportPath(directory, importer, statement.moduleSpecifier.text);
+      if (!path || loaded.has(resolve(path))) continue;
+      loaded.add(resolve(path));
+      const source = readFileSync(path, "utf8");
+      files.push(ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true, path.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS));
+    }
   }
   return files;
 }
@@ -1741,20 +2150,37 @@ function validateLoweredTree(project: SourceProject, errors: string[]): void {
     ts.isJsxElement(node)
       ? { tag: node.openingElement.tagName.getText(node.getSourceFile()), attributes: node.openingElement.attributes }
       : { tag: node.tagName.getText(node.getSourceFile()), attributes: node.attributes };
-  const isPaintedLayout = (node: ts.JsxElement | ts.JsxSelfClosingElement, tag: string): boolean => {
-    if (tag !== "row" && tag !== "column" && tag !== "stack") return false;
+  const staticClassVariants = new Map<ts.JsxAttribute, readonly string[] | null>();
+  for (const sourceFile of project.sourceFiles) {
+    walkSourceWithStaticExpressions(sourceFile, (node, context) => {
+      if (ts.isJsxAttribute(node) && node.name.getText(sourceFile) === "class") {
+        staticClassVariants.set(node, jsxClassVariants(node, context));
+      }
+      return false;
+    });
+  }
+  const classAttribute = (node: ts.JsxElement | ts.JsxSelfClosingElement): ts.JsxAttribute | null => {
     const { attributes } = tagAndAttributes(node);
     const sourceFile = node.getSourceFile();
-    const classAttribute = attributes.properties.find((attribute): attribute is ts.JsxAttribute =>
-      ts.isJsxAttribute(attribute) && attribute.name.getText(sourceFile) === "class");
-    const classText = classAttribute ? jsxStringValue(classAttribute.initializer) : "";
-    if (classText === null) return false;
-    try {
-      const compiled = compileClass(classText);
-      return Object.keys(compiled).some((key) => key === "background" || key === "radius" || key.startsWith("radius") || key.startsWith("border") || key.toLowerCase().includes("shadow"));
-    } catch {
-      return false; // The normal class validator reports the actionable error.
+    return attributes.properties.find((attribute): attribute is ts.JsxAttribute =>
+      ts.isJsxAttribute(attribute) && attribute.name.getText(sourceFile) === "class") ?? null;
+  };
+  const classVariants = (node: ts.JsxElement | ts.JsxSelfClosingElement): readonly string[] | null => {
+    const attribute = classAttribute(node);
+    if (!attribute) return [""];
+    return staticClassVariants.get(attribute) ?? null;
+  };
+  const isPaintedLayout = (node: ts.JsxElement | ts.JsxSelfClosingElement, tag: string): boolean => {
+    if (tag !== "row" && tag !== "column" && tag !== "stack") return false;
+    for (const classText of classVariants(node) ?? []) {
+      try {
+        const compiled = compileClass(classText);
+        if (Object.keys(compiled).some((key) => key === "background" || key === "radius" || key.startsWith("radius") || key.startsWith("border") || key.toLowerCase().includes("shadow"))) return true;
+      } catch {
+        // The ordinary class validator reports the malformed utility.
+      }
     }
+    return false;
   };
   const maximum = (values: LoweredTreeMetrics[]): LoweredTreeMetrics => ({
     nodes: Math.max(0, ...values.map((value) => value.nodes)),
@@ -1790,20 +2216,17 @@ function validateLoweredTree(project: SourceProject, errors: string[]): void {
     opacityCanvas: values.some((value) => value.opacityCanvas),
   });
   const canvasHasOpacityLayer = (node: ts.JsxElement | ts.JsxSelfClosingElement): boolean => {
-    const { tag, attributes } = tagAndAttributes(node);
+    const { tag } = tagAndAttributes(node);
     if (/^[A-Z]/.test(tag)) return false;
-    const sourceFile = node.getSourceFile();
-    const classAttribute = attributes.properties.find((attribute): attribute is ts.JsxAttribute =>
-      ts.isJsxAttribute(attribute) && attribute.name.getText(sourceFile) === "class");
-    const classText = classAttribute ? jsxStringValue(classAttribute.initializer) : "";
-    if (classText === null) return false;
-    try {
-      const compiled = compileClass(classText);
-      return typeof compiled.opacity === "number" && compiled.opacity < 1;
-    } catch {
-      // The ordinary class validator reports the malformed utility.
-      return false;
+    for (const classText of classVariants(node) ?? []) {
+      try {
+        const compiled = compileClass(classText);
+        if (typeof compiled.opacity === "number" && compiled.opacity < 1) return true;
+      } catch {
+        // The ordinary class validator reports the malformed utility.
+      }
     }
+    return false;
   };
   const metrics = (node: JsxRoot, visiting: Set<string>): LoweredTreeMetrics => {
     const childMetrics = (children: readonly ts.JsxChild[], parentTag: string | null): LoweredTreeMetrics[] => {
@@ -1903,15 +2326,11 @@ function validateLoweredTree(project: SourceProject, errors: string[]): void {
     };
   };
   const formatPixels = (value: number): string => Number.isInteger(value) ? String(value) : String(Number(value.toFixed(3)));
-  const compiledClass = (node: PrimitiveRoot): Record<string, unknown> | null => {
-    const { attributes } = tagAndAttributes(node);
-    const sourceFile = node.getSourceFile();
-    const classAttribute = attributes.properties.find((attribute): attribute is ts.JsxAttribute =>
-      ts.isJsxAttribute(attribute) && attribute.name.getText(sourceFile) === "class");
-    const classText = classAttribute ? jsxStringValue(classAttribute.initializer) : "";
-    if (classText === null) return null;
+  const compiledClasses = (node: PrimitiveRoot): readonly Record<string, unknown>[] | null => {
+    const variants = classVariants(node);
+    if (!variants) return null;
     try {
-      return compileClass(classText) as Record<string, unknown>;
+      return variants.map((classText) => compileClass(classText) as Record<string, unknown>);
     } catch {
       return null; // The ordinary class validator reports the malformed utility.
     }
@@ -1928,16 +2347,18 @@ function validateLoweredTree(project: SourceProject, errors: string[]): void {
     }
     return result;
   };
-  const validateVisualNodeBounds = (node: PrimitiveRoot, rect: VisualRect, seen: Set<string>): boolean => {
+  const validateVisualNodeBounds = (
+    node: PrimitiveRoot,
+    compiled: Record<string, unknown>,
+    rect: VisualRect,
+    seen: Set<string>,
+  ): boolean => {
     const nodeKey = `${node.getSourceFile().fileName}:${node.getStart()}`;
     if (seen.has(nodeKey)) return false;
     seen.add(nodeKey);
-    const { tag, attributes } = tagAndAttributes(node);
+    const { tag } = tagAndAttributes(node);
     const sourceFile = node.getSourceFile();
-    const classAttribute = attributes.properties.find((attribute): attribute is ts.JsxAttribute =>
-      ts.isJsxAttribute(attribute) && attribute.name.getText(sourceFile) === "class");
-    const compiled = compiledClass(node);
-    if (!compiled) return false;
+    const attribute = classAttribute(node);
     const [surfaceWidth, surfaceHeight] = project.config.size;
     const shadows = [
       [compiled.shadow, compiled.shadowInset],
@@ -1969,7 +2390,7 @@ function validateLoweredTree(project: SourceProject, errors: string[]): void {
         const paintedHeight = surfaceHeight + missing.top + missing.bottom;
         errors.push(locationMessage(
           sourceFile,
-          classAttribute ?? node,
+          attribute ?? node,
           `RootOutsetShadowClipped: root-surface <${tag}> has an outset shadow outside config.size [${formatPixels(surfaceWidth)}, ${formatPixels(surfaceHeight)}]. ` +
           `Required shadow room: left=${formatPixels(required.left)}px, top=${formatPixels(required.top)}px, right=${formatPixels(required.right)}px, bottom=${formatPixels(required.bottom)}px; ` +
           `available: left=${formatPixels(available.left)}px, top=${formatPixels(available.top)}px, right=${formatPixels(available.right)}px, bottom=${formatPixels(available.bottom)}px; ` +
@@ -2001,13 +2422,13 @@ function validateLoweredTree(project: SourceProject, errors: string[]): void {
     // main-axis sizes and are left to runtime rendering.
     const candidates = tag === "stack" || children.length === 1 ? children : [];
     for (const child of candidates) {
-      const childCompiled = compiledClass(child);
-      if (!childCompiled) continue;
-      const fillsContent = (childCompiled.widthPercent === 100 && childCompiled.heightPercent === 100) ||
-        (childCompiled.width === content.width && childCompiled.height === content.height);
-      const hasMargins = ["marginLeft", "marginTop", "marginRight", "marginBottom"].some((key) =>
-        typeof childCompiled[key] === "number" && childCompiled[key] !== 0);
-      if (fillsContent && !hasMargins && validateVisualNodeBounds(child, content, seen)) return true;
+      for (const childCompiled of compiledClasses(child) ?? []) {
+        const fillsContent = (childCompiled.widthPercent === 100 && childCompiled.heightPercent === 100) ||
+          (childCompiled.width === content.width && childCompiled.height === content.height);
+        const hasMargins = ["marginLeft", "marginTop", "marginRight", "marginBottom"].some((key) =>
+          typeof childCompiled[key] === "number" && childCompiled[key] !== 0);
+        if (fillsContent && !hasMargins && validateVisualNodeBounds(child, childCompiled, content, new Set(seen))) return true;
+      }
     }
     return false;
   };
@@ -2024,12 +2445,17 @@ function validateLoweredTree(project: SourceProject, errors: string[]): void {
     const key = `${root.getSourceFile().fileName}:${root.getStart()}`;
     if (seenVisualRoots.has(key)) continue;
     seenVisualRoots.add(key);
-    const compiled = compiledClass(root);
-    if (!compiled) continue;
     const [surfaceWidth, surfaceHeight] = project.config.size;
-    const fillsSurface = (compiled.widthPercent === 100 && compiled.heightPercent === 100) ||
-      (compiled.width === surfaceWidth && compiled.height === surfaceHeight);
-    if (fillsSurface) validateVisualNodeBounds(root, { x: 0, y: 0, width: surfaceWidth, height: surfaceHeight }, new Set());
+    for (const compiled of compiledClasses(root) ?? []) {
+      const fillsSurface = (compiled.widthPercent === 100 && compiled.heightPercent === 100) ||
+        (compiled.width === surfaceWidth && compiled.height === surfaceHeight);
+      if (fillsSurface && validateVisualNodeBounds(
+        root,
+        compiled,
+        { x: 0, y: 0, width: surfaceWidth, height: surfaceHeight },
+        new Set(),
+      )) break;
+    }
   }
   const lowered = maximum(roots.map((root) => metrics(root, new Set())));
   const evidenceNode = roots[0];
@@ -2207,7 +2633,10 @@ function validateSource(project: SourceProject): string[] {
     }
     return "none";
   };
-  const canvasOpacityAncestor = (node: ts.JsxOpeningElement | ts.JsxSelfClosingElement): string | null => {
+  const canvasOpacityAncestor = (
+    node: ts.JsxOpeningElement | ts.JsxSelfClosingElement,
+    context: StaticExpressionContext,
+  ): string | null => {
     let current: ts.Node | undefined = node.parent;
     while (current) {
       if (ts.isJsxElement(current) && current.openingElement !== node) {
@@ -2216,8 +2645,8 @@ function validateSource(project: SourceProject): string[] {
         if (/^[A-Z]/.test(tag)) return null;
         const attribute = current.openingElement.attributes.properties.find((candidate): candidate is ts.JsxAttribute =>
           ts.isJsxAttribute(candidate) && candidate.name.getText(sourceFile) === "class");
-        const classText = attribute ? jsxStringValue(attribute.initializer) : "";
-        if (classText !== null) {
+        const variants = attribute ? jsxClassVariants(attribute, context) : [""];
+        for (const classText of variants ?? []) {
           try {
             const compiled = compileClass(classText);
             if (typeof compiled.opacity === "number" && compiled.opacity < 1) return tag;
@@ -2369,29 +2798,37 @@ function validateSource(project: SourceProject): string[] {
       ));
     }
   };
-  const visit = (node: ts.Node): void => {
+  const visit = (node: ts.Node, context: StaticExpressionContext): boolean => {
     if (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) {
       const sourceFile = node.getSourceFile();
       const tag = node.tagName.getText(sourceFile);
       if (tag === "button" || tag === "slider") validateAccessibleName(node, tag);
       const classAttribute = node.attributes.properties.find((attribute): attribute is ts.JsxAttribute => ts.isJsxAttribute(attribute) && attribute.name.getText(sourceFile) === "class");
       if (classAttribute) {
-        const classText = jsxStringValue(classAttribute.initializer);
-        if (classText === null) errors.push(locationMessage(sourceFile, classAttribute, "class must be a literal string so weaver check can validate every utility"));
+        const classVariants = jsxClassVariants(classAttribute, context);
+        if (classVariants === null) errors.push(locationMessage(
+          sourceFile,
+          classAttribute,
+          `class must resolve to at most ${maxStaticClassVariants} literal strings so weaver check can validate every utility`,
+        ));
         else {
-          try {
+          const classErrors = new Set<string>();
+          for (const classText of classVariants) try {
             const compiled = compileClass(classText);
+            if (compiled.backgroundGradient !== undefined && tag !== "column" && tag !== "row" && tag !== "stack" && tag !== "panel" && tag !== "button") {
+              classErrors.add(
+                `GradientBackgroundElementUnsupported: gradient backgrounds are supported on <column>, <row>, <stack>, <panel>, and <button>; received <${tag}>. Fix: move the gradient to a containing panel.`,
+              );
+            }
             const hasStateVariant = Object.keys(compiled).some((key) => key.startsWith("hover") || key.startsWith("pressed"));
             if (hasStateVariant && tag !== "button" && tag !== "slider" && stateVariantAncestry(node) === "none") {
-              errors.push(locationMessage(
-                sourceFile,
-                classAttribute,
+              classErrors.add(
                 `NearestPressableAncestor: state variants on non-pressable <${tag}> require a nearest <button> or <slider> ancestor. Fix: move the utility to the pressable node or place this node inside one.`,
-              ));
+              );
             }
             if (compiled.fontFamily && !["sans", "mono"].includes(compiled.fontFamily) && !project.fonts.some((font) => font.stem === compiled.fontFamily || font.family === compiled.fontFamily)) {
               const available = project.fonts.length === 0 ? "no bundled fonts were found next to widget.tsx" : `available bundled names: ${[...new Set(project.fonts.flatMap((font) => [font.stem, font.family]))].join(", ")}`;
-              errors.push(locationMessage(sourceFile, classAttribute, `Unknown bundled font "${compiled.fontFamily}"; ${available}`));
+              classErrors.add(`Unknown bundled font "${compiled.fontFamily}"; ${available}`);
             }
             if (tag === "canvas") {
               const sizes = compiled as Record<string, unknown>;
@@ -2399,23 +2836,22 @@ function validateSource(project: SourceProject): string[] {
                 const percent = sizes[axis === "width" ? "widthPercent" : "heightPercent"] !== undefined;
                 if (percent || sizes[axis] === undefined) {
                   const shape = percent ? `a percentage ${axis}` : `no ${axis}`;
-                  errors.push(locationMessage(
-                    sourceFile,
-                    classAttribute,
+                  classErrors.add(
                     `CanvasNeedsExplicitSize: <canvas> has ${shape}. A canvas has no intrinsic size, so inside a content-sized container a percentage resolves against 0 and every draw silently no-ops (ctx.${axis} === 0). Fix: give the canvas an explicit pixel ${axis}, e.g. ${axis === "width" ? "w-[312px]" : "h-[71px]"}.`,
-                  ));
+                  );
                 }
               }
             }
           }
-          catch (error) { errors.push(locationMessage(sourceFile, classAttribute, error instanceof UtilityError ? error.message : String(error))); }
+          catch (error) { classErrors.add(error instanceof UtilityError ? error.message : String(error)); }
+          for (const error of classErrors) errors.push(locationMessage(sourceFile, classAttribute, error));
         }
       }
       if (tag === "canvas" && !classAttribute) {
         errors.push(locationMessage(sourceFile, node, `CanvasNeedsExplicitSize: <canvas> has no class. A canvas has no intrinsic size and draws nothing without one; give it explicit pixel dimensions, e.g. class="w-[312px] h-[71px]".`));
       }
       if (tag === "canvas") {
-        const opacityAncestor = canvasOpacityAncestor(node);
+        const opacityAncestor = canvasOpacityAncestor(node, context);
         if (opacityAncestor) {
           errors.push(locationMessage(
             sourceFile,
@@ -2466,9 +2902,9 @@ function validateSource(project: SourceProject): string[] {
         else if (!originDeclared(project.config.origins ?? [], host)) errors.push(locationMessage(node.getSourceFile(), argument, originNotDeclaredMessage(host)));
       }
     }
-    ts.forEachChild(node, visit);
+    return false;
   };
-  for (const sourceFile of project.sourceFiles) visit(sourceFile);
+  for (const sourceFile of project.sourceFiles) walkSourceWithStaticExpressions(sourceFile, visit);
   for (const [provider, hooks] of usedProviders) {
     if (!project.config.subscribe?.includes(provider)) {
       for (const hook of hooks) errors.push(`${hook}("${provider}") requires subscribe: ["${provider}"] in the widget config`);

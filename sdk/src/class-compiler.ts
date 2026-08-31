@@ -1,4 +1,5 @@
 import { tailwindColors } from "./tailwind-colors.js";
+import { serializeBackground } from "./gradients.js";
 
 export type CrossAlign = "start" | "center" | "end" | "baseline" | "stretch";
 export type MainAlign = "start" | "center" | "end" | "between" | "around" | "evenly";
@@ -26,6 +27,7 @@ export interface ClassProps {
   shadowInset?: boolean;
   textShadow?: string;
   background?: string;
+  backgroundGradient?: string;
   textColor?: string;
   fontScale?: number;
   fontWeight?: "light" | "normal" | "medium" | "semibold" | "bold";
@@ -128,6 +130,15 @@ type CompileOutput = ClassProps & {
   pressedShadowGeometry?: string;
   pressedShadowColor?: string;
   textShadowGeometry?: string;
+  gradientDirection?: readonly [number, number, number, number];
+  gradientSpread?: "pad" | "repeat";
+  gradientFrom?: string;
+  gradientVia?: string;
+  gradientTo?: string;
+  gradientFromOffset?: number;
+  gradientViaOffset?: number;
+  gradientToOffset?: number;
+  gradientUtility?: string;
 };
 
 const boxShadows: Readonly<Record<string, string>> = {
@@ -166,6 +177,7 @@ const radii: Readonly<Record<string, number>> = {
 };
 
 const maxUtilityNumber = 1_000_000;
+const gradientDirectionPattern = /^bg-(repeating-)?(?:gradient|linear)-to-(r|tr|t|tl|l|bl|b|br)$/;
 
 function utilityNumber(raw: string, utility: string, multiplier = 1): number {
   const value = Number(raw) * multiplier;
@@ -216,6 +228,26 @@ export function compileClass(className: string): ClassProps {
   if (output.hoverShadowGeometry !== undefined) output.hoverShadow = `${output.hoverShadowGeometry} ${output.hoverShadowColor ?? "#0000001A"}`;
   if (output.pressedShadowGeometry !== undefined) output.pressedShadow = `${output.pressedShadowGeometry} ${output.pressedShadowColor ?? "#0000001A"}`;
   if (output.textShadowGeometry !== undefined) output.textShadow = `${output.textShadowGeometry} #00000026`;
+  if (output.gradientDirection !== undefined) {
+    if (output.gradientFrom === undefined || output.gradientTo === undefined) {
+      throw new UtilityError(output.gradientUtility ?? "bg-gradient", "A linear gradient requires both from-<color> and to-<color>");
+    }
+    const [startX, startY, endX, endY] = output.gradientDirection;
+    const stops = [
+      { offset: output.gradientFromOffset ?? 0, color: output.gradientFrom },
+      ...(output.gradientVia === undefined ? [] : [{ offset: output.gradientViaOffset ?? 0.5, color: output.gradientVia }]),
+      { offset: output.gradientToOffset ?? 1, color: output.gradientTo },
+    ];
+    output.backgroundGradient = serializeBackground({
+      type: "linear",
+      start: [startX, startY],
+      end: [endX, endY],
+      stops,
+      spread: output.gradientSpread ?? "pad",
+    });
+  } else if (output.gradientFrom !== undefined || output.gradientVia !== undefined || output.gradientTo !== undefined) {
+    throw new UtilityError(output.gradientUtility ?? "from", "Gradient stop utilities require bg-gradient-to-* or bg-linear-to-*");
+  }
   delete output.lineHeightPx;
   delete output.letterSpacingEm;
   delete output.lineHeightExplicit;
@@ -226,7 +258,21 @@ export function compileClass(className: string): ClassProps {
   delete output.pressedShadowGeometry;
   delete output.pressedShadowColor;
   delete output.textShadowGeometry;
+  delete output.gradientDirection;
+  delete output.gradientSpread;
+  delete output.gradientFrom;
+  delete output.gradientVia;
+  delete output.gradientTo;
+  delete output.gradientFromOffset;
+  delete output.gradientViaOffset;
+  delete output.gradientToOffset;
+  delete output.gradientUtility;
   return output;
+}
+
+export function classUsesGradientBackground(className: string): boolean {
+  if (!className.includes("bg-")) return false;
+  return className.trim().split(/\s+/).some((utility) => gradientDirectionPattern.test(utility));
 }
 
 function applyUtility(output: CompileOutput, utility: string): void {
@@ -235,11 +281,42 @@ function applyUtility(output: CompileOutput, utility: string): void {
     applyStateUtility(output, stateMatch[1] as "hover" | "pressed", stateMatch[2], utility);
     return;
   }
-  if (/^(?:bg-gradient|from-|via-|to-|focus:|active:|transition)/.test(utility)) {
+  if (/^(?:focus:|active:|transition)/.test(utility)) {
     throw new UtilityError(utility, `Class utility "${utility}" arrives in M2+`);
   }
 
   let match: RegExpExecArray | null;
+  if ((match = gradientDirectionPattern.exec(utility))) {
+    const directions: Record<string, readonly [number, number, number, number]> = {
+      r: [0, 0.5, 1, 0.5], tr: [0, 1, 1, 0], t: [0.5, 1, 0.5, 0], tl: [1, 1, 0, 0],
+      l: [1, 0.5, 0, 0.5], bl: [1, 0, 0, 1], b: [0.5, 0, 0.5, 1], br: [0, 0, 1, 1],
+    };
+    output.gradientDirection = directions[match[2]];
+    output.gradientSpread = match[1] === undefined ? "pad" : "repeat";
+    output.gradientUtility = utility;
+    return;
+  }
+  if ((match = /^(from|via|to)-\[(#[0-9a-fA-F]{3}|#[0-9a-fA-F]{6}|#[0-9a-fA-F]{8})\](?:\/(\d{1,3}))?$/.exec(utility))) {
+    setGradientColor(output, match[1], normalizeColor(match[2], match[3]), utility);
+    return;
+  }
+  if ((match = /^(from|via|to)-([a-z]+(?:-\d+)?)(?:\/(\d{1,3}))?$/.exec(utility))) {
+    const resolved = tailwindColors[match[2]];
+    if (resolved !== undefined) {
+      setGradientColor(output, match[1], namedColorWithAlpha(resolved, match[3]), utility);
+      return;
+    }
+  }
+  if ((match = /^(from|via|to)-(?:\[(\d+(?:\.\d+)?)%\]|(\d+(?:\.\d+)?)%)$/.exec(utility))) {
+    const percent = utilityNumber(match[2] ?? match[3], utility);
+    if (percent <= 100) {
+      if (match[1] === "from") output.gradientFromOffset = percent / 100;
+      else if (match[1] === "via") output.gradientViaOffset = percent / 100;
+      else output.gradientToOffset = percent / 100;
+      output.gradientUtility = utility;
+      return;
+    }
+  }
   if (utility in boxShadows) {
     output.shadowGeometry = boxShadows[utility];
     output.shadowColor ??= boxShadowColors[utility];
@@ -591,6 +668,13 @@ function applyUtility(output: CompileOutput, utility: string): void {
     return;
   }
   throw unknownUtility(utility);
+}
+
+function setGradientColor(output: CompileOutput, position: string, color: string, utility: string): void {
+  if (position === "from") output.gradientFrom = color;
+  else if (position === "via") output.gradientVia = color;
+  else output.gradientTo = color;
+  output.gradientUtility = utility;
 }
 
 function applyStateUtility(output: CompileOutput, state: "hover" | "pressed", utility: string, authored: string): void {

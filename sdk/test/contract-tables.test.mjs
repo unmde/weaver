@@ -24,7 +24,7 @@ test("consolidated v0.4 element and class tables are complete and ordered", () =
   ]);
   assert.deepEqual(firstColumnAfter("| Class family |"), [
     "spacing", "sizing", "flex", "radii", "borders",
-    "colors", "typography", "effects", "overflow", "native state",
+    "colors", "gradients", "typography", "effects", "overflow", "native state",
   ]);
 });
 
@@ -36,13 +36,14 @@ test("consolidated class table representatives compile and omitted families stay
     "rounded-tl-3xl rounded-r-[7px]",
     "border-2 border-mauve-500/40",
     "bg-taupe-950 text-[#abcdef]/75",
+    "bg-repeating-linear-to-r from-amber-400 from-0% via-rose-500 via-25% to-amber-400 to-50%",
     "text-3xl font-bold font-[Display] text-right leading-[18px] tracking-[0.1em] line-clamp-2 tabular-nums truncate",
     "shadow-inner shadow-amber-400/30 text-shadow-lg opacity-70",
     "overflow-hidden",
     "hover:bg-zinc-800 hover:text-white pressed:opacity-70 pressed:border-[#abc]",
   ];
   for (const authored of representatives) assert.doesNotThrow(() => compileClass(authored), authored);
-  for (const authored of ["bg-gradient-to-r", "transition-colors", "absolute", "hover:p-2"]) {
+  for (const authored of ["bg-gradient-to-r from-red-500", "transition-colors", "absolute", "hover:p-2"]) {
     assert.throws(() => compileClass(authored), UtilityError, authored);
   }
 });

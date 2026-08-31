@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test from "node:test";
-import { compileClass } from "../src/class-compiler.ts";
+import { classUsesGradientBackground, compileClass } from "../src/class-compiler.ts";
 import { tailwindColors } from "../src/tailwind-colors.js";
 
 test("class compiler maps the frozen M1 utility surface", () => {
@@ -18,6 +18,32 @@ test("class compiler maps the frozen M1 utility surface", () => {
       truncate: true,
     },
   );
+});
+
+test("linear gradient utilities compile to the canonical retained wire", () => {
+  assert.equal(classUsesGradientBackground("p-2 bg-linear-to-r from-black to-white"), true);
+  assert.equal(classUsesGradientBackground("bg-repeating-gradient-to-b from-black to-white"), true);
+  assert.equal(classUsesGradientBackground("bg-black from-black to-white"), false);
+  const compiled = compileClass("bg-gradient-to-tr from-red-500 from-10% via-white/50 via-[45%] to-blue-500 to-90%");
+  const document = JSON.parse(compiled.backgroundGradient);
+  assert.equal(document.v, 1);
+  assert.equal(document.layers.length, 1);
+  assert.deepEqual(document.layers[0].start, [0, 1]);
+  assert.deepEqual(document.layers[0].end, [1, 0]);
+  assert.deepEqual(document.layers[0].stops, [
+    { offset: 0.1, color: "#FB2C36FF" },
+    { offset: 0.45, color: "#FFFFFF80" },
+    { offset: 0.9, color: "#2B7FFFFF" },
+  ]);
+  assert.equal(document.layers[0].spread, "pad");
+
+  const repeating = JSON.parse(compileClass("bg-repeating-linear-to-r from-black to-white").backgroundGradient);
+  assert.equal(repeating.layers[0].spread, "repeat");
+});
+
+test("gradient utilities reject incomplete axes and orphan stops", () => {
+  assert.throws(() => compileClass("bg-gradient-to-r from-red-500"), /requires both from-<color> and to-<color>/);
+  assert.throws(() => compileClass("from-red-500 to-blue-500"), /require bg-gradient-to-\*/);
 });
 
 test("unknown utilities carry an actionable fix-it", () => {
@@ -343,4 +369,3 @@ test("styling 11 rejects unsupported state channels with the supported-form fix-
     );
   }
 });
-

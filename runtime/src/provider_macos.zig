@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const c = @cImport({
     @cInclude("poll.h");
     @cInclude("sys/socket.h");
@@ -10,7 +11,17 @@ const protocol = @import("provider_protocol.zig");
 // is 4,096, so the worker's dominant live locals total 29,112 bytes. 256 KiB
 // leaves 9x headroom for its shallow syscall call graph. The OS reserves the
 // stack and commits pages only as used; there is one reader per widget.
-const reader_stack_bytes: usize = 256 * 1024;
+// macOS keeps the measured 256 KiB production reservation. On the Linux
+// null-backend verifier, glibc places the test binary's large Native canvas
+// thread-local segment inside every pthread allocation; pthread_create
+// rejects a 256 KiB attribute with EINVAL before the reader starts. The
+// verifier therefore uses Zig's ordinary thread reservation. It is neither a
+// shipped runtime nor committed memory, and it lets Linux execute the real
+// Unix transport instead of replacing it with a test stub.
+const reader_stack_bytes: usize = if (builtin.os.tag == .linux)
+    std.Thread.SpawnConfig.default_stack_size
+else
+    256 * 1024;
 // A legal command is at most 86 bytes and a healthy local socket write is
 // immediate; one second is a supervision tripwire, not retained work, and
 // costs no memory.

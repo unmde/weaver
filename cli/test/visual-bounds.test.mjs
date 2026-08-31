@@ -41,6 +41,39 @@ export default widget({ name: "Clipped Shadow", size: [100, 100] }, () => <Surfa
   }
 });
 
+test("check reports a clipped shadow in any finite root class branch", () => {
+  const source = `import { widget } from "@weaver/sdk";
+const elevated = true;
+export default widget({ name: "Conditional Clipped Shadow", size: [100, 100] }, () => (
+  <stack class={elevated ? "size-full shadow-[0_16px_28px_0_#00000066]" : "size-full shadow-none"} />
+));
+`;
+  const { root, widget } = fixture(source);
+  try {
+    const checked = runCli(root, "check", widget);
+    assert.equal(checked.status, 1);
+    assert.match(checked.stderr, /RootOutsetShadowClipped/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("check keeps mutually exclusive root geometry correlated", () => {
+  const source = `import { widget } from "@weaver/sdk";
+const compact = true;
+export default widget({ name: "Conditional Shadow Geometry", size: [100, 100] }, () => (
+  <stack class={compact ? "w-[50px] h-[50px] shadow-[0_4px_4px_0_#00000066]" : "size-full shadow-none"} />
+));
+`;
+  const { root, widget } = fixture(source);
+  try {
+    const checked = runCli(root, "check", widget);
+    assert.equal(checked.status, 0, checked.stderr);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("check accepts a shadowed inner surface with measured transparent room", () => {
   const source = `import { widget } from "@weaver/sdk";
 export default widget({ name: "Shadow Room", size: [156, 156] }, () => (
