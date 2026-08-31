@@ -86,6 +86,27 @@ test("check rejects a canvas below an opacity ancestor", () => {
   }
 });
 
+test("check follows conditional opacity through a component boundary", () => {
+  const widgetSource = `import { widget } from "@weaver/sdk";
+const faded = true;
+function Surface() {
+  return <canvas class="w-[312px] h-[71px]" fps={0} onFrame={() => {}} />;
+}
+export default widget({ name: "Conditional Canvas Opacity", size: [320, 200] }, () => (
+  <column class={faded ? "opacity-50" : "opacity-100"}><Surface /></column>
+));
+`;
+  const { root, widget } = fixture(widgetSource);
+  try {
+    const checked = runCli(root, "check", widget);
+    assert.equal(checked.status, 1);
+    assert.match(checked.stderr, /CanvasNeedsOpaqueAncestors/);
+    assert.match(checked.stderr, /statically lowered component tree/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("check accepts a rounded canvas clip across a component boundary", () => {
   const widgetSource = `import { widget } from "@weaver/sdk";
 function Surface() {

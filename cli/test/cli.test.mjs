@@ -358,6 +358,94 @@ export default widget({ name: "Gradient Backend", size: [160, 80] }, () => ${bod
       assert.equal(manifest.renderBackend, "gpu", body);
     }
 
+    const jsxConditionalCases = [
+      [`import { widget } from "@weaver/sdk";
+const enabled = true;
+export default widget({ name: "JSX Conditional Gradient", size: [160, 80] }, () => (
+  <panel class={enabled ? "bg-linear-to-r from-black to-white" : "bg-black"} />
+));
+`, "direct conditional JSX class"],
+      [`import { widget } from "@weaver/sdk";
+export default widget({ name: "JSX Bound Gradient", size: [160, 80] }, () => {
+  const enabled = true;
+  const base = "p-2 ";
+  const surface = enabled ? "bg-linear-to-r from-black to-white" : "bg-black";
+  const classes = base + surface;
+  return <panel class={classes} />;
+});
+`, "bound concatenated JSX class"],
+      [`import { widget } from "@weaver/sdk";
+export default widget({ name: "JSX Template Gradient", size: [160, 80] }, () => {
+  const enabled = true;
+  const direction = enabled ? "r" : "l";
+  return <panel class={\`bg-linear-to-\${direction} from-black to-white\`} />;
+});
+`, "static template JSX class"],
+    ];
+    for (const [source, label] of jsxConditionalCases) {
+      writeFileSync(sourcePath, source, "utf8");
+      const bundled = spawnSync(process.execPath, [cli, "bundle", join(root, "widget")], { encoding: "utf8" });
+      assert.equal(bundled.status, 0, bundled.stderr);
+      const manifest = JSON.parse(readFileSync(join(root, "widget", "dist", "widget.json"), "utf8"));
+      assert.equal(manifest.renderBackend, "gpu", label);
+    }
+
+    writeFileSync(sourcePath, `import { widget } from "@weaver/sdk";
+const enabled = true;
+export default widget({ name: "JSX Conditional Solid", size: [160, 80] }, () => (
+  <panel class={enabled ? "bg-black" : "bg-white"} />
+));
+`, "utf8");
+    const jsxConditionalSolid = spawnSync(process.execPath, [cli, "bundle", join(root, "widget")], { encoding: "utf8" });
+    assert.equal(jsxConditionalSolid.status, 0, jsxConditionalSolid.stderr);
+    const jsxConditionalSolidManifest = JSON.parse(readFileSync(join(root, "widget", "dist", "widget.json"), "utf8"));
+    assert.equal(jsxConditionalSolidManifest.renderBackend, "software", "statically solid JSX conditional stays software");
+
+    const rejectedJsxClasses = [
+      [`import { widget } from "@weaver/sdk";
+const enabled = true;
+export default widget({ name: "JSX Invalid Branch", size: [160, 80] }, () => (
+  <panel class={enabled ? "bg-black" : "pad-13"} />
+));
+`, /Unknown class utility "pad-13"/, "invalid conditional branch"],
+      [`import { widget } from "@weaver/sdk";
+const enabled = true;
+export default widget({ name: "JSX Unsupported Gradient", size: [160, 80] }, () => (
+  <text class={enabled ? "bg-linear-to-r from-black to-white" : "bg-black"}>Nope</text>
+));
+`, /GradientBackgroundElementUnsupported/, "gradient branch on an unsupported leaf"],
+      [`import { widget } from "@weaver/sdk";
+const dynamicClass = ["bg-black"].join(" ");
+export default widget({ name: "JSX Dynamic Class", size: [160, 80] }, () => (
+  <panel class={dynamicClass} />
+));
+`, /class must resolve to at most 32 literal strings/, "unbounded runtime class"],
+      [`import { widget } from "@weaver/sdk";
+let mutableClass = "bg-linear-to-r from-black to-white";
+export default widget({ name: "JSX Mutable Class", size: [160, 80] }, () => (
+  <panel class={mutableClass} />
+));
+`, /class must resolve to at most 32 literal strings/, "mutable class binding"],
+    ];
+    for (const [source, expected, label] of rejectedJsxClasses) {
+      writeFileSync(sourcePath, source, "utf8");
+      const checked = spawnSync(process.execPath, [cli, "check", join(root, "widget")], { encoding: "utf8" });
+      assert.equal(checked.status, 1, label);
+      assert.match(checked.stderr, expected, label);
+    }
+
+    const tooManyVariants = Array.from({ length: 33 }, (_, index) =>
+      `choice === ${index} ? "bg-[#${index.toString(16).padStart(6, "0")}]" : `,
+    ).join("") + '"bg-black"';
+    writeFileSync(sourcePath, `import { widget } from "@weaver/sdk";
+const choice = 0;
+const classes = ${tooManyVariants};
+export default widget({ name: "JSX Variant Cap", size: [160, 80] }, () => <panel class={classes} />);
+`, "utf8");
+    const capped = spawnSync(process.execPath, [cli, "check", join(root, "widget")], { encoding: "utf8" });
+    assert.equal(capped.status, 1);
+    assert.match(capped.stderr, /class must resolve to at most 32 literal strings/);
+
     writeFileSync(join(root, "widget", "Gradient.tsx"), `export function Gradient() {
   return <panel class="bg-linear-to-r from-black to-white" />;
 }

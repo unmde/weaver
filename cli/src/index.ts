@@ -813,6 +813,144 @@ function writeAtomic(path: string, data: string | Uint8Array): void {
   }
 }
 
+const maxStaticClassVariants = 32;
+
+interface StaticExpressionContext {
+  unwrap(expression: ts.Expression): ts.Expression;
+  boundExpression(name: string): ts.Expression | null | undefined;
+  stringVariants(expression: ts.Expression): readonly string[] | null;
+}
+
+function walkSourceWithStaticExpressions(
+  sourceFile: ts.SourceFile,
+  visitor: (node: ts.Node, context: StaticExpressionContext) => boolean,
+): boolean {
+  const bindingScopes: Array<Map<string, ts.Expression | null>> = [new Map()];
+  const bindName = (name: ts.BindingName, value: ts.Expression | null): void => {
+    if (ts.isIdentifier(name)) {
+      bindingScopes[bindingScopes.length - 1].set(name.text, value);
+      return;
+    }
+    for (const element of name.elements) {
+      if (!ts.isOmittedExpression(element)) bindName(element.name, null);
+    }
+  };
+  const boundExpression = (name: string): ts.Expression | null | undefined => {
+    for (let index = bindingScopes.length - 1; index >= 0; index -= 1) {
+      const scope = bindingScopes[index];
+      if (scope.has(name)) return scope.get(name);
+    }
+    return undefined;
+  };
+  const unwrap = (expression: ts.Expression): ts.Expression => {
+    let current = expression;
+    while (ts.isParenthesizedExpression(current) || ts.isAsExpression(current) ||
+      ts.isTypeAssertionExpression(current) || ts.isNonNullExpression(current) || ts.isSatisfiesExpression(current)) {
+      current = current.expression;
+    }
+    return current;
+  };
+  const merge = (groups: readonly (readonly string[])[]): readonly string[] | null => {
+    const values = new Set<string>();
+    for (const group of groups) {
+      for (const value of group) {
+        values.add(value);
+        if (values.size > maxStaticClassVariants) return null;
+      }
+    }
+    return [...values];
+  };
+  const combine = (left: readonly string[], right: readonly string[]): readonly string[] | null => {
+    const values = new Set<string>();
+    for (const prefix of left) {
+      for (const suffix of right) {
+        values.add(`${prefix}${suffix}`);
+        if (values.size > maxStaticClassVariants) return null;
+      }
+    }
+    return [...values];
+  };
+  const stringVariants = (expression: ts.Expression, seen = new Set<ts.Expression>()): readonly string[] | null => {
+    const current = unwrap(expression);
+    if (ts.isStringLiteral(current) || ts.isNoSubstitutionTemplateLiteral(current) || ts.isNumericLiteral(current)) {
+      return [current.text];
+    }
+    if (seen.has(current)) return null;
+    if (ts.isIdentifier(current)) {
+      const bound = boundExpression(current.text);
+      if (!bound) return null;
+      const nextSeen = new Set(seen);
+      nextSeen.add(current);
+      return stringVariants(bound, nextSeen);
+    }
+    if (ts.isConditionalExpression(current)) {
+      const whenTrue = stringVariants(current.whenTrue, new Set(seen));
+      const whenFalse = stringVariants(current.whenFalse, new Set(seen));
+      return whenTrue && whenFalse ? merge([whenTrue, whenFalse]) : null;
+    }
+    if (ts.isBinaryExpression(current) && current.operatorToken.kind === ts.SyntaxKind.PlusToken) {
+      const left = stringVariants(current.left, new Set(seen));
+      const right = stringVariants(current.right, new Set(seen));
+      return left && right ? combine(left, right) : null;
+    }
+    if (ts.isTemplateExpression(current)) {
+      let values: readonly string[] = [current.head.text];
+      for (const span of current.templateSpans) {
+        const substitution = stringVariants(span.expression, new Set(seen));
+        if (!substitution) return null;
+        const expanded = combine(values, substitution);
+        if (!expanded) return null;
+        values = expanded.map((value) => `${value}${span.literal.text}`);
+      }
+      return values;
+    }
+    return null;
+  };
+  const context: StaticExpressionContext = { unwrap, boundExpression, stringVariants };
+  const visitChildren = (node: ts.Node): boolean => {
+    let stopped = false;
+    ts.forEachChild(node, (child) => {
+      if (!stopped) stopped = walk(child);
+    });
+    return stopped;
+  };
+  const walk = (node: ts.Node): boolean => {
+    if (visitor(node, context)) return true;
+    if (ts.isVariableDeclaration(node)) {
+      if (node.initializer && walk(node.initializer)) return true;
+      const immutable = ts.isVariableDeclarationList(node.parent) && (node.parent.flags & ts.NodeFlags.Const) !== 0;
+      bindName(node.name, immutable ? node.initializer ?? null : null);
+      return false;
+    }
+    if (ts.isFunctionDeclaration(node) && node.name) bindName(node.name, null);
+    if (ts.isClassDeclaration(node) && node.name) bindName(node.name, null);
+    if (ts.isFunctionLike(node)) {
+      bindingScopes.push(new Map());
+      for (const parameter of node.parameters) bindName(parameter.name, null);
+      const stopped = visitChildren(node);
+      bindingScopes.pop();
+      return stopped;
+    }
+    if (ts.isBlock(node) || ts.isModuleBlock(node) || ts.isCatchClause(node)) {
+      bindingScopes.push(new Map());
+      if (ts.isCatchClause(node) && node.variableDeclaration) bindName(node.variableDeclaration.name, null);
+      const stopped = visitChildren(node);
+      bindingScopes.pop();
+      return stopped;
+    }
+    return visitChildren(node);
+  };
+  return walk(sourceFile);
+}
+
+function jsxClassVariants(attribute: ts.JsxAttribute, context: StaticExpressionContext): readonly string[] | null {
+  const initializer = attribute.initializer;
+  if (!initializer) return null;
+  if (ts.isStringLiteral(initializer)) return [initializer.text];
+  if (ts.isJsxExpression(initializer) && initializer.expression) return context.stringVariants(initializer.expression);
+  return null;
+}
+
 function sourceNeedsGpuSurface(sourceFile: ts.SourceFile): boolean {
   const hIdentifiers = new Set(["h"]);
   const hNamespaces = new Set<string>();
@@ -848,93 +986,27 @@ function sourceNeedsGpuSurface(sourceFile: ts.SourceFile): boolean {
     if (ts.isComputedPropertyName(name) && ts.isStringLiteral(name.expression)) return name.expression.text;
     return null;
   };
-  const bindingScopes: Array<Map<string, ts.Expression | null>> = [new Map()];
-  const bindName = (name: ts.BindingName, value: ts.Expression | null): void => {
-    if (ts.isIdentifier(name)) {
-      bindingScopes[bindingScopes.length - 1].set(name.text, value);
-      return;
-    }
-    for (const element of name.elements) {
-      if (!ts.isOmittedExpression(element)) bindName(element.name, null);
-    }
-  };
-  const boundExpression = (name: string): ts.Expression | null | undefined => {
-    for (let index = bindingScopes.length - 1; index >= 0; index -= 1) {
-      const scope = bindingScopes[index];
-      if (scope.has(name)) return scope.get(name);
-    }
-    return undefined;
-  };
-  const unwrapExpression = (expression: ts.Expression): ts.Expression => {
-    let current = expression;
-    while (ts.isParenthesizedExpression(current) || ts.isAsExpression(current) ||
-      ts.isTypeAssertionExpression(current) || ts.isNonNullExpression(current) || ts.isSatisfiesExpression(current)) {
-      current = current.expression;
-    }
-    return current;
-  };
-  const staticString = (expression: ts.Expression, seen: Set<ts.Expression>): string | null => {
-    const current = unwrapExpression(expression);
-    if (ts.isStringLiteral(current) || ts.isNoSubstitutionTemplateLiteral(current) || ts.isNumericLiteral(current)) {
-      return current.text;
-    }
-    if (ts.isIdentifier(current)) {
-      if (seen.has(current)) return null;
-      const bound = boundExpression(current.text);
-      if (!bound) return null;
-      const nextSeen = new Set(seen);
-      nextSeen.add(current);
-      return staticString(bound, nextSeen);
-    }
-    if (ts.isBinaryExpression(current) && current.operatorToken.kind === ts.SyntaxKind.PlusToken) {
-      const left = staticString(current.left, new Set(seen));
-      const right = staticString(current.right, new Set(seen));
-      if (left === null || right === null) return null;
-      return `${left}${right}`;
-    }
-    if (ts.isTemplateExpression(current)) {
-      let value = current.head.text;
-      for (const span of current.templateSpans) {
-        const substitution = staticString(span.expression, new Set(seen));
-        if (substitution === null) return null;
-        value += `${substitution}${span.literal.text}`;
+  const classExpressionNeedsGpu = (expression: ts.Expression, context: StaticExpressionContext): boolean => {
+    const variants = context.stringVariants(expression);
+    if (!variants) return true;
+    return variants.some((classText) => {
+      try {
+        return compileClass(classText).backgroundGradient !== undefined;
+      } catch {
+        // The ordinary class validator reports malformed utilities.
+        return false;
       }
-      return value;
-    }
-    return null;
+    });
   };
-  const classExpressionNeedsGpu = (expression: ts.Expression, seen: Set<ts.Expression>): boolean => {
-    const current = unwrapExpression(expression);
-    if (seen.has(current)) return true;
-    if (ts.isIdentifier(current)) {
-      const bound = boundExpression(current.text);
-      if (!bound) return true;
-      const nextSeen = new Set(seen);
-      nextSeen.add(current);
-      return classExpressionNeedsGpu(bound, nextSeen);
-    }
-    if (ts.isConditionalExpression(current)) {
-      return classExpressionNeedsGpu(current.whenTrue, new Set(seen)) ||
-        classExpressionNeedsGpu(current.whenFalse, new Set(seen));
-    }
-    const classText = staticString(current, new Set(seen));
-    if (classText === null) return true;
-    try {
-      return compileClass(classText).backgroundGradient !== undefined;
-    } catch {
-      // The ordinary class validator reports malformed utilities.
-      return false;
-    }
-  };
-  const hPropsNeedGpu = (tag: string, props: ts.Expression | undefined): boolean => {
+  const hPropsNeedGpu = (tag: string, props: ts.Expression | undefined, context: StaticExpressionContext): boolean => {
     if (tag === "canvas") return true;
     if (!["column", "row", "stack", "panel", "button"].includes(tag) || !props) return false;
     const objectNeedsGpu = (expression: ts.Expression, seen: Set<ts.Expression>): boolean => {
-      const current = unwrapExpression(expression);
+      const current = context.unwrap(expression);
       if (seen.has(current)) return false;
       seen.add(current);
       if (ts.isIdentifier(current)) {
-        const bound = boundExpression(current.text);
+        const bound = context.boundExpression(current.text);
         if (!bound) return current.text !== "undefined";
         return objectNeedsGpu(bound, seen);
       }
@@ -955,35 +1027,14 @@ function sourceNeedsGpuSurface(sourceFile: ts.SourceFile): boolean {
         }
         if (ts.isComputedPropertyName(property.name) && propertyName(property.name) === null) return true;
         if (!ts.isPropertyAssignment(property) || propertyName(property.name) !== "class") continue;
-        if (classExpressionNeedsGpu(property.initializer, new Set())) return true;
+        if (classExpressionNeedsGpu(property.initializer, context)) return true;
       }
       return false;
     };
     return objectNeedsGpu(props, new Set());
   };
   let found = false;
-  const visit = (node: ts.Node): void => {
-    if (ts.isVariableDeclaration(node)) {
-      if (node.initializer) visit(node.initializer);
-      bindName(node.name, node.initializer ?? null);
-      return;
-    }
-    if (ts.isFunctionDeclaration(node) && node.name) bindName(node.name, null);
-    if (ts.isClassDeclaration(node) && node.name) bindName(node.name, null);
-    if (ts.isFunctionLike(node)) {
-      bindingScopes.push(new Map());
-      for (const parameter of node.parameters) bindName(parameter.name, null);
-      ts.forEachChild(node, visit);
-      bindingScopes.pop();
-      return;
-    }
-    if (ts.isBlock(node) || ts.isModuleBlock(node) || ts.isCatchClause(node)) {
-      bindingScopes.push(new Map());
-      if (ts.isCatchClause(node) && node.variableDeclaration) bindName(node.variableDeclaration.name, null);
-      ts.forEachChild(node, visit);
-      bindingScopes.pop();
-      return;
-    }
+  walkSourceWithStaticExpressions(sourceFile, (node, context) => {
     if (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) {
       const tag = node.tagName.getText(sourceFile);
       if (tag === "canvas") {
@@ -996,26 +1047,26 @@ function sourceNeedsGpuSurface(sourceFile: ts.SourceFile): boolean {
         } else {
           const classAttribute = node.attributes.properties.find((attribute): attribute is ts.JsxAttribute =>
             ts.isJsxAttribute(attribute) && attribute.name.getText(sourceFile) === "class");
-          const classText = classAttribute ? jsxStringValue(classAttribute.initializer) : "";
-          if (classText !== null) {
+          const variants = classAttribute ? jsxClassVariants(classAttribute, context) : [""];
+          found = variants === null || variants.some((classText) => {
             try {
-              found = compileClass(classText).backgroundGradient !== undefined;
+              return compileClass(classText).backgroundGradient !== undefined;
             } catch {
               // The ordinary class validator reports malformed utilities.
+              return false;
             }
-          }
+          });
         }
       }
     }
     if (!found && ts.isCallExpression(node) && isHCall(node)) {
       const tag = node.arguments[0];
       if (tag && (ts.isStringLiteral(tag) || ts.isNoSubstitutionTemplateLiteral(tag))) {
-        found = hPropsNeedGpu(tag.text, node.arguments[1]);
+        found = hPropsNeedGpu(tag.text, node.arguments[1], context);
       }
     }
-    if (!found) ts.forEachChild(node, visit);
-  };
-  visit(sourceFile);
+    return found;
+  });
   return found;
 }
 
@@ -1942,20 +1993,37 @@ function validateLoweredTree(project: SourceProject, errors: string[]): void {
     ts.isJsxElement(node)
       ? { tag: node.openingElement.tagName.getText(node.getSourceFile()), attributes: node.openingElement.attributes }
       : { tag: node.tagName.getText(node.getSourceFile()), attributes: node.attributes };
-  const isPaintedLayout = (node: ts.JsxElement | ts.JsxSelfClosingElement, tag: string): boolean => {
-    if (tag !== "row" && tag !== "column" && tag !== "stack") return false;
+  const staticClassVariants = new Map<ts.JsxAttribute, readonly string[] | null>();
+  for (const sourceFile of project.sourceFiles) {
+    walkSourceWithStaticExpressions(sourceFile, (node, context) => {
+      if (ts.isJsxAttribute(node) && node.name.getText(sourceFile) === "class") {
+        staticClassVariants.set(node, jsxClassVariants(node, context));
+      }
+      return false;
+    });
+  }
+  const classAttribute = (node: ts.JsxElement | ts.JsxSelfClosingElement): ts.JsxAttribute | null => {
     const { attributes } = tagAndAttributes(node);
     const sourceFile = node.getSourceFile();
-    const classAttribute = attributes.properties.find((attribute): attribute is ts.JsxAttribute =>
-      ts.isJsxAttribute(attribute) && attribute.name.getText(sourceFile) === "class");
-    const classText = classAttribute ? jsxStringValue(classAttribute.initializer) : "";
-    if (classText === null) return false;
-    try {
-      const compiled = compileClass(classText);
-      return Object.keys(compiled).some((key) => key === "background" || key === "radius" || key.startsWith("radius") || key.startsWith("border") || key.toLowerCase().includes("shadow"));
-    } catch {
-      return false; // The normal class validator reports the actionable error.
+    return attributes.properties.find((attribute): attribute is ts.JsxAttribute =>
+      ts.isJsxAttribute(attribute) && attribute.name.getText(sourceFile) === "class") ?? null;
+  };
+  const classVariants = (node: ts.JsxElement | ts.JsxSelfClosingElement): readonly string[] | null => {
+    const attribute = classAttribute(node);
+    if (!attribute) return [""];
+    return staticClassVariants.get(attribute) ?? null;
+  };
+  const isPaintedLayout = (node: ts.JsxElement | ts.JsxSelfClosingElement, tag: string): boolean => {
+    if (tag !== "row" && tag !== "column" && tag !== "stack") return false;
+    for (const classText of classVariants(node) ?? []) {
+      try {
+        const compiled = compileClass(classText);
+        if (Object.keys(compiled).some((key) => key === "background" || key === "radius" || key.startsWith("radius") || key.startsWith("border") || key.toLowerCase().includes("shadow"))) return true;
+      } catch {
+        // The ordinary class validator reports the malformed utility.
+      }
     }
+    return false;
   };
   const maximum = (values: LoweredTreeMetrics[]): LoweredTreeMetrics => ({
     nodes: Math.max(0, ...values.map((value) => value.nodes)),
@@ -1991,20 +2059,17 @@ function validateLoweredTree(project: SourceProject, errors: string[]): void {
     opacityCanvas: values.some((value) => value.opacityCanvas),
   });
   const canvasHasOpacityLayer = (node: ts.JsxElement | ts.JsxSelfClosingElement): boolean => {
-    const { tag, attributes } = tagAndAttributes(node);
+    const { tag } = tagAndAttributes(node);
     if (/^[A-Z]/.test(tag)) return false;
-    const sourceFile = node.getSourceFile();
-    const classAttribute = attributes.properties.find((attribute): attribute is ts.JsxAttribute =>
-      ts.isJsxAttribute(attribute) && attribute.name.getText(sourceFile) === "class");
-    const classText = classAttribute ? jsxStringValue(classAttribute.initializer) : "";
-    if (classText === null) return false;
-    try {
-      const compiled = compileClass(classText);
-      return typeof compiled.opacity === "number" && compiled.opacity < 1;
-    } catch {
-      // The ordinary class validator reports the malformed utility.
-      return false;
+    for (const classText of classVariants(node) ?? []) {
+      try {
+        const compiled = compileClass(classText);
+        if (typeof compiled.opacity === "number" && compiled.opacity < 1) return true;
+      } catch {
+        // The ordinary class validator reports the malformed utility.
+      }
     }
+    return false;
   };
   const metrics = (node: JsxRoot, visiting: Set<string>): LoweredTreeMetrics => {
     const childMetrics = (children: readonly ts.JsxChild[], parentTag: string | null): LoweredTreeMetrics[] => {
@@ -2104,15 +2169,11 @@ function validateLoweredTree(project: SourceProject, errors: string[]): void {
     };
   };
   const formatPixels = (value: number): string => Number.isInteger(value) ? String(value) : String(Number(value.toFixed(3)));
-  const compiledClass = (node: PrimitiveRoot): Record<string, unknown> | null => {
-    const { attributes } = tagAndAttributes(node);
-    const sourceFile = node.getSourceFile();
-    const classAttribute = attributes.properties.find((attribute): attribute is ts.JsxAttribute =>
-      ts.isJsxAttribute(attribute) && attribute.name.getText(sourceFile) === "class");
-    const classText = classAttribute ? jsxStringValue(classAttribute.initializer) : "";
-    if (classText === null) return null;
+  const compiledClasses = (node: PrimitiveRoot): readonly Record<string, unknown>[] | null => {
+    const variants = classVariants(node);
+    if (!variants) return null;
     try {
-      return compileClass(classText) as Record<string, unknown>;
+      return variants.map((classText) => compileClass(classText) as Record<string, unknown>);
     } catch {
       return null; // The ordinary class validator reports the malformed utility.
     }
@@ -2129,16 +2190,18 @@ function validateLoweredTree(project: SourceProject, errors: string[]): void {
     }
     return result;
   };
-  const validateVisualNodeBounds = (node: PrimitiveRoot, rect: VisualRect, seen: Set<string>): boolean => {
+  const validateVisualNodeBounds = (
+    node: PrimitiveRoot,
+    compiled: Record<string, unknown>,
+    rect: VisualRect,
+    seen: Set<string>,
+  ): boolean => {
     const nodeKey = `${node.getSourceFile().fileName}:${node.getStart()}`;
     if (seen.has(nodeKey)) return false;
     seen.add(nodeKey);
-    const { tag, attributes } = tagAndAttributes(node);
+    const { tag } = tagAndAttributes(node);
     const sourceFile = node.getSourceFile();
-    const classAttribute = attributes.properties.find((attribute): attribute is ts.JsxAttribute =>
-      ts.isJsxAttribute(attribute) && attribute.name.getText(sourceFile) === "class");
-    const compiled = compiledClass(node);
-    if (!compiled) return false;
+    const attribute = classAttribute(node);
     const [surfaceWidth, surfaceHeight] = project.config.size;
     const shadows = [
       [compiled.shadow, compiled.shadowInset],
@@ -2170,7 +2233,7 @@ function validateLoweredTree(project: SourceProject, errors: string[]): void {
         const paintedHeight = surfaceHeight + missing.top + missing.bottom;
         errors.push(locationMessage(
           sourceFile,
-          classAttribute ?? node,
+          attribute ?? node,
           `RootOutsetShadowClipped: root-surface <${tag}> has an outset shadow outside config.size [${formatPixels(surfaceWidth)}, ${formatPixels(surfaceHeight)}]. ` +
           `Required shadow room: left=${formatPixels(required.left)}px, top=${formatPixels(required.top)}px, right=${formatPixels(required.right)}px, bottom=${formatPixels(required.bottom)}px; ` +
           `available: left=${formatPixels(available.left)}px, top=${formatPixels(available.top)}px, right=${formatPixels(available.right)}px, bottom=${formatPixels(available.bottom)}px; ` +
@@ -2202,13 +2265,13 @@ function validateLoweredTree(project: SourceProject, errors: string[]): void {
     // main-axis sizes and are left to runtime rendering.
     const candidates = tag === "stack" || children.length === 1 ? children : [];
     for (const child of candidates) {
-      const childCompiled = compiledClass(child);
-      if (!childCompiled) continue;
-      const fillsContent = (childCompiled.widthPercent === 100 && childCompiled.heightPercent === 100) ||
-        (childCompiled.width === content.width && childCompiled.height === content.height);
-      const hasMargins = ["marginLeft", "marginTop", "marginRight", "marginBottom"].some((key) =>
-        typeof childCompiled[key] === "number" && childCompiled[key] !== 0);
-      if (fillsContent && !hasMargins && validateVisualNodeBounds(child, content, seen)) return true;
+      for (const childCompiled of compiledClasses(child) ?? []) {
+        const fillsContent = (childCompiled.widthPercent === 100 && childCompiled.heightPercent === 100) ||
+          (childCompiled.width === content.width && childCompiled.height === content.height);
+        const hasMargins = ["marginLeft", "marginTop", "marginRight", "marginBottom"].some((key) =>
+          typeof childCompiled[key] === "number" && childCompiled[key] !== 0);
+        if (fillsContent && !hasMargins && validateVisualNodeBounds(child, childCompiled, content, new Set(seen))) return true;
+      }
     }
     return false;
   };
@@ -2225,12 +2288,17 @@ function validateLoweredTree(project: SourceProject, errors: string[]): void {
     const key = `${root.getSourceFile().fileName}:${root.getStart()}`;
     if (seenVisualRoots.has(key)) continue;
     seenVisualRoots.add(key);
-    const compiled = compiledClass(root);
-    if (!compiled) continue;
     const [surfaceWidth, surfaceHeight] = project.config.size;
-    const fillsSurface = (compiled.widthPercent === 100 && compiled.heightPercent === 100) ||
-      (compiled.width === surfaceWidth && compiled.height === surfaceHeight);
-    if (fillsSurface) validateVisualNodeBounds(root, { x: 0, y: 0, width: surfaceWidth, height: surfaceHeight }, new Set());
+    for (const compiled of compiledClasses(root) ?? []) {
+      const fillsSurface = (compiled.widthPercent === 100 && compiled.heightPercent === 100) ||
+        (compiled.width === surfaceWidth && compiled.height === surfaceHeight);
+      if (fillsSurface && validateVisualNodeBounds(
+        root,
+        compiled,
+        { x: 0, y: 0, width: surfaceWidth, height: surfaceHeight },
+        new Set(),
+      )) break;
+    }
   }
   const lowered = maximum(roots.map((root) => metrics(root, new Set())));
   const evidenceNode = roots[0];
@@ -2408,7 +2476,10 @@ function validateSource(project: SourceProject): string[] {
     }
     return "none";
   };
-  const canvasOpacityAncestor = (node: ts.JsxOpeningElement | ts.JsxSelfClosingElement): string | null => {
+  const canvasOpacityAncestor = (
+    node: ts.JsxOpeningElement | ts.JsxSelfClosingElement,
+    context: StaticExpressionContext,
+  ): string | null => {
     let current: ts.Node | undefined = node.parent;
     while (current) {
       if (ts.isJsxElement(current) && current.openingElement !== node) {
@@ -2417,8 +2488,8 @@ function validateSource(project: SourceProject): string[] {
         if (/^[A-Z]/.test(tag)) return null;
         const attribute = current.openingElement.attributes.properties.find((candidate): candidate is ts.JsxAttribute =>
           ts.isJsxAttribute(candidate) && candidate.name.getText(sourceFile) === "class");
-        const classText = attribute ? jsxStringValue(attribute.initializer) : "";
-        if (classText !== null) {
+        const variants = attribute ? jsxClassVariants(attribute, context) : [""];
+        for (const classText of variants ?? []) {
           try {
             const compiled = compileClass(classText);
             if (typeof compiled.opacity === "number" && compiled.opacity < 1) return tag;
@@ -2570,36 +2641,37 @@ function validateSource(project: SourceProject): string[] {
       ));
     }
   };
-  const visit = (node: ts.Node): void => {
+  const visit = (node: ts.Node, context: StaticExpressionContext): boolean => {
     if (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) {
       const sourceFile = node.getSourceFile();
       const tag = node.tagName.getText(sourceFile);
       if (tag === "button" || tag === "slider") validateAccessibleName(node, tag);
       const classAttribute = node.attributes.properties.find((attribute): attribute is ts.JsxAttribute => ts.isJsxAttribute(attribute) && attribute.name.getText(sourceFile) === "class");
       if (classAttribute) {
-        const classText = jsxStringValue(classAttribute.initializer);
-        if (classText === null) errors.push(locationMessage(sourceFile, classAttribute, "class must be a literal string so weaver check can validate every utility"));
+        const classVariants = jsxClassVariants(classAttribute, context);
+        if (classVariants === null) errors.push(locationMessage(
+          sourceFile,
+          classAttribute,
+          `class must resolve to at most ${maxStaticClassVariants} literal strings so weaver check can validate every utility`,
+        ));
         else {
-          try {
+          const classErrors = new Set<string>();
+          for (const classText of classVariants) try {
             const compiled = compileClass(classText);
             if (compiled.backgroundGradient !== undefined && tag !== "column" && tag !== "row" && tag !== "stack" && tag !== "panel" && tag !== "button") {
-              errors.push(locationMessage(
-                sourceFile,
-                classAttribute,
+              classErrors.add(
                 `GradientBackgroundElementUnsupported: gradient backgrounds are supported on <column>, <row>, <stack>, <panel>, and <button>; received <${tag}>. Fix: move the gradient to a containing panel.`,
-              ));
+              );
             }
             const hasStateVariant = Object.keys(compiled).some((key) => key.startsWith("hover") || key.startsWith("pressed"));
             if (hasStateVariant && tag !== "button" && tag !== "slider" && stateVariantAncestry(node) === "none") {
-              errors.push(locationMessage(
-                sourceFile,
-                classAttribute,
+              classErrors.add(
                 `NearestPressableAncestor: state variants on non-pressable <${tag}> require a nearest <button> or <slider> ancestor. Fix: move the utility to the pressable node or place this node inside one.`,
-              ));
+              );
             }
             if (compiled.fontFamily && !["sans", "mono"].includes(compiled.fontFamily) && !project.fonts.some((font) => font.stem === compiled.fontFamily || font.family === compiled.fontFamily)) {
               const available = project.fonts.length === 0 ? "no bundled fonts were found next to widget.tsx" : `available bundled names: ${[...new Set(project.fonts.flatMap((font) => [font.stem, font.family]))].join(", ")}`;
-              errors.push(locationMessage(sourceFile, classAttribute, `Unknown bundled font "${compiled.fontFamily}"; ${available}`));
+              classErrors.add(`Unknown bundled font "${compiled.fontFamily}"; ${available}`);
             }
             if (tag === "canvas") {
               const sizes = compiled as Record<string, unknown>;
@@ -2607,23 +2679,22 @@ function validateSource(project: SourceProject): string[] {
                 const percent = sizes[axis === "width" ? "widthPercent" : "heightPercent"] !== undefined;
                 if (percent || sizes[axis] === undefined) {
                   const shape = percent ? `a percentage ${axis}` : `no ${axis}`;
-                  errors.push(locationMessage(
-                    sourceFile,
-                    classAttribute,
+                  classErrors.add(
                     `CanvasNeedsExplicitSize: <canvas> has ${shape}. A canvas has no intrinsic size, so inside a content-sized container a percentage resolves against 0 and every draw silently no-ops (ctx.${axis} === 0). Fix: give the canvas an explicit pixel ${axis}, e.g. ${axis === "width" ? "w-[312px]" : "h-[71px]"}.`,
-                  ));
+                  );
                 }
               }
             }
           }
-          catch (error) { errors.push(locationMessage(sourceFile, classAttribute, error instanceof UtilityError ? error.message : String(error))); }
+          catch (error) { classErrors.add(error instanceof UtilityError ? error.message : String(error)); }
+          for (const error of classErrors) errors.push(locationMessage(sourceFile, classAttribute, error));
         }
       }
       if (tag === "canvas" && !classAttribute) {
         errors.push(locationMessage(sourceFile, node, `CanvasNeedsExplicitSize: <canvas> has no class. A canvas has no intrinsic size and draws nothing without one; give it explicit pixel dimensions, e.g. class="w-[312px] h-[71px]".`));
       }
       if (tag === "canvas") {
-        const opacityAncestor = canvasOpacityAncestor(node);
+        const opacityAncestor = canvasOpacityAncestor(node, context);
         if (opacityAncestor) {
           errors.push(locationMessage(
             sourceFile,
@@ -2674,9 +2745,9 @@ function validateSource(project: SourceProject): string[] {
         else if (!originDeclared(project.config.origins ?? [], host)) errors.push(locationMessage(node.getSourceFile(), argument, originNotDeclaredMessage(host)));
       }
     }
-    ts.forEachChild(node, visit);
+    return false;
   };
-  for (const sourceFile of project.sourceFiles) visit(sourceFile);
+  for (const sourceFile of project.sourceFiles) walkSourceWithStaticExpressions(sourceFile, visit);
   for (const [provider, hooks] of usedProviders) {
     if (!project.config.subscribe?.includes(provider)) {
       for (const hook of hooks) errors.push(`${hook}("${provider}") requires subscribe: ["${provider}"] in the widget config`);
