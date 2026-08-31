@@ -1197,7 +1197,9 @@ function sourceNeedsGpuSurface(sourceFile: ts.SourceFile, bindings?: HFactoryBin
       } else if (["column", "row", "stack", "panel", "button"].includes(tag)) {
         const background = node.attributes.properties.find((attribute): attribute is ts.JsxAttribute =>
           ts.isJsxAttribute(attribute) && attribute.name.getText(sourceFile) === "background");
-        if (background) {
+        const spreadNeedsGpu = node.attributes.properties.some((attribute) =>
+          ts.isJsxSpreadAttribute(attribute) && hPropsNeedGpu(tag, attribute.expression, context));
+        if (background || spreadNeedsGpu) {
           found = true;
         } else {
           const classAttribute = node.attributes.properties.find((attribute): attribute is ts.JsxAttribute =>

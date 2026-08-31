@@ -381,6 +381,18 @@ export default widget({ name: "JSX Template Gradient", size: [160, 80] }, () => 
   return <panel class={\`bg-linear-to-\${direction} from-black to-white\`} />;
 });
 `, "static template JSX class"],
+      [`import { widget } from "@weaver/sdk";
+export default widget({ name: "JSX Spread Gradient", size: [160, 80] }, () => (
+  <panel {...{ class: "bg-linear-to-r from-black to-white" }} />
+));
+`, "inline JSX props spread"],
+      [`import { widget } from "@weaver/sdk";
+const surface = { class: "bg-linear-to-r from-black to-white" };
+const props = { ...surface };
+export default widget({ name: "JSX Bound Spread Gradient", size: [160, 80] }, () => (
+  <panel {...props} />
+));
+`, "bound nested JSX props spread"],
     ];
     for (const [source, label] of jsxConditionalCases) {
       writeFileSync(sourcePath, source, "utf8");
@@ -400,6 +412,15 @@ export default widget({ name: "JSX Conditional Solid", size: [160, 80] }, () => 
     assert.equal(jsxConditionalSolid.status, 0, jsxConditionalSolid.stderr);
     const jsxConditionalSolidManifest = JSON.parse(readFileSync(join(root, "widget", "dist", "widget.json"), "utf8"));
     assert.equal(jsxConditionalSolidManifest.renderBackend, "software", "statically solid JSX conditional stays software");
+
+    writeFileSync(sourcePath, `import { widget } from "@weaver/sdk";
+const props = { class: "bg-black" };
+export default widget({ name: "JSX Solid Spread", size: [160, 80] }, () => <panel {...props} />);
+`, "utf8");
+    const jsxSolidSpread = spawnSync(process.execPath, [cli, "bundle", join(root, "widget")], { encoding: "utf8" });
+    assert.equal(jsxSolidSpread.status, 0, jsxSolidSpread.stderr);
+    const jsxSolidSpreadManifest = JSON.parse(readFileSync(join(root, "widget", "dist", "widget.json"), "utf8"));
+    assert.equal(jsxSolidSpreadManifest.renderBackend, "software", "statically solid JSX spread stays software");
 
     const rejectedJsxClasses = [
       [`import { widget } from "@weaver/sdk";
