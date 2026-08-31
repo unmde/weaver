@@ -986,6 +986,48 @@ function hFactoryBindings(directory: string, sourceFiles: readonly ts.SourceFile
         namespaces.set(imported.name.text, exports);
       }
     }
+    const unwrap = (expression: ts.Expression): ts.Expression => {
+      let current = expression;
+      while (ts.isParenthesizedExpression(current) || ts.isAsExpression(current) ||
+        ts.isTypeAssertionExpression(current) || ts.isNonNullExpression(current) || ts.isSatisfiesExpression(current)) {
+        current = current.expression;
+      }
+      return current;
+    };
+    const namespaceBinding = (expression: ts.Expression): ReadonlySet<string> | undefined => {
+      const current = unwrap(expression);
+      return ts.isIdentifier(current) ? namespaces.get(current.text) : undefined;
+    };
+    const factoryBinding = (expression: ts.Expression): boolean => {
+      const current = unwrap(expression);
+      if (ts.isIdentifier(current)) return identifiers.has(current.text);
+      if (ts.isPropertyAccessExpression(current)) {
+        return namespaceBinding(current.expression)?.has(current.name.text) === true;
+      }
+      return ts.isElementAccessExpression(current) && current.argumentExpression !== undefined &&
+        ts.isStringLiteral(current.argumentExpression) &&
+        namespaceBinding(current.expression)?.has(current.argumentExpression.text) === true;
+    };
+    let aliasesChanged = true;
+    while (aliasesChanged) {
+      aliasesChanged = false;
+      for (const statement of sourceFile.statements) {
+        if (!ts.isVariableStatement(statement) ||
+          (statement.declarationList.flags & ts.NodeFlags.Const) === 0) continue;
+        for (const declaration of statement.declarationList.declarations) {
+          if (!ts.isIdentifier(declaration.name) || !declaration.initializer) continue;
+          const namespace = namespaceBinding(declaration.initializer);
+          if (namespace && !namespaces.has(declaration.name.text)) {
+            namespaces.set(declaration.name.text, namespace);
+            aliasesChanged = true;
+          }
+          if (factoryBinding(declaration.initializer) && !identifiers.has(declaration.name.text)) {
+            identifiers.add(declaration.name.text);
+            aliasesChanged = true;
+          }
+        }
+      }
+    }
     return { identifiers, namespaces };
   };
   let changed = true;
@@ -1003,6 +1045,13 @@ function hFactoryBindings(directory: string, sourceFiles: readonly ts.SourceFile
         if (ts.isExportAssignment(statement) && !statement.isExportEquals &&
           ts.isIdentifier(statement.expression) && local.identifiers.has(statement.expression.text)) {
           add("default");
+          continue;
+        }
+        if (ts.isVariableStatement(statement) &&
+          statement.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword)) {
+          for (const declaration of statement.declarationList.declarations) {
+            if (ts.isIdentifier(declaration.name) && local.identifiers.has(declaration.name.text)) add(declaration.name.text);
+          }
           continue;
         }
         if (!ts.isExportDeclaration(statement)) continue;
@@ -1031,17 +1080,42 @@ function hFactoryBindings(directory: string, sourceFiles: readonly ts.SourceFile
 function sourceNeedsGpuSurface(sourceFile: ts.SourceFile, bindings?: HFactoryBindings): boolean {
   const hIdentifiers = new Set(["h", ...(bindings?.identifiers ?? [])]);
   const hNamespaces = bindings?.namespaces ?? new Map<string, ReadonlySet<string>>();
-  const isHCall = (node: ts.CallExpression): boolean => {
-    if (ts.isIdentifier(node.expression)) return hIdentifiers.has(node.expression.text);
-    if (ts.isPropertyAccessExpression(node.expression)) {
-      return ts.isIdentifier(node.expression.expression) &&
-        hNamespaces.get(node.expression.expression.text)?.has(node.expression.name.text) === true;
+  const namespaceExports = (
+    expression: ts.Expression,
+    context: StaticExpressionContext,
+    seen: Set<ts.Expression>,
+  ): ReadonlySet<string> | undefined => {
+    const current = context.unwrap(expression);
+    if (seen.has(current) || !ts.isIdentifier(current)) return undefined;
+    const bound = context.boundExpression(current.text);
+    if (bound !== undefined) {
+      if (bound === null) return undefined;
+      seen.add(current);
+      return namespaceExports(bound, context, seen);
     }
-    if (ts.isElementAccessExpression(node.expression)) {
-      return ts.isIdentifier(node.expression.expression) &&
-        node.expression.argumentExpression !== undefined &&
-        ts.isStringLiteral(node.expression.argumentExpression) &&
-        hNamespaces.get(node.expression.expression.text)?.has(node.expression.argumentExpression.text) === true;
+    return hNamespaces.get(current.text);
+  };
+  const isHExpression = (
+    expression: ts.Expression,
+    context: StaticExpressionContext,
+    seen = new Set<ts.Expression>(),
+  ): boolean => {
+    const current = context.unwrap(expression);
+    if (seen.has(current)) return false;
+    if (ts.isIdentifier(current)) {
+      const bound = context.boundExpression(current.text);
+      if (bound !== undefined) {
+        if (bound === null) return false;
+        seen.add(current);
+        return isHExpression(bound, context, seen);
+      }
+      return hIdentifiers.has(current.text);
+    }
+    if (ts.isPropertyAccessExpression(current)) {
+      return namespaceExports(current.expression, context, new Set(seen))?.has(current.name.text) === true;
+    }
+    if (ts.isElementAccessExpression(current) && current.argumentExpression && ts.isStringLiteral(current.argumentExpression)) {
+      return namespaceExports(current.expression, context, new Set(seen))?.has(current.argumentExpression.text) === true;
     }
     return false;
   };
@@ -1123,7 +1197,7 @@ function sourceNeedsGpuSurface(sourceFile: ts.SourceFile, bindings?: HFactoryBin
         }
       }
     }
-    if (!found && ts.isCallExpression(node) && isHCall(node)) {
+    if (!found && ts.isCallExpression(node) && isHExpression(node.expression, context)) {
       const tag = node.arguments[0];
       if (tag && (ts.isStringLiteral(tag) || ts.isNoSubstitutionTemplateLiteral(tag))) {
         found = hPropsNeedGpu(tag.text, node.arguments[1], context);

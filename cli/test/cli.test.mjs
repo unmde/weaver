@@ -509,6 +509,18 @@ export default widget({ name: "h Conditional Class", size: [160, 80] }, () => {
   return h("panel", { class: enabled ? "bg-linear-to-r from-black to-white" : "bg-black" });
 });
 `, "h() conditional gradient class"],
+      [`import { h, widget } from "@weaver/sdk";
+const create = h;
+export default widget({ name: "h Local Alias", size: [160, 80] }, () =>
+  create("panel", { class: "bg-linear-to-r from-black to-white" }));
+`, "h() immutable local alias"],
+      [`import { widget } from "@weaver/sdk";
+import * as Weaver from "@weaver/sdk";
+const Factory = Weaver;
+const create = Factory.h;
+export default widget({ name: "h Namespace Alias", size: [160, 80] }, () =>
+  create("panel", { class: "bg-linear-to-r from-black to-white" }));
+`, "h() chained namespace alias"],
     ];
     for (const [source, label] of hCases) {
       writeFileSync(sourcePath, source, "utf8");
@@ -530,6 +542,20 @@ export default widget({ name: "Local h Re-export", size: [160, 80] }, () =>
     const localFactoryManifest = JSON.parse(readFileSync(join(root, "widget", "dist", "widget.json"), "utf8"));
     assert.equal(localFactoryManifest.renderBackend, "gpu", "locally re-exported h() gradient class");
 
+    writeFileSync(join(root, "widget", "aliased-factory.ts"), `import { h } from "@weaver/sdk";
+const create = h;
+export { create };
+`, "utf8");
+    writeFileSync(sourcePath, `import { widget } from "@weaver/sdk";
+import { create } from "./aliased-factory";
+export default widget({ name: "Exported h Alias", size: [160, 80] }, () =>
+  create("panel", { class: "bg-linear-to-r from-black to-white" }));
+`, "utf8");
+    const exportedAlias = spawnSync(process.execPath, [cli, "bundle", join(root, "widget")], { encoding: "utf8" });
+    assert.equal(exportedAlias.status, 0, exportedAlias.stderr);
+    const exportedAliasManifest = JSON.parse(readFileSync(join(root, "widget", "dist", "widget.json"), "utf8"));
+    assert.equal(exportedAliasManifest.renderBackend, "gpu", "locally exported immutable h() alias");
+
     writeFileSync(sourcePath, `import { h, widget } from "@weaver/sdk";
 const props = { class: "bg-linear-to-r from-black to-white" };
 export default widget({ name: "h Scoped Props", size: [160, 80] }, () => {
@@ -541,6 +567,18 @@ export default widget({ name: "h Scoped Props", size: [160, 80] }, () => {
     assert.equal(scoped.status, 0, scoped.stderr);
     const scopedManifest = JSON.parse(readFileSync(join(root, "widget", "dist", "widget.json"), "utf8"));
     assert.equal(scopedManifest.renderBackend, "software", "h() bound props respect lexical shadowing");
+
+    writeFileSync(sourcePath, `import { h, widget } from "@weaver/sdk";
+const create = h;
+export default widget({ name: "h Shadowed Factory", size: [160, 80] }, () => {
+  const create = (_type: string, _props: Record<string, unknown>) => h("panel", { class: "bg-black" });
+  return create("panel", { class: "bg-linear-to-r from-black to-white" });
+});
+`, "utf8");
+    const shadowedFactory = spawnSync(process.execPath, [cli, "bundle", join(root, "widget")], { encoding: "utf8" });
+    assert.equal(shadowedFactory.status, 0, shadowedFactory.stderr);
+    const shadowedFactoryManifest = JSON.parse(readFileSync(join(root, "widget", "dist", "widget.json"), "utf8"));
+    assert.equal(shadowedFactoryManifest.renderBackend, "software", "h() factory aliases respect lexical shadowing");
 
     writeFileSync(sourcePath, `import { h, widget } from "@weaver/sdk";
 export default widget({ name: "h Conditional Solid", size: [160, 80] }, () => {
