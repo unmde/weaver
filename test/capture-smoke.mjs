@@ -155,13 +155,27 @@ try {
     { role: "button", name: "Reset" },
   ]);
 
+  const renderThrows = captureFailureRun("render-throws", "test/fixtures/render-throws");
+  assert.equal(renderThrows.receipt.error?.name, "CaptureWidgetFailed");
+  assert.match(renderThrows.receipt.error?.diagnostic ?? "", /^widget render failed:\nError: boom: deliberate render failure\n\s+at /);
+  assert.match(renderThrows.stderr, /^diagnostic: widget render failed:\nError: boom: deliberate render failure\n\s+at /m);
+
+  const pressThrows = capture("press-throws", "test/fixtures/press-throws");
+  assert.match(snapshotText(pressThrows), /role=button name="Detonate"/);
+  const pressThrowsClicked = captureFailureRun("press-throws-clicked", "test/fixtures/press-throws", [
+    "--action-file", join(root, "test", "capture", "press-throws.actions"),
+  ]);
+  assert.equal(pressThrowsClicked.receipt.error?.name, "CaptureWidgetFailed");
+  assert.match(pressThrowsClicked.receipt.error?.diagnostic ?? "", /^widget .+ failed:\nError: boom: deliberate press failure\n\s+at /);
+  assert.match(pressThrowsClicked.stderr, /^diagnostic: widget .+ failed:\nError: boom: deliberate press failure\n\s+at /m);
+
   const recorded = recordClockSession();
   const replayed = capture("clock-replayed", "examples/clock", ["--session-journal", recorded.journal]);
   assert.equal(fileHash(recorded.image), imageHash(replayed));
   assert.deepEqual(replayed.renderer.eventsDriven, ["session_journal"]);
   assert.ok(replayed.inputs.sessionJournalSha256);
 
-  process.stdout.write("weaver capture smoke passed: pixels, resize, semantics, actions, providers, isolation, and session replay\n");
+  process.stdout.write("weaver capture smoke passed: pixels, resize, semantics, actions, providers, isolation, widget diagnostics, and session replay\n");
 } finally {
   rmSync(outputRoot, { recursive: true, force: true });
 }
@@ -180,13 +194,17 @@ function capture(name, directory, extra = []) {
 }
 
 function captureFailure(name, directory, extra = []) {
+  return captureFailureRun(name, directory, extra).receipt;
+}
+
+function captureFailureRun(name, directory, extra = []) {
   const result = runCapture(name, directory, extra);
   assert.equal(result.process.status, 1, result.process.stderr);
   assert.equal(result.receipt.status, "error");
   assert.equal(existsSync(result.image), false);
   assert.equal(existsSync(result.snapshot), false);
   assert.equal(existsSync(result.receiptPath), false);
-  return result.receipt;
+  return { receipt: result.receipt, stderr: result.process.stderr };
 }
 
 function runCapture(name, directory, extra = []) {

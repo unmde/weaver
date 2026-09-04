@@ -1,0 +1,1 @@
+fix: **Show the widget error behind a failed capture**: `weaver capture` now carries the widget's thrown message and stack in the receipt's `error.diagnostic` and prints it on standard error, so a `CaptureWidgetFailed` or runtime-crash receipt alone tells an agent what to fix.

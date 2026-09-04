@@ -20,7 +20,10 @@ go to standard error. A failed run also emits one error receipt, exits nonzero,
 and does not publish a partial artifact set. If widget execution falls back to
 its runtime error surface during an action or replay, capture reports
 `CaptureWidgetFailed` instead of treating those error pixels as a successful
-widget render.
+widget render. The widget's own diagnostic (the thrown message and stack, or
+the unhandled rejection) travels with that failure: the receipt carries it as
+`error.diagnostic` and standard error prints it on a `diagnostic:` line, so the
+capture output alone names what to fix.
 
 Capture uses a fresh temporary data, storage, geometry, log, and artwork root.
 It neither reads nor changes the live widget state. The clock starts at the ISO

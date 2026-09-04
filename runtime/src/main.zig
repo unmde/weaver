@@ -14,6 +14,7 @@ const platform = @import("platform/root.zig");
 const storage_mod = @import("storage.zig");
 const windows_monitor = if (builtin.os.tag == .windows) @import("platform/windows_monitor.zig") else struct {};
 const tree_mod = @import("tree.zig");
+const widget_diagnostic = @import("widget_diagnostic.zig");
 const widget_log = @import("widget_log.zig");
 
 comptime {
@@ -1387,6 +1388,11 @@ pub fn main(init: std.process.Init) !void {
     const log_name = try safeLogName(allocator, loaded.manifest.name);
     const log_path = try std.fs.path.join(allocator, &.{ log_directory, log_name });
     try widget_log.init(init.io, log_path);
+    // That capture log is deleted with the state root, so widget diagnostics
+    // also go to a file the CLI copies into the capture receipt.
+    if (capture_state_root) |root| {
+        widget_diagnostic.initCaptureSink(init.io, try std.fs.path.join(allocator, &.{ root, "diagnostic.txt" }));
+    }
     std.log.info("widget runtime starting pid={d}{s}", .{ platform.currentProcessId(), if (dev) " dev=true" else "" });
     var storage = try storage_mod.Store.init(init.io, allocator, data_root, loaded.manifest.name);
     const bundle_path = try std.fs.path.join(allocator, &.{ directory, "bundle.js" });
@@ -1977,6 +1983,7 @@ test {
     _ = @import("network.zig");
     _ = @import("storage.zig");
     _ = @import("provider.zig");
+    _ = @import("widget_diagnostic.zig");
     _ = @import("widget_log.zig");
     const automatic_software_backend: native_sdk.app_manifest.GpuSurfaceBackend =
         if (@import("builtin").os.tag == .macos) .metal else .software;

@@ -172,7 +172,7 @@ interface CaptureReceipt {
   inputs: { clock: string; storage: string; actionFileSha256?: string; providerFixtureSha256?: string; sessionJournalSha256?: string };
   interactions?: { actions: string[]; mediaCommands: CaptureMediaCommandFixture[] };
   warnings: string[];
-  error?: { name: string; ask: string; remedy: string; candidates?: CaptureCandidate[] };
+  error?: { name: string; ask: string; remedy: string; diagnostic?: string; candidates?: CaptureCandidate[] };
 }
 
 async function main(argv: string[]): Promise<void> {
@@ -371,6 +371,10 @@ async function captureWidget(directory: string, options: CaptureOptions): Promis
   const temporaryImage = join(captureRoot, "capture.png");
   const temporarySnapshot = join(captureRoot, "capture.snapshot.txt");
   const nativeResultPath = join(captureRoot, "native-result.json");
+  // The runtime appends every widget diagnostic (a throwing render or
+  // handler, an unhandled rejection, a script exception) with its message
+  // and stack here; see runtime/src/widget_diagnostic.zig.
+  const diagnosticPath = join(captureRoot, "diagnostic.txt");
   const chosenClock = options.clock ?? new Date().toISOString();
   let bundleSha256 = "";
   let bundleUs = 0;
@@ -459,16 +463,18 @@ async function captureWidget(directory: string, options: CaptureOptions): Promis
     }
     if (child.error) throw child.error;
     if (child.status !== 0 || nativeResult?.status !== "ok") {
+      const diagnostic = existsSync(diagnosticPath) ? readFileSync(diagnosticPath, "utf8").trimEnd() : "";
       if (nativeResult?.error) throw new CaptureInputFailure(
         nativeResult.error.name,
         nativeResult.error.ask,
         nativeResult.error.remedy,
-        nativeResult.error.candidates,
+        { candidates: nativeResult.error.candidates, diagnostic },
       );
       throw new CaptureInputFailure(
         "CaptureRuntimeFailed",
-        `inspect the runtime diagnostic above (exit ${child.status ?? "signal"})`,
+        `inspect the widget diagnostic and runtime output (exit ${child.status ?? "signal"})`,
         "fix the named widget or runtime failure, then rerun the same capture command",
+        { diagnostic },
       );
     }
     if (!nativeResult.output || !nativeResult.renderer || !nativeResult.pending || !nativeResult.timingUs) {
@@ -551,7 +557,9 @@ async function captureWidget(directory: string, options: CaptureOptions): Promis
       error: named,
     });
     process.stdout.write(`${JSON.stringify(receipt)}\n`);
-    process.stderr.write(`weaver capture failed: ${named.name}: ${named.ask}\nremedy: ${named.remedy}\n`);
+    process.stderr.write(`weaver capture failed: ${named.name}: ${named.ask}\n`);
+    if (named.diagnostic) process.stderr.write(`diagnostic: ${named.diagnostic}\n`);
+    process.stderr.write(`remedy: ${named.remedy}\n`);
     process.exitCode = 1;
   } finally {
     rmSync(captureRoot, { recursive: true, force: true });
@@ -559,8 +567,18 @@ async function captureWidget(directory: string, options: CaptureOptions): Promis
 }
 
 class CaptureInputFailure extends Error {
-  constructor(readonly name: string, readonly ask: string, readonly remedy: string, readonly candidates?: CaptureCandidate[]) {
+  readonly candidates?: CaptureCandidate[];
+  readonly diagnostic?: string;
+
+  constructor(
+    readonly name: string,
+    readonly ask: string,
+    readonly remedy: string,
+    detail: { candidates?: CaptureCandidate[]; diagnostic?: string } = {},
+  ) {
     super(ask);
+    this.candidates = detail.candidates;
+    this.diagnostic = detail.diagnostic || undefined;
   }
 }
 
@@ -625,6 +643,7 @@ function failedCaptureReceipt(input: {
       name: input.error.name,
       ask: input.error.ask,
       remedy: input.error.remedy,
+      ...(input.error.diagnostic ? { diagnostic: input.error.diagnostic } : {}),
       ...(input.error.candidates ? { candidates: input.error.candidates } : {}),
     },
   };
