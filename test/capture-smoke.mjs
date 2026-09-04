@@ -61,6 +61,12 @@ try {
   assert.match(snapshotText(noro), /role=button name="Seek"/);
   assert.match(snapshotText(noro), /name="00:42"/);
 
+  // Content-sized labels must hold their run on one line: the number of
+  // laid-out text lines equals the number of text nodes.
+  const textWrap = capture("text-wrap", "test/fixtures/text-wrap");
+  assert.equal(textNodeCount(textWrap), 5);
+  assert.equal(textLineCount(textWrap), 5);
+
   const noroSignal = capture("noro-signal", "examples/noro-signal", [
     "--provider-fixture", join(root, "test", "capture", "noro.provider.json"),
   ]);
@@ -68,6 +74,7 @@ try {
   assert.match(snapshotText(noroSignal), /role=button name="Seek"/);
   assert.match(snapshotText(noroSignal), /role=button name="PAUSE"/);
   assert.match(snapshotText(noroSignal), /name="00:42"/);
+  assert.equal(textLineCount(noroSignal), textNodeCount(noroSignal));
 
   const noroSignalAction = capture("noro-signal-action", "examples/noro-signal", [
     "--provider-fixture", join(root, "test", "capture", "noro-action.provider.json"),
@@ -268,4 +275,14 @@ function recordClockSession() {
 
 function snapshotText(receipt) {
   return readFileSync(receipt.output.snapshot, "utf8");
+}
+
+function textLineCount(receipt) {
+  const match = /text_layout_lines=(\d+)\//.exec(snapshotText(receipt));
+  assert.ok(match, "snapshot header is missing text_layout_lines");
+  return Number(match[1]);
+}
+
+function textNodeCount(receipt) {
+  return snapshotText(receipt).split("\n").filter((line) => line.includes(" role=text ")).length;
 }
