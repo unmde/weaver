@@ -5,6 +5,7 @@ const qjs = @import("qjs.zig");
 const provider_mod = @import("provider.zig");
 const tree_mod = @import("tree.zig");
 const storage_mod = @import("storage.zig");
+const widget_diagnostic = @import("widget_diagnostic.zig");
 const c = qjs.c;
 
 // QuickJS receipt (2026-07-29): a synthetic worst-good retained view with
@@ -363,7 +364,7 @@ pub const Engine = struct {
             if (c.JS_IsUndefined(pending.promise)) continue;
             var detail_buffer: [max_exception_detail_bytes]u8 = undefined;
             const details = valueDetails(self.context, pending.reason, &detail_buffer);
-            if (self.bridge_state.emit_error_logs) std.log.err("widget unhandled promise rejection:\n{s}", .{details});
+            if (self.bridge_state.emit_error_logs) widget_diagnostic.report("widget unhandled promise rejection:\n{s}", .{details});
             self.bridge_state.render_failed = true;
             var visible_buffer: [tree_mod.max_text_bytes]u8 = undefined;
             const first_line_length = std.mem.indexOfScalar(u8, details, '\n') orelse details.len;
@@ -385,7 +386,7 @@ fn logExceptionFrom(context: *c.JSContext) void {
     const exception = c.JS_GetException(context);
     defer c.JS_FreeValue(context, exception);
     var buffer: [max_exception_detail_bytes]u8 = undefined;
-    std.log.err("widget JavaScript exception:\n{s}", .{valueDetails(context, exception, &buffer)});
+    widget_diagnostic.report("widget JavaScript exception:\n{s}", .{valueDetails(context, exception, &buffer)});
 }
 
 fn valueDetails(context: *c.JSContext, value: c.JSValueConst, buffer: []u8) []const u8 {

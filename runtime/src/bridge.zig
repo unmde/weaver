@@ -5,6 +5,7 @@ const media_pending = @import("media_pending.zig");
 const provider_mod = @import("provider.zig");
 const qjs = @import("qjs.zig");
 const storage_mod = @import("storage.zig");
+const widget_diagnostic = @import("widget_diagnostic.zig");
 const c = qjs.c;
 
 pub const State = struct {
@@ -343,7 +344,7 @@ fn reportError(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c.J
 
     const visible_scope = scope.bytes[0..@min(scope.bytes.len, max_visible_error_scope_bytes)];
     const log_details = details.bytes[0..@min(details.bytes.len, max_logged_error_detail_bytes)];
-    if (bridge_state.emit_error_logs) std.log.err("widget {s} failed:\n{s}", .{ visible_scope, log_details });
+    if (bridge_state.emit_error_logs) widget_diagnostic.report("widget {s} failed:\n{s}", .{ visible_scope, log_details });
 
     var visible_buffer: [tree_mod.max_text_bytes]u8 = undefined;
     const first_line_length = std.mem.indexOfScalar(u8, details.bytes, '\n') orelse details.bytes.len;
