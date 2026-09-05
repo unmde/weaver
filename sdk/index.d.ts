@@ -139,7 +139,17 @@ declare global {
       key?: string | number;
     }
 
-    interface BoxProps {
+    /**
+     * `key` on an intrinsic element. Under `jsx: "react-jsx"` TypeScript
+     * checks a keyed intrinsic's props against `IntrinsicElements[tag]`
+     * directly, so `IntrinsicAttributes` alone does not admit `key` there.
+     * The reconciler reads `key` for positional diffing of mapped children.
+     */
+    interface KeyedProps {
+      key?: string | number;
+    }
+
+    interface BoxProps extends KeyedProps {
       class?: string;
       children?: WidgetChild | WidgetChild[];
     }
@@ -149,14 +159,14 @@ declare global {
       background?: BackgroundGradientStack;
     }
 
-    interface TextProps {
+    interface TextProps extends KeyedProps {
       class?: string;
       children?: string | number | Signal<string | number> | (string | number)[];
     }
 
-    type IconProps =
+    type IconProps = KeyedProps & (
       | { class?: string; name: string; d?: never; viewBox?: never; stroke?: never }
-      | { class?: string; d: string; viewBox?: string; stroke?: number; name?: never };
+      | { class?: string; d: string; viewBox?: string; stroke?: number; name?: never });
 
     interface IntrinsicElements {
       column: GradientBoxProps;
