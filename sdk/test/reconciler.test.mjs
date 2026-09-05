@@ -722,3 +722,59 @@ test("hot swap captures and seeds root hook slots only when every slot type matc
   const malformed = await runHotSwapFixture({ seed: "not-json" });
   assert.equal(malformed.fixtureAccepted, false);
 });
+
+test("a canvas keeps its layout size across re-renders", async () => {
+  const source = `
+    import { h, useState, widget } from "./src/index.ts";
+    widget({ name: "Canvas layout size fixture", size: [240, 80] }, () => {
+      const [tick, setTick] = useState(0);
+      globalThis.rerender = () => setTick((value) => value + 1);
+      return h("row", { class: "w-full gap-2" },
+        h("canvas", {
+          class: "w-0 grow h-[8px]",
+          onFrame(ctx) { globalThis.drawSizes.push([ctx.width, ctx.height]); ctx.clear(); },
+        }),
+        h("text", null, String(tick)),
+      );
+    });
+  `;
+  const output = await build({
+    stdin: { contents: source, resolveDir: fileURLToPath(new URL("..", import.meta.url)), sourcefile: "canvas-layout-size-fixture.ts" },
+    bundle: true, format: "iife", platform: "neutral", write: false,
+  });
+  let id = 0;
+  let canvasId = 0;
+  let resize;
+  const errors = [];
+  const native = {
+    ...isolatedNative(),
+    createNode(type) { id += 1; if (type === "canvas") canvasId = id; return id; },
+    reportError(...args) { errors.push(args); },
+    onCanvasResize(callback) { resize = callback; },
+    setCanvasCommands() {},
+  };
+  const context = { native, drawSizes: [] };
+  vm.runInNewContext(output.outputFiles[0].text, context);
+  assert.deepEqual(errors, []);
+
+  // The first draw can only use the class-declared size: `w-0 grow` is 0 wide until layout runs.
+  assert.deepEqual(Array.from(context.drawSizes.at(-1)), [0, 8]);
+
+  // Layout reports the real size; the canvas redraws at it.
+  resize(canvasId, 181, 8);
+  assert.deepEqual(Array.from(context.drawSizes.at(-1)), [181, 8]);
+
+  // A re-render must not shrink the draw size back to the declared 0.
+  const drawsBefore = context.drawSizes.length;
+  context.rerender();
+  await Promise.resolve();
+  assert.ok(context.drawSizes.length > drawsBefore, "re-render redraws the one-shot canvas");
+  assert.deepEqual(Array.from(context.drawSizes.at(-1)), [181, 8]);
+
+  // Layout moving again is still honored.
+  resize(canvasId, 150, 8);
+  assert.deepEqual(Array.from(context.drawSizes.at(-1)), [150, 8]);
+  context.rerender();
+  await Promise.resolve();
+  assert.deepEqual(Array.from(context.drawSizes.at(-1)), [150, 8]);
+});

@@ -485,6 +485,13 @@ async function captureWidget(directory: string, options: CaptureOptions): Promis
     }
 
     warnings.push(...(nativeResult.warnings ?? []));
+    // The runtime appends capture-only warnings here (see
+    // runtime/src/capture_warnings.zig): conditions the pixels show but do not
+    // explain, such as a canvas whose commands were drawn for another size.
+    const runtimeWarningsPath = join(captureRoot, "warnings.txt");
+    if (existsSync(runtimeWarningsPath)) {
+      warnings.push(...readFileSync(runtimeWarningsPath, "utf8").split("\n").map((line) => line.trim()).filter((line) => line.length > 0));
+    }
     const nativeRenderer = nativeResult.renderer;
     const nativeOutput = nativeResult.output;
     const nativePending = nativeResult.pending;
@@ -2849,25 +2856,10 @@ function validateSource(project: SourceProject): string[] {
               const available = project.fonts.length === 0 ? "no bundled fonts were found next to widget.tsx" : `available bundled names: ${[...new Set(project.fonts.flatMap((font) => [font.stem, font.family]))].join(", ")}`;
               classErrors.add(`Unknown bundled font "${compiled.fontFamily}"; ${available}`);
             }
-            if (tag === "canvas") {
-              const sizes = compiled as Record<string, unknown>;
-              for (const axis of ["width", "height"] as const) {
-                const percent = sizes[axis === "width" ? "widthPercent" : "heightPercent"] !== undefined;
-                if (percent || sizes[axis] === undefined) {
-                  const shape = percent ? `a percentage ${axis}` : `no ${axis}`;
-                  classErrors.add(
-                    `CanvasNeedsExplicitSize: <canvas> has ${shape}. A canvas has no intrinsic size, so inside a content-sized container a percentage resolves against 0 and every draw silently no-ops (ctx.${axis} === 0). Fix: give the canvas an explicit pixel ${axis}, e.g. ${axis === "width" ? "w-[312px]" : "h-[71px]"}.`,
-                  );
-                }
-              }
-            }
           }
           catch (error) { classErrors.add(error instanceof UtilityError ? error.message : String(error)); }
           for (const error of classErrors) errors.push(locationMessage(sourceFile, classAttribute, error));
         }
-      }
-      if (tag === "canvas" && !classAttribute) {
-        errors.push(locationMessage(sourceFile, node, `CanvasNeedsExplicitSize: <canvas> has no class. A canvas has no intrinsic size and draws nothing without one; give it explicit pixel dimensions, e.g. class="w-[312px] h-[71px]".`));
       }
       if (tag === "canvas") {
         const opacityAncestor = canvasOpacityAncestor(node, context);

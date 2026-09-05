@@ -1,0 +1,7 @@
+{
+  "schema": "weaver.capture.actions.v1",
+  "actions": [
+    { "action": "advance-clock", "milliseconds": 1000 },
+    { "action": "advance-clock", "milliseconds": 1000 }
+  ]
+}
