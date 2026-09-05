@@ -1044,7 +1044,21 @@ fn buildNode(ui: *WidgetUi, model: *const Model, id: tree_mod.NodeId, is_root: b
             options.gap = 0;
             break :block ui.panel(options, .{ui.stack(stack_options, children)});
         } else ui.stack(options, children),
-        .panel => ui.panel(options, children),
+        // `<panel>` is a painted box with column layout (CONTRACT: "a styled
+        // box; column layout"). Native's panel kind overlays its children, so
+        // the panel owns paint and effects while an inner column owns child
+        // layout, exactly like a styled `<column>`.
+        .panel => block: {
+            const column_options: WidgetUi.ElementOptions = .{
+                .gap = retained.gap,
+                .grow = 1,
+                .cross = options.cross,
+                .main = options.main,
+                .flex_wrap = retained.flex_wrap,
+            };
+            options.gap = 0;
+            break :block ui.panel(options, .{ui.column(column_options, children)});
+        },
         .icon => ui.el(.icon, options, .{}),
         .button => ui.panel(options, children),
         .slider => ui.el(.slider, block: {
@@ -2185,6 +2199,28 @@ test "painted row lowering preserves flex wrap on the inner layout node" {
     try std.testing.expectEqual(@as(usize, 1), built.root.children.len);
     try std.testing.expectEqual(native_sdk.canvas.WidgetKind.row, built.root.children[0].kind);
     try std.testing.expect(built.root.children[0].layout.flex_wrap);
+}
+
+test "panel lowers to a painted box around a column so children stack vertically" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    var model: Model = .{};
+    const panel = try model.tree.createNode(.panel);
+    const first = try model.tree.createNode(.text);
+    const second = try model.tree.createNode(.text);
+    try model.tree.appendChild(panel, first);
+    try model.tree.appendChild(panel, second);
+    try model.tree.setNumberProp(panel, "gap", 6);
+
+    var ui = WidgetUi.init(arena_state.allocator());
+    const built = try ui.finalize(buildNodeForTest(&ui, &model, panel, true));
+    try std.testing.expectEqual(native_sdk.canvas.WidgetKind.panel, built.root.kind);
+    try std.testing.expectEqual(@as(f32, 0), built.root.layout.gap);
+    try std.testing.expectEqual(@as(usize, 1), built.root.children.len);
+    const column = built.root.children[0];
+    try std.testing.expectEqual(native_sdk.canvas.WidgetKind.column, column.kind);
+    try std.testing.expectEqual(@as(f32, 6), column.layout.gap);
+    try std.testing.expectEqual(@as(usize, 2), column.children.len);
 }
 
 test "attached effects combine builder metadata with box and text shadows" {
