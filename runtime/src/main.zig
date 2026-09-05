@@ -940,7 +940,7 @@ fn buildNode(ui: *WidgetUi, model: *const Model, id: tree_mod.NodeId, is_root: b
         .style = .{
             .background = retained.background,
             .foreground = retained.text_color,
-            .radius = if (retained.radius > 0) retained.radius else null,
+            .radius = if (retained.radius >= 0) retained.radius else null,
             .border = retained.border_color,
             .stroke_width = retained.border_width,
             .quiet_hover = true,
@@ -2185,6 +2185,25 @@ test "painted row lowering preserves flex wrap on the inner layout node" {
     try std.testing.expectEqual(@as(usize, 1), built.root.children.len);
     try std.testing.expectEqual(native_sdk.canvas.WidgetKind.row, built.root.children[0].kind);
     try std.testing.expect(built.root.children[0].layout.flex_wrap);
+}
+
+test "painted boxes without a rounded utility project square corners, not the theme radius" {
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    var model: Model = .{};
+    const unset = try model.tree.createNode(.stack);
+    try model.tree.setBackground(unset, native_sdk.canvas.Color.rgb8(20, 30, 40));
+    const zero = try model.tree.createNode(.stack);
+    try model.tree.setBackground(zero, native_sdk.canvas.Color.rgb8(20, 30, 40));
+    try model.tree.setNumberProp(zero, "radius", 0);
+
+    var ui = WidgetUi.init(arena_state.allocator());
+    const built_unset = try ui.finalize(buildNodeForTest(&ui, &model, unset, true));
+    try std.testing.expectEqual(native_sdk.canvas.WidgetKind.panel, built_unset.root.kind);
+    try std.testing.expectEqual(@as(?f32, 0), built_unset.root.style.radius);
+    var zero_ui = WidgetUi.init(arena_state.allocator());
+    const built_zero = try zero_ui.finalize(buildNodeForTest(&zero_ui, &model, zero, true));
+    try std.testing.expectEqual(@as(?f32, 0), built_zero.root.style.radius);
 }
 
 test "attached effects combine builder metadata with box and text shadows" {
