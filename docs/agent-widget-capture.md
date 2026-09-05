@@ -138,6 +138,11 @@ timeout.
 `provenance` records the Weaver and Native SDK commits plus the exact bundled
 JavaScript hash. A dirty checkout is allowed but is called out in `warnings`.
 
+`warnings` also carries runtime observations that the pixels show but cannot
+explain. `CanvasDrewForStaleLayout` names a canvas whose last `onFrame` ran
+for a different size than layout finally gave it; a blank or clipped canvas
+with that line is a framework reproduction, not a widget bug.
+
 After building the runtime, run the repository acceptance corpus with
 `npm run test:capture`. It checks non-flat pixels, semantic state changes,
 provider failure and fixture behavior, ambiguous-target candidates, artifact

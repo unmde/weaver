@@ -833,3 +833,16 @@ Click-to-seek uses the event's normalized local `u` coordinate. The handler
 clamps `event.u` to `[0, 1]`, multiplies by `durationMs`, and passes that
 absolute value to `seek(ms)`. The SDK owns whole-millisecond normalization.
 Click-only seek is the contracted example behavior; dragging is not implied.
+
+
+## Canvas layout sizing amendment
+
+A `<canvas>` is sized by layout like every other element. Explicit pixel
+sizes, `w-full`, fractions, and `grow` all work. Inside `onFrame`,
+`ctx.width` and `ctx.height` are the laid-out size, and `onFrame` runs again
+whenever layout changes that size, including the first layout after mount. The
+class-declared size is only the guess used for the very first draw; a
+re-render never shrinks the draw size back to it. `weaver check` no longer
+requires explicit pixel dimensions on a canvas (`CanvasNeedsExplicitSize` is
+retired). A capture whose canvas commands were drawn for a different size than
+the canvas's layout reports `CanvasDrewForStaleLayout` in `warnings`.

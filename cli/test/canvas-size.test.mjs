@@ -29,24 +29,31 @@ export default widget({ name: "Canvas Size", size: [320, 200] }, () => (
 `;
 }
 
-test("check rejects a canvas with a percentage width", () => {
+test("check accepts a canvas sized by layout with a percentage width", () => {
   const { root, widget } = fixture(source(`<canvas class="w-full h-[71px]" fps={0} onFrame={() => {}} />`));
   try {
     const checked = runCli(root, "check", widget);
-    assert.equal(checked.status, 1);
-    assert.match(checked.stderr, /CanvasNeedsExplicitSize: <canvas> has a percentage width/);
-    assert.match(checked.stderr, /w-\[312px\]/);
+    assert.equal(checked.status, 0, checked.stderr);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-test("check rejects a canvas with no class at all", () => {
+test("check accepts a canvas that grows into its row", () => {
+  const { root, widget } = fixture(source(`<row class="w-full"><canvas class="w-0 grow h-[8px]" fps={0} onFrame={() => {}} /></row>`));
+  try {
+    const checked = runCli(root, "check", widget);
+    assert.equal(checked.status, 0, checked.stderr);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("check accepts a canvas with no class at all", () => {
   const { root, widget } = fixture(source(`<canvas fps={0} onFrame={() => {}} />`));
   try {
     const checked = runCli(root, "check", widget);
-    assert.equal(checked.status, 1);
-    assert.match(checked.stderr, /CanvasNeedsExplicitSize: <canvas> has no class/);
+    assert.equal(checked.status, 0, checked.stderr);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

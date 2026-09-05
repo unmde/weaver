@@ -198,8 +198,14 @@ interface CanvasBinding {
   timerId: number;
   surfaceClock: boolean;
   surfaceClockGeneration?: object;
+  /** Draw size. Starts as the class-declared size and becomes the layout size once the runtime reports it. */
   width: number;
   height: number;
+  /** The class-declared size from the last render; only a guess until `layoutSized`. */
+  declaredWidth: number;
+  declaredHeight: number;
+  /** Set once `onCanvasResize` has delivered a layout size; from then on re-renders must not shrink the draw size back to the declared one. */
+  layoutSized: boolean;
   lastT?: number;
   nextT?: number;
   nativeTimestampStarted?: boolean;
@@ -217,6 +223,7 @@ const colorCache: Record<string, number> = Object.create(null) as Record<string,
 native.onCanvasResize((id, width, height) => runWidgetCallback("canvas resize callback", () => {
   const binding = canvases.get(id);
   if (!binding || !Number.isFinite(width) || !Number.isFinite(height) || width < 0 || height < 0) return;
+  binding.layoutSized = true;
   if (binding.width === width && binding.height === height) return;
   binding.width = width;
   binding.height = height;
@@ -776,17 +783,26 @@ function updateCanvasBinding(id: number, onFrame: (ctx: CanvasCtx, frame: Canvas
   if (!binding) {
     binding = {
       onFrame, fps, timerId: 0, surfaceClock: false, width, height,
+      declaredWidth: width, declaredHeight: height, layoutSized: false,
       batch: new Float64Array(MAX_CANVAS_WIRE_VALUES), batchLength: 0, active: false,
       ctx: undefined as unknown as CanvasCtx,
     };
     binding.ctx = createCanvasContext(binding);
     canvases.set(id, binding);
   } else {
-    const sizeChanged = binding.width !== width || binding.height !== height;
+    // The declared size is a guess until layout reports the real one. After
+    // that, a re-render must keep the layout size: the runtime refires
+    // onCanvasResize only when layout actually moves, so overwriting it here
+    // would leave a `grow` or `w-full` canvas drawing at its declared 0 forever.
+    const declaredChanged = binding.declaredWidth !== width || binding.declaredHeight !== height;
+    binding.declaredWidth = width;
+    binding.declaredHeight = height;
     binding.onFrame = onFrame;
-    binding.width = width;
-    binding.height = height;
-    if (sizeChanged) binding.ctx = createCanvasContext(binding);
+    if (declaredChanged && !binding.layoutSized) {
+      binding.width = width;
+      binding.height = height;
+      binding.ctx = createCanvasContext(binding);
+    }
   }
   if (rateChanged && binding.timerId !== 0) {
     native.clearInterval(binding.timerId);

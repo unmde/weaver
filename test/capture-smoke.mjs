@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { inflateSync } from "node:zlib";
 
 const root = process.cwd();
 const cli = join(root, "cli", "bin", "weaver.js");
@@ -21,6 +22,19 @@ try {
 
   const text = capture("styling-text", "examples/styling-text");
   assert.ok(text.renderer.pixelsDifferentFromClear > 0);
+
+  // A layout-sized canvas paints at its laid-out width on the first frame and
+  // keeps it across provider re-renders. The accent count is a real pixel
+  // probe; pixelsDifferentFromClear cannot tell a bar from its dark surface.
+  const canvasGrow = capture("canvas-grow", "test/fixtures/canvas-grow");
+  assert.deepEqual(canvasGrow.warnings.filter((warning) => warning.startsWith("CanvasDrewForStaleLayout")), []);
+  assert.ok(countPixels(canvasGrow, [0x5e, 0xea, 0xd4]) > 1000, `grow canvas painted ${countPixels(canvasGrow, [0x5e, 0xea, 0xd4])} accent pixels`);
+  const canvasGrowTicked = capture("canvas-grow-ticked", "test/fixtures/canvas-grow", [
+    "--action-file", join(root, "test", "capture", "advance-two-seconds.actions"),
+  ]);
+  assert.deepEqual(canvasGrowTicked.warnings.filter((warning) => warning.startsWith("CanvasDrewForStaleLayout")), []);
+  assert.match(snapshotText(canvasGrowTicked), /role=text name="02"/);
+  assert.ok(countPixels(canvasGrowTicked, [0x5e, 0xea, 0xd4]) > 1000, `grow canvas after re-render painted ${countPixels(canvasGrowTicked, [0x5e, 0xea, 0xd4])} accent pixels`);
 
   const images = capture("styling-images", "examples/styling-images");
   assert.equal(images.renderer.images, 3);
@@ -238,6 +252,66 @@ function runCapture(name, directory, extra = []) {
 
 function imageHash(receipt) {
   return fileHash(receipt.output.image);
+}
+
+// Count pixels within `tolerance` of an RGB color in a capture PNG.
+function countPixels(receipt, [red, green, blue], tolerance = 24) {
+  const { width, height, channels, pixels } = decodePng(readFileSync(receipt.output.image));
+  let count = 0;
+  for (let index = 0; index < width * height; index += 1) {
+    const offset = index * channels;
+    if (channels === 4 && pixels[offset + 3] < 128) continue;
+    if (Math.abs(pixels[offset] - red) <= tolerance && Math.abs(pixels[offset + 1] - green) <= tolerance && Math.abs(pixels[offset + 2] - blue) <= tolerance) count += 1;
+  }
+  return count;
+}
+
+// Minimal PNG decoder for capture output: 8-bit RGB or RGBA, no interlace.
+function decodePng(bytes) {
+  assert.equal(bytes.readUInt32BE(12), 0x49484452, "PNG IHDR");
+  const width = bytes.readUInt32BE(16);
+  const height = bytes.readUInt32BE(20);
+  const bitDepth = bytes[24];
+  const colorType = bytes[25];
+  const interlace = bytes[28];
+  assert.equal(bitDepth, 8, "8-bit PNG");
+  assert.equal(interlace, 0, "non-interlaced PNG");
+  const channels = colorType === 6 ? 4 : colorType === 2 ? 3 : assert.fail(`unsupported PNG color type ${colorType}`);
+  const chunks = [];
+  for (let offset = 8; offset < bytes.length;) {
+    const length = bytes.readUInt32BE(offset);
+    const type = bytes.toString("latin1", offset + 4, offset + 8);
+    if (type === "IDAT") chunks.push(bytes.subarray(offset + 8, offset + 8 + length));
+    offset += 12 + length;
+  }
+  const raw = inflateSync(Buffer.concat(chunks));
+  const stride = width * channels;
+  const pixels = Buffer.alloc(stride * height);
+  let previous = Buffer.alloc(stride);
+  for (let row = 0; row < height; row += 1) {
+    const filter = raw[row * (stride + 1)];
+    const line = raw.subarray(row * (stride + 1) + 1, (row + 1) * (stride + 1));
+    const current = pixels.subarray(row * stride, (row + 1) * stride);
+    for (let index = 0; index < stride; index += 1) {
+      const left = index >= channels ? current[index - channels] : 0;
+      const up = previous[index];
+      const upLeft = index >= channels ? previous[index - channels] : 0;
+      let predictor = 0;
+      if (filter === 1) predictor = left;
+      else if (filter === 2) predictor = up;
+      else if (filter === 3) predictor = (left + up) >> 1;
+      else if (filter === 4) {
+        const estimate = left + up - upLeft;
+        const distanceLeft = Math.abs(estimate - left);
+        const distanceUp = Math.abs(estimate - up);
+        const distanceUpLeft = Math.abs(estimate - upLeft);
+        predictor = distanceLeft <= distanceUp && distanceLeft <= distanceUpLeft ? left : distanceUp <= distanceUpLeft ? up : upLeft;
+      } else assert.equal(filter, 0, `PNG filter ${filter}`);
+      current[index] = (line[index] + predictor) & 0xff;
+    }
+    previous = current;
+  }
+  return { width, height, channels, pixels };
 }
 
 function fileHash(path) {
