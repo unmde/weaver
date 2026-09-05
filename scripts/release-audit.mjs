@@ -92,8 +92,8 @@ assert.match(plist, /<key>NSAudioCaptureUsageDescription<\/key>\s*<string>[^<]+<
 const workflow = readFileSync(join(repoRoot, ".github", "workflows", "ci.yml"), "utf8");
 const zigSetupAction = readFileSync(join(repoRoot, ".github", "actions", "setup-zig", "action.yml"), "utf8");
 for (const required of [
-  "blacksmith-4vcpu-windows-2025",
-  "blacksmith-6vcpu-macos-15",
+  "runs-on: windows-2025",
+  "runs-on: macos-15",
   "actions/cache@v5",
   "./.github/actions/setup-zig",
   "hashFiles(",
@@ -143,6 +143,7 @@ for (const required of ["actions/cache@v5", "ZIG_GLOBAL_CACHE_DIR", "zig-toolcha
   assert.ok(zigSetupAction.includes(required), `cached Zig setup is missing ${required}`);
 }
 for (const [forbidden, reason] of [
+  ["runs-on: blacksmith-", "CI must use standard GitHub-hosted runners to avoid external runner charges"],
   ["macos-15-intel", "Intel macOS is outside Weaver's supported targets"],
   ["needs: macos-headless", "the independent macOS session smoke must start in parallel"],
   ["github.job }}-${{ github.sha", "Zig caches must follow component inputs instead of churning on every commit"],

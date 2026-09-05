@@ -4,6 +4,7 @@ on:
   push:
     branches: [master]
   pull_request:
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -35,7 +36,7 @@ jobs:
 
   windows-cli:
     name: Windows CLI and portable contracts
-    runs-on: blacksmith-4vcpu-windows-2025
+    runs-on: windows-2025
     steps:
       - uses: actions/checkout@v6
 
@@ -63,9 +64,8 @@ jobs:
 
   windows-runtime:
     name: Windows native runtime + host
-    runs-on: blacksmith-4vcpu-windows-2025
-    # Blacksmith schedules this label across Intel gen-1 and AMD gen-2 hosts.
-    # Pin the CI CPU so Zig cache entries remain reusable across both pools.
+    runs-on: windows-2025
+    # Pin the CI CPU so Zig cache entries remain reusable across hosted machines.
     steps:
       - name: Begin Windows media runtime install
         shell: pwsh
@@ -163,9 +163,9 @@ jobs:
             ${{ runner.temp }}/zig-global-cache
             runtime/.zig-cache
             host/.zig-cache
-          key: zig-build-v3-0.16.0-blacksmith-${{ runner.os }}-${{ runner.arch }}-cpu-baseline-native-${{ hashFiles('runtime/build.zig', 'runtime/build.zig.zon', 'runtime/src/**', 'runtime/vendor/**', 'runtime/native-sdk/build.zig', 'runtime/native-sdk/build.zig.zon', 'runtime/native-sdk/src/**', 'host/build.zig', 'host/build.zig.zon', 'host/src/**', 'host/macos/**', 'host/assets/**') }}
+          key: zig-build-v4-0.16.0-github-hosted-${{ runner.os }}-${{ runner.arch }}-cpu-baseline-native-${{ hashFiles('runtime/build.zig', 'runtime/build.zig.zon', 'runtime/src/**', 'runtime/vendor/**', 'runtime/native-sdk/build.zig', 'runtime/native-sdk/build.zig.zon', 'runtime/native-sdk/src/**', 'host/build.zig', 'host/build.zig.zon', 'host/src/**', 'host/macos/**', 'host/assets/**') }}
           restore-keys: |
-            zig-build-v3-0.16.0-blacksmith-${{ runner.os }}-${{ runner.arch }}-cpu-baseline-native-
+            zig-build-v4-0.16.0-github-hosted-${{ runner.os }}-${{ runner.arch }}-cpu-baseline-native-
 
       - name: Wait for Windows media runtime
         shell: pwsh
@@ -280,7 +280,7 @@ jobs:
 
   macos-headless:
     name: macOS headless (apple-silicon)
-    runs-on: blacksmith-6vcpu-macos-15
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v6
         with:
@@ -310,9 +310,9 @@ jobs:
           path: |
             ${{ runner.temp }}/zig-global-cache
             host/.zig-cache
-          key: zig-build-0.16.0-${{ runner.os }}-${{ runner.arch }}-host-${{ hashFiles('host/build.zig', 'host/build.zig.zon', 'host/src/**', 'host/macos/**', 'host/assets/**') }}
+          key: zig-build-0.16.0-github-hosted-${{ runner.os }}-${{ runner.arch }}-host-${{ hashFiles('host/build.zig', 'host/build.zig.zon', 'host/src/**', 'host/macos/**', 'host/assets/**') }}
           restore-keys: |
-            zig-build-0.16.0-${{ runner.os }}-${{ runner.arch }}-host-
+            zig-build-0.16.0-github-hosted-${{ runner.os }}-${{ runner.arch }}-host-
 
       - name: Build and test macOS host
         working-directory: host
@@ -335,7 +335,7 @@ jobs:
 
   macos-runtime:
     name: macOS runtime (apple-silicon)
-    runs-on: blacksmith-6vcpu-macos-15
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v6
         with:
@@ -349,9 +349,9 @@ jobs:
           path: |
             ${{ runner.temp }}/zig-global-cache
             runtime/.zig-cache
-          key: zig-build-0.16.0-${{ runner.os }}-${{ runner.arch }}-runtime-${{ hashFiles('runtime/build.zig', 'runtime/build.zig.zon', 'runtime/src/**', 'runtime/vendor/**', 'runtime/native-sdk/build.zig', 'runtime/native-sdk/build.zig.zon', 'runtime/native-sdk/src/**') }}
+          key: zig-build-0.16.0-github-hosted-${{ runner.os }}-${{ runner.arch }}-runtime-${{ hashFiles('runtime/build.zig', 'runtime/build.zig.zon', 'runtime/src/**', 'runtime/vendor/**', 'runtime/native-sdk/build.zig', 'runtime/native-sdk/build.zig.zon', 'runtime/native-sdk/src/**') }}
           restore-keys: |
-            zig-build-0.16.0-${{ runner.os }}-${{ runner.arch }}-runtime-
+            zig-build-0.16.0-github-hosted-${{ runner.os }}-${{ runner.arch }}-runtime-
 
       - name: Runtime platform-service seam
         working-directory: runtime
@@ -367,7 +367,7 @@ jobs:
 
   macos-native-sdk:
     name: macOS Native SDK profiles
-    runs-on: blacksmith-6vcpu-macos-15
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v6
         with:
@@ -381,10 +381,10 @@ jobs:
           path: |
             ${{ runner.temp }}/zig-global-cache
             runtime/native-sdk/.zig-cache
-          key: zig-build-0.16.0-${{ runner.os }}-${{ runner.arch }}-native-sdk-profiles-${{ hashFiles('runtime/native-sdk/build.zig', 'runtime/native-sdk/build.zig.zon', 'runtime/native-sdk/src/**') }}
+          key: zig-build-0.16.0-github-hosted-${{ runner.os }}-${{ runner.arch }}-native-sdk-profiles-${{ hashFiles('runtime/native-sdk/build.zig', 'runtime/native-sdk/build.zig.zon', 'runtime/native-sdk/src/**') }}
           restore-keys: |
-            zig-build-0.16.0-${{ runner.os }}-${{ runner.arch }}-native-sdk-profiles-
-            zig-build-0.16.0-${{ runner.os }}-${{ runner.arch }}-native-sdk-
+            zig-build-0.16.0-github-hosted-${{ runner.os }}-${{ runner.arch }}-native-sdk-profiles-
+            zig-build-0.16.0-github-hosted-${{ runner.os }}-${{ runner.arch }}-native-sdk-
 
       - name: Test Native SDK stock profile
         working-directory: runtime/native-sdk
@@ -396,7 +396,7 @@ jobs:
 
   macos-session:
     name: macOS session (apple-silicon)
-    runs-on: blacksmith-6vcpu-macos-15
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v6
         with:
@@ -419,9 +419,9 @@ jobs:
             ${{ runner.temp }}/zig-global-cache
             runtime/.zig-cache
             host/.zig-cache
-          key: zig-build-0.16.0-${{ runner.os }}-${{ runner.arch }}-session-${{ hashFiles('runtime/build.zig', 'runtime/build.zig.zon', 'runtime/src/**', 'runtime/vendor/**', 'runtime/native-sdk/build.zig', 'runtime/native-sdk/build.zig.zon', 'runtime/native-sdk/src/**', 'host/build.zig', 'host/build.zig.zon', 'host/src/**', 'host/macos/**', 'host/assets/**') }}
+          key: zig-build-0.16.0-github-hosted-${{ runner.os }}-${{ runner.arch }}-session-${{ hashFiles('runtime/build.zig', 'runtime/build.zig.zon', 'runtime/src/**', 'runtime/vendor/**', 'runtime/native-sdk/build.zig', 'runtime/native-sdk/build.zig.zon', 'runtime/native-sdk/src/**', 'host/build.zig', 'host/build.zig.zon', 'host/src/**', 'host/macos/**', 'host/assets/**') }}
           restore-keys: |
-            zig-build-0.16.0-${{ runner.os }}-${{ runner.arch }}-session-
+            zig-build-0.16.0-github-hosted-${{ runner.os }}-${{ runner.arch }}-session-
 
       - name: Record hosted display capability
         run: system_profiler SPDisplaysDataType
