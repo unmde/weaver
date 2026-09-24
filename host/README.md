@@ -7,7 +7,11 @@ and acknowledged reload/shutdown. Constructing the Widget renderer and
 QuickJS in the one always-running process would spend memory without buying a
 host capability.
 
-Build and test on macOS 14.2 or later:
+The macOS host reads the shared renderer's wire contract from the pinned
+Native SDK submodule. Initialize it with `git submodule update --init
+runtime/native-sdk` from the repository root before building.
+
+Build and test on macOS 14.2 or later, from `host`:
 
 ```sh
 zig build -Doptimize=ReleaseFast
@@ -20,6 +24,14 @@ The macOS build emits an ad-hoc-signed `Weaverd.app` agent with bundle ID
 Recording usage description. The CLI launches only its nested executable so
 authorization, daemon work, and status share one stable identity. This is a
 developer build, not a Developer ID/notarized distribution claim.
+
+Widget launches wait for a valid hello reply from the shared renderer's
+message loop. Registering its service name alone does not establish readiness.
+Pending widgets report the wait in status without consuming restart attempts,
+and host reload/shutdown remain available while startup is pending. A renderer
+exit clears readiness before another process starts. Existing widgets retain
+their state and use the Native SDK's reconnect behavior; this launch gate does
+not promote a widget that already selected software during a renderer outage.
 
 On Windows, build with the repository's Zig toolchain and an installed Windows
 10 SDK:
