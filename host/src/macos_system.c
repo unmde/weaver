@@ -3,6 +3,7 @@
 #include <libproc.h>
 #include <mach/mach.h>
 #include <mach/mach_host.h>
+#include <mach/mach_time.h>
 #include <mach/processor_info.h>
 #include <mach/vm_statistics.h>
 #include <signal.h>
@@ -55,10 +56,15 @@ int weaver_process_sample(int32_t pid, uint64_t *physical_footprint,
     if (!physical_footprint || !cpu_time_ns || !threads) return -1;
     struct rusage_info_v4 usage;
     struct proc_taskinfo task;
+    mach_timebase_info_data_t timebase;
     if (proc_pid_rusage(pid, RUSAGE_INFO_V4, (rusage_info_t *)&usage) != 0) return -1;
     if (proc_pidinfo(pid, PROC_PIDTASKINFO, 0, &task, sizeof(task)) != sizeof(task)) return -1;
+    if (mach_timebase_info(&timebase) != KERN_SUCCESS || timebase.denom == 0) return -1;
     *physical_footprint = usage.ri_phys_footprint;
-    *cpu_time_ns = usage.ri_user_time + usage.ri_system_time;
+    // proc_pid_rusage reports Mach absolute-time ticks, not nanoseconds.
+    // Widen before scaling so a long-running process cannot overflow the product.
+    const __uint128_t cpu_ticks = (__uint128_t)usage.ri_user_time + usage.ri_system_time;
+    *cpu_time_ns = (uint64_t)(cpu_ticks * timebase.numer / timebase.denom);
     *threads = task.pti_threadnum < 0 ? 0 : (uint32_t)task.pti_threadnum;
     return 0;
 }
