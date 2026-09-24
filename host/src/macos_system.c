@@ -113,6 +113,13 @@ int weaver_renderer_readiness_poll(const char *name, size_t name_len, uint32_t *
         result = mach_msg(&hello.header, MACH_SEND_MSG | MACH_SEND_TIMEOUT, sizeof(hello), 0, MACH_PORT_NULL, 0, MACH_PORT_NULL);
         mach_port_deallocate(mach_task_self(), service);
         if (result != KERN_SUCCESS) {
+            // A failed send can return the made reply right as a separate
+            // send-once name. mach_msg_destroy deliberately skips local_port.
+            const mach_msg_type_name_t local_type = MACH_MSGH_BITS_LOCAL(hello.header.msgh_bits);
+            if (local_type == MACH_MSG_TYPE_MOVE_SEND || local_type == MACH_MSG_TYPE_MOVE_SEND_ONCE) {
+                mach_port_deallocate(mach_task_self(), hello.header.msgh_local_port);
+                hello.header.msgh_local_port = MACH_PORT_NULL;
+            }
             mach_msg_destroy(&hello.header);
             weaver_renderer_readiness_reset(reply_port);
             return result == MACH_SEND_TIMED_OUT ? WEAVER_RENDERER_WAITING : result;

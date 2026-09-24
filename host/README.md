@@ -31,7 +31,8 @@ Pending widgets report the wait in status without consuming restart attempts,
 and host reload/shutdown remain available while startup is pending. A renderer
 exit clears readiness before another process starts. Existing widgets retain
 their state and use the Native SDK's reconnect behavior; this launch gate does
-not promote a widget that already selected software during a renderer outage.
+not promote a widget that already selected software during a renderer outage
+or a later packet/presentation refusal.
 
 On Windows, build with the repository's Zig toolchain and an installed Windows
 10 SDK:

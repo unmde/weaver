@@ -1418,6 +1418,10 @@ test "process CPU samples report nanoseconds" {
 }
 
 test "widget supervision waits for renderer readiness without consuming restart attempts" {
+    var directory = std.testing.tmpDir(.{});
+    defer directory.cleanup();
+    const source = try directory.dir.realPathFileAlloc(std.testing.io, ".", std.testing.allocator);
+    defer std.testing.allocator.free(source);
     const host = try std.testing.allocator.create(Host);
     defer std.testing.allocator.destroy(host);
     host.* = .{
@@ -1429,15 +1433,15 @@ test "widget supervision waits for renderer readiness without consuming restart 
         .status_temp_path = "",
         .runtime_exe = "",
         .cli_script = "",
-        .runtime_root = "",
+        .runtime_root = source,
         .audio_authorization_marker = "",
         .media_provider = undefined,
         .art_cache_root = "",
     };
-    // This existing directory has no widget.tsx. Any attempted launch fails
+    // This empty directory has no widget.tsx. Any attempted launch fails
     // before spawning or accessing the deliberately unused host services.
     const slot = &host.slots[0];
-    try slot.setRegistration(.{ .name = "waiting", .sourcePath = ".", .enabled = true });
+    try slot.setRegistration(.{ .name = "waiting", .sourcePath = source, .enabled = true });
     slot.state = .starting;
     host.supervise(100);
     try std.testing.expectEqual(supervisor.RunState.starting, slot.state);
@@ -1449,10 +1453,18 @@ test "widget supervision waits for renderer readiness without consuming restart 
     try std.testing.expectEqual(supervisor.RunState.backoff, slot.state);
     try std.testing.expectEqual(@as(usize, 1), slot.crash_count);
 
-    host.render_host_ready = false;
+    // A missing/reaped renderer invalidates the old handshake before a
+    // replacement worker can launch. Our PID is deliberately not a child.
+    host.render_host_process = posix.system.getpid();
+    host.superviseRenderHost(200);
+    try std.testing.expect(host.render_host_process == null);
+    try std.testing.expect(!host.render_host_ready);
+    try std.testing.expectEqual(200 + render_host_restart_backoff_ms, host.render_host_restart_at_ms);
     slot.next_restart_ms = 200;
     host.supervise(200);
+    try std.testing.expectEqual(supervisor.RunState.backoff, slot.state);
     try std.testing.expectEqual(@as(usize, 1), slot.crash_count);
+    try std.testing.expect(std.mem.indexOf(u8, slot.reason(), "renderer") != null);
 
     // Automation uses its own in-process renderer and must not be gated.
     host.automation_seam = true;
