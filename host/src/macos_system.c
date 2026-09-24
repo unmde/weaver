@@ -12,6 +12,9 @@
 #include <sys/stat.h>
 #include <sys/sysctl.h>
 #include <unistd.h>
+#include <servers/bootstrap.h>
+
+#include "../../runtime/native-sdk/src/platform/macos/renderer_protocol_mach.h"
 
 int weaver_system_sample(uint32_t *ticks, size_t core_capacity, size_t *core_count,
                          uint64_t *used_bytes, uint64_t *total_bytes) {
@@ -72,6 +75,73 @@ int weaver_process_sample(int32_t pid, uint64_t *physical_footprint,
 int weaver_process_path(int32_t pid, char *path, size_t capacity) {
     if (!path || capacity == 0) return -1;
     return proc_pidpath(pid, path, (uint32_t)capacity);
+}
+
+void weaver_renderer_readiness_reset(uint32_t *reply_port) {
+    if (!reply_port || *reply_port == MACH_PORT_NULL) return;
+    mach_port_mod_refs(mach_task_self(), *reply_port, MACH_PORT_RIGHT_RECEIVE, -1);
+    *reply_port = MACH_PORT_NULL;
+}
+
+int weaver_renderer_readiness_poll(const char *name, size_t name_len, uint32_t *reply_port) {
+    if (!name || !reply_port || name_len == 0 || name_len >= BOOTSTRAP_MAX_NAME_LEN) return KERN_INVALID_ARGUMENT;
+    if (*reply_port == MACH_PORT_NULL) {
+        char service_name[BOOTSTRAP_MAX_NAME_LEN];
+        memcpy(service_name, name, name_len);
+        service_name[name_len] = '\0';
+        mach_port_t service = MACH_PORT_NULL;
+        kern_return_t result = bootstrap_look_up(bootstrap_port, service_name, &service);
+        if (result == BOOTSTRAP_UNKNOWN_SERVICE) return WEAVER_RENDERER_WAITING;
+        if (result != KERN_SUCCESS) return result;
+        result = mach_port_allocate(mach_task_self(), MACH_PORT_RIGHT_RECEIVE, reply_port);
+        if (result != KERN_SUCCESS) {
+            mach_port_deallocate(mach_task_self(), service);
+            return result;
+        }
+        WeaverRendererMachHello hello = {0};
+        hello.header.msgh_bits = MACH_MSGH_BITS(MACH_MSG_TYPE_COPY_SEND, MACH_MSG_TYPE_MAKE_SEND_ONCE);
+        hello.header.msgh_remote_port = service;
+        hello.header.msgh_local_port = *reply_port;
+        hello.header.msgh_size = sizeof(hello);
+        hello.header.msgh_id = kWeaverRendererMachMsgHello;
+        hello.magic = kWeaverRendererMachMagic;
+        hello.version = kWeaverRendererMachVersion;
+        hello.struct_size = sizeof(hello);
+        hello.widget_pid = (uint32_t)getpid();
+        // A zero timeout means poll, not a startup deadline. Even an occupied
+        // service queue cannot block provider delivery or the down command.
+        result = mach_msg(&hello.header, MACH_SEND_MSG | MACH_SEND_TIMEOUT, sizeof(hello), 0, MACH_PORT_NULL, 0, MACH_PORT_NULL);
+        mach_port_deallocate(mach_task_self(), service);
+        if (result != KERN_SUCCESS) {
+            // A failed send can return the made reply right as a separate
+            // send-once name. mach_msg_destroy deliberately skips local_port.
+            const mach_msg_type_name_t local_type = MACH_MSGH_BITS_LOCAL(hello.header.msgh_bits);
+            if (local_type == MACH_MSG_TYPE_MOVE_SEND || local_type == MACH_MSG_TYPE_MOVE_SEND_ONCE) {
+                mach_port_deallocate(mach_task_self(), hello.header.msgh_local_port);
+                hello.header.msgh_local_port = MACH_PORT_NULL;
+            }
+            mach_msg_destroy(&hello.header);
+            weaver_renderer_readiness_reset(reply_port);
+            return result == MACH_SEND_TIMED_OUT ? WEAVER_RENDERER_WAITING : result;
+        }
+    }
+    struct { WeaverRendererMachHelloReply reply; mach_msg_trailer_t trailer; } message = {0};
+    kern_return_t result = mach_msg(&message.reply.header, MACH_RCV_MSG | MACH_RCV_TIMEOUT, 0, sizeof(message), *reply_port, 0, MACH_PORT_NULL);
+    if (result == MACH_RCV_TIMED_OUT) return WEAVER_RENDERER_WAITING;
+    weaver_renderer_readiness_reset(reply_port);
+    if (result != KERN_SUCCESS) return result;
+    const WeaverRendererMachHelloReply *reply = &message.reply;
+    const bool valid = reply->header.msgh_size == sizeof(*reply) &&
+        (reply->header.msgh_bits & MACH_MSGH_BITS_COMPLEX) != 0 &&
+        reply->magic == kWeaverRendererMachMagic && reply->version == kWeaverRendererMachVersion &&
+        reply->status == kWeaverRendererMachStatusOk && reply->body.msgh_descriptor_count == 1 &&
+        reply->session_port.type == MACH_MSG_PORT_DESCRIPTOR &&
+        reply->session_port.disposition == MACH_MSG_TYPE_PORT_SEND &&
+        MACH_PORT_VALID(reply->session_port.name);
+    // Readiness does not render: release the returned session immediately.
+    // Native's no-senders handler reclaims it without allocating a renderer.
+    mach_msg_destroy(&message.reply.header);
+    return valid ? WEAVER_RENDERER_READY : KERN_INVALID_ARGUMENT;
 }
 
 int weaver_secure_private_dir(const char *path) {

@@ -105,6 +105,10 @@ pub fn build(b: *std.Build) void {
             }),
         });
         addMacosAudio(tests.root_module, b, automation_seam);
+        tests.root_module.addCSourceFile(.{
+            .file = b.path("src/macos_renderer_test.c"),
+            .flags = &.{ "-std=c11", "-mmacosx-version-min=14.2", "-isysroot", b.sysroot.?, b.fmt("-I{s}/usr/include", .{b.sysroot.?}) },
+        });
         tests.root_module.linkSystemLibrary("c", .{});
         const test_step = b.step("test", "Run macOS host and portable supervisor tests");
         test_step.dependOn(&b.addRunArtifact(tests).step);

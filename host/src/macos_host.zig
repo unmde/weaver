@@ -447,6 +447,9 @@ const Host = struct {
     render_host_name: []const u8 = render_host_default_name,
     render_host_process: ?posix.pid_t = null,
     render_host_restart_at_ms: u64 = 0,
+    render_host_ready: bool = false,
+    render_host_probe_port: u32 = 0,
+    render_host_probe_error: c_int = 0,
 
     fn loadRegistry(self: *Host) !void {
         const owned_bytes = std.Io.Dir.cwd().readFileAlloc(self.io, self.registry_path, self.allocator, .limited(256 * 1024)) catch |err| switch (err) {
@@ -496,8 +499,14 @@ const Host = struct {
                 .none => {},
                 .stop_missing => self.stopSlot(slot, true),
                 .handle_exit => self.handleExit(slot, now_ms),
-                .launch => self.launch(slot, now_ms) catch |err| {
-                    supervisor.recordLaunchFailure(slot, now_ms, err);
+                .launch => {
+                    if (!self.automation_seam and !self.render_host_ready) {
+                        slot.setReason("waiting for shared renderer readiness; check host log if startup does not complete", .{});
+                        continue;
+                    }
+                    self.launch(slot, now_ms) catch |err| {
+                        supervisor.recordLaunchFailure(slot, now_ms, err);
+                    };
                 },
             }
         }
@@ -583,16 +592,24 @@ const Host = struct {
         if (self.render_host_process) |pid| {
             var status: c_int = 0;
             const result = posix.system.waitpid(pid, &status, posix.W.NOHANG);
-            if (posix.errno(result) != .SUCCESS or result == 0) return;
+            if (result == 0 or posix.errno(result) == .INTR) {
+                self.pollRenderHostReadiness();
+                return;
+            }
+            if (posix.errno(result) != .SUCCESS and posix.errno(result) != .CHILD) return;
             std.log.warn("render host pid={d} exited; restarting in {d} ms (widgets keep retained frames and reconnect)", .{ pid, render_host_restart_backoff_ms });
             self.removeChildMarker(pid);
             self.render_host_process = null;
+            self.resetRenderHostReadiness();
             self.render_host_restart_at_ms = now_ms + render_host_restart_backoff_ms;
         }
         if (self.render_host_process != null or now_ms < self.render_host_restart_at_ms) return;
         const argv = [_][]const u8{ self.runtime_exe, "--render-host", self.render_host_name };
         var environment = self.environ_map.clone(self.allocator) catch return;
         defer environment.deinit();
+        // This process owns Metal. An inherited client flag would make its
+        // headless surfaces wait for a window layer that they never create.
+        environment.put(shared_renderer_environment, "0") catch return;
         const child = std.process.spawn(self.io, .{
             .argv = &argv,
             .environ_map = &environment,
@@ -607,10 +624,34 @@ const Host = struct {
         };
         self.render_host_process = child.id.?;
         self.writeChildMarker(child.id.?) catch {};
-        std.log.info("render host started pid={d} name={s}", .{ child.id.?, self.render_host_name });
+        std.log.info("render host started pid={d} name={s}; widgets wait for its readiness reply", .{ child.id.?, self.render_host_name });
+    }
+
+    fn pollRenderHostReadiness(self: *Host) void {
+        if (self.render_host_ready) return;
+        const result = c.weaver_renderer_readiness_poll(self.render_host_name.ptr, self.render_host_name.len, &self.render_host_probe_port);
+        switch (result) {
+            c.WEAVER_RENDERER_READY => {
+                self.render_host_ready = true;
+                self.render_host_probe_error = 0;
+                std.log.info("render host ready pid={d} name={s}; widget launches enabled", .{ self.render_host_process.?, self.render_host_name });
+            },
+            c.WEAVER_RENDERER_WAITING => {},
+            else => if (self.render_host_probe_error != result) {
+                self.render_host_probe_error = result;
+                std.log.err("render host readiness hello failed code=0x{x} name={s}; widget launches remain pending; check that host and runtime use the same renderer protocol", .{ result, self.render_host_name });
+            },
+        }
+    }
+
+    fn resetRenderHostReadiness(self: *Host) void {
+        c.weaver_renderer_readiness_reset(&self.render_host_probe_port);
+        self.render_host_ready = false;
+        self.render_host_probe_error = 0;
     }
 
     fn stopRenderHost(self: *Host) void {
+        self.resetRenderHostReadiness();
         const pid = self.render_host_process orelse return;
         // Same escalation as widget teardown: the marker is removed only
         // after the process is actually dead and reaped — a TERM-ignoring
@@ -1374,6 +1415,68 @@ test "process CPU samples report nanoseconds" {
     // each truncated to microseconds. Allow only that loss of precision.
     try std.testing.expect(cpu_time_ns >= before_ns);
     try std.testing.expect(cpu_time_ns <= after_ns + 2 * std.time.ns_per_us);
+}
+
+test "widget supervision waits for renderer readiness without consuming restart attempts" {
+    var directory = std.testing.tmpDir(.{});
+    defer directory.cleanup();
+    const source = try directory.dir.realPathFileAlloc(std.testing.io, ".", std.testing.allocator);
+    defer std.testing.allocator.free(source);
+    const host = try std.testing.allocator.create(Host);
+    defer std.testing.allocator.destroy(host);
+    host.* = .{
+        .io = std.testing.io,
+        .allocator = std.testing.allocator,
+        .environ_map = undefined,
+        .registry_path = "",
+        .status_path = "",
+        .status_temp_path = "",
+        .runtime_exe = "",
+        .cli_script = "",
+        .runtime_root = source,
+        .audio_authorization_marker = "",
+        .media_provider = undefined,
+        .art_cache_root = "",
+    };
+    // This empty directory has no widget.tsx. Any attempted launch fails
+    // before spawning or accessing the deliberately unused host services.
+    const slot = &host.slots[0];
+    try slot.setRegistration(.{ .name = "waiting", .sourcePath = source, .enabled = true });
+    slot.state = .starting;
+    host.supervise(100);
+    try std.testing.expectEqual(supervisor.RunState.starting, slot.state);
+    try std.testing.expectEqual(@as(usize, 0), slot.crash_count);
+    try std.testing.expect(std.mem.indexOf(u8, slot.reason(), "renderer") != null);
+
+    host.render_host_ready = true;
+    host.supervise(150);
+    try std.testing.expectEqual(supervisor.RunState.backoff, slot.state);
+    try std.testing.expectEqual(@as(usize, 1), slot.crash_count);
+
+    // A missing/reaped renderer invalidates the old handshake before a
+    // replacement worker can launch. Our PID is deliberately not a child.
+    host.render_host_process = posix.system.getpid();
+    host.superviseRenderHost(200);
+    try std.testing.expect(host.render_host_process == null);
+    try std.testing.expect(!host.render_host_ready);
+    try std.testing.expectEqual(200 + render_host_restart_backoff_ms, host.render_host_restart_at_ms);
+    slot.next_restart_ms = 200;
+    host.supervise(200);
+    try std.testing.expectEqual(supervisor.RunState.backoff, slot.state);
+    try std.testing.expectEqual(@as(usize, 1), slot.crash_count);
+    try std.testing.expect(std.mem.indexOf(u8, slot.reason(), "renderer") != null);
+
+    // Automation uses its own in-process renderer and must not be gated.
+    host.automation_seam = true;
+    host.supervise(250);
+    try std.testing.expectEqual(@as(usize, 2), slot.crash_count);
+}
+
+test "renderer readiness requires a valid hello and releases probe rights" {
+    const probe = struct {
+        extern fn weaver_test_renderer_readiness() c_int;
+    };
+    try std.testing.expectEqual(@as(c_int, 0), probe.weaver_test_renderer_readiness());
 }
 
 test "provider socket peer pid rejects a same-user hijacker pid" {
