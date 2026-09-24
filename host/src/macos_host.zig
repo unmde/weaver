@@ -1358,6 +1358,24 @@ test "runtime socket root is short, per-user, and data-root-specific" {
     try std.testing.expect(!std.mem.eql(u8, first, second));
 }
 
+test "process CPU samples report nanoseconds" {
+    var before: posix.timespec = undefined;
+    var after: posix.timespec = undefined;
+    var footprint: u64 = 0;
+    var cpu_time_ns: u64 = 0;
+    var threads: u32 = 0;
+    try std.testing.expectEqual(.SUCCESS, posix.errno(posix.system.clock_gettime(.PROCESS_CPUTIME_ID, &before)));
+    try std.testing.expectEqual(@as(c_int, 0), c.weaver_process_sample(posix.system.getpid(), &footprint, &cpu_time_ns, &threads));
+    try std.testing.expectEqual(.SUCCESS, posix.errno(posix.system.clock_gettime(.PROCESS_CPUTIME_ID, &after)));
+
+    const before_ns: u64 = @intCast(before.sec * std.time.ns_per_s + before.nsec);
+    const after_ns: u64 = @intCast(after.sec * std.time.ns_per_s + after.nsec);
+    // Darwin's process CPU clock sums getrusage's user and system times,
+    // each truncated to microseconds. Allow only that loss of precision.
+    try std.testing.expect(cpu_time_ns >= before_ns);
+    try std.testing.expect(cpu_time_ns <= after_ns + 2 * std.time.ns_per_us);
+}
+
 test "provider socket peer pid rejects a same-user hijacker pid" {
     var path_buffer: [96]u8 = undefined;
     const path = try std.fmt.bufPrint(&path_buffer, "/tmp/weaver-peer-test-{d}.sock", .{posix.system.getpid()});
