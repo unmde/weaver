@@ -1,0 +1,1740 @@
+diff --git a/skills/conjure-widget/SKILL.md b/.agents/skills/conjure-widget/SKILL.md
+similarity index 83%
+rename from skills/conjure-widget/SKILL.md
+rename to .agents/skills/conjure-widget/SKILL.md
+index 2e81f02..0d2d78b 100644
+--- a/skills/conjure-widget/SKILL.md
++++ b/.agents/skills/conjure-widget/SKILL.md
+@@ -24,7 +24,7 @@ honest. Report any part Weaver does not support as a boundary.
+ 2. Read the relevant current sections under **Contract routing** before choosing
+    elements, hooks, providers, classes, assets, network access, or capabilities.
+    When the request uses interaction, changing time, provider data, or replay,
+-   read [`docs/agent-widget-capture.md`](../../docs/agent-widget-capture.md) now.
++   read [`docs/agent-widget-capture.md`](../../../docs/agent-widget-capture.md) now.
+    Define stable capture inputs and a name for each state the request needs so
+    every pass renders the same evidence.
+ 3. Start the **Live loop** before the first source edit. Run
+@@ -81,7 +81,7 @@ For each defined state:
+ 
+ ## Contract routing
+ 
+-[`sdk/CONTRACT.md`](../../sdk/CONTRACT.md) is authoritative and chronological;
++[`sdk/CONTRACT.md`](../../../sdk/CONTRACT.md) is authoritative and chronological;
+ later amendments supersede earlier scheduling notes. Read only the headings the
+ widget needs:
+ 
+@@ -100,6 +100,26 @@ widget needs:
+   a number only for an intentional fixed cadence, and `0` once animation
+   settles.
+ 
++Read the shipped example closest to the request before writing the first
++element; they are the house style and each one proves one slice of the
++contract on the current runtime:
++
++- [`examples/clock`](../../../examples/clock/widget.tsx): `time` provider,
++  layered gradient surface, a canvas that redraws once per render.
++- [`examples/system`](../../../examples/system/widget.tsx): `cpu` and `memory`
++  providers, provider history in an effect, canvas charts with explicit sizes.
++- [`examples/pomodoro`](../../../examples/pomodoro/widget.tsx): `useStorage`,
++  `useInterval`, buttons with `hover:`/`pressed:` states, centered labels.
++- [`examples/now-playing`](../../../examples/now-playing/widget.tsx): `media`
++  provider, conditional artwork, transport capability, click-to-seek.
++- [`examples/weather`](../../../examples/weather/widget.tsx): declared
++  `origins`, `wfetch` with honest loading and failure states, literal icons
++  chosen per branch.
++- [`examples/noro-shell`](../../../examples/noro-shell/widget.tsx) and
++  [`examples/visualizer`](../../../examples/visualizer/widget.tsx): bundled
++  fonts, tiled image assets, and an `audio` signal driving a display-rate
++  canvas.
++
+ Use `weaver check` as the final authority for statically knowable widget errors.
+ Do not infer browser DOM, CSS, package, or network behavior that the contract
+ does not provide.
+diff --git a/skills/conjure-widget/agents/openai.yaml b/.agents/skills/conjure-widget/agents/openai.yaml
+similarity index 100%
+rename from skills/conjure-widget/agents/openai.yaml
+rename to .agents/skills/conjure-widget/agents/openai.yaml
+diff --git a/README.md b/README.md
+index 38a1841..8b673ed 100644
+--- a/README.md
++++ b/README.md
+@@ -216,9 +216,32 @@ See [`macos-m12-results.md`](docs/macos-m12-results.md) and the live
+ blockers.
+ 
+ Or do it the intended way: point your coding agent at
+-[`skills/conjure-widget/SKILL.md`](skills/conjure-widget/SKILL.md) and ask it
++[`.agents/skills/conjure-widget/SKILL.md`](.agents/skills/conjure-widget/SKILL.md) and ask it
+ for the widget you actually want.
+ 
++## Examples
++
++Each directory under [`examples/`](examples) is one complete widget that
++checks and captures on the current runtime. They are the house style, and the
++first thing an agent should read before conjuring something similar.
++
++| Example | Shows |
++|---|---|
++| [`clock`](examples/clock/widget.tsx) | the `time` provider, a layered gradient surface, a canvas dial that redraws once per render |
++| [`system`](examples/system/widget.tsx) | `cpu` and `memory` providers, a minute of history kept in an effect, canvas charts |
++| [`pomodoro`](examples/pomodoro/widget.tsx) | `useStorage`, `useInterval`, buttons with native `hover:` and `pressed:` states |
++| [`now-playing`](examples/now-playing/widget.tsx) | the `media` provider, conditional artwork, `media-transport`, click-to-seek |
++| [`weather`](examples/weather/widget.tsx) | declared `origins` and `wfetch` against Open-Meteo, with honest loading and failure states |
++| [`noro-shell`](examples/noro-shell/widget.tsx), [`noro-signal`](examples/noro-signal/widget.tsx) | pixel-faithful media skins: bundled fonts, tiled image assets, transport |
++| [`visualizer`](examples/visualizer/widget.tsx) | the `audio` signal driving a display-rate canvas that sleeps on silence |
++
++Render any of them without a desktop session:
++
++```sh
++node cli/bin/weaver.js capture examples/system \
++  --provider-fixture test/capture/system.provider.json --out /tmp/system.png
++```
++
+ ## How it's put together
+ 
+ | Path | What |
+@@ -226,7 +249,7 @@ for the widget you actually want.
+ | `runtime/` | `weaver-widget[.exe]` — Zig, embeds QuickJS-NG, renders via the Native SDK fork (submodule `runtime/native-sdk`) |
+ | `sdk/` | `@weaver/sdk` — the authoring API: reconciler, hooks, class compiler. Contract frozen in [`sdk/CONTRACT.md`](sdk/CONTRACT.md) |
+ | `cli/` | `weaver` — init / check / bundle / capture / dev / pack / inspect / install / uninstall / logs |
+-| `skills/` | agent skills (conjuring is the primary authoring path) |
++| `.agents/skills/` | agent skills, mirrored in `.claude/skills/` (conjuring is the primary authoring path) |
+ | `docs/adr/` | why things are the way they are — start here to understand the project |
+ | `CONTEXT.md` | the domain glossary |
+ 
+diff --git a/cli/test/example-surface-smoke.mjs b/cli/test/example-surface-smoke.mjs
+index e8e48ab..1bb21da 100644
+--- a/cli/test/example-surface-smoke.mjs
++++ b/cli/test/example-surface-smoke.mjs
+@@ -6,29 +6,34 @@ import { fileURLToPath } from "node:url";
+ 
+ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+ const cli = join(repoRoot, "cli", "bin", "weaver.js");
+-const fixtures = [
+-  "clock",
+-  "pomodoro",
+-  "system",
+-  "now-playing",
+-  "noro-shell",
+-  "visualizer",
+-  "dpi-diagnostic",
+-  "m4b-parity",
+-  "m4b-synthetic",
++// Every shipped example plus the measurement fixtures that scripts/ and docs/
++// still drive. Each must check and bundle on a clean checkout.
++const surfaces = [
++  "examples/clock",
++  "examples/system",
++  "examples/pomodoro",
++  "examples/now-playing",
++  "examples/weather",
++  "examples/noro-shell",
++  "examples/noro-signal",
++  "examples/visualizer",
++  "test/fixtures/dpi-diagnostic",
++  "test/fixtures/m4b-parity",
++  "test/fixtures/m4b-synthetic",
++  "test/fixtures/gradient-stack",
+ ];
+ 
+-for (const fixture of fixtures) {
+-  const source = join(repoRoot, "examples", fixture);
++for (const surface of surfaces) {
++  const source = join(repoRoot, surface);
+   const dist = join(source, "dist");
+   const distExisted = existsSync(dist);
+   for (const command of ["check", "bundle"]) {
+     const result = spawnSync(process.execPath, [cli, command, source], { cwd: repoRoot, encoding: "utf8" });
+-    assert.equal(result.status, 0, `${command} failed for ${fixture}\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
++    assert.equal(result.status, 0, `${command} failed for ${surface}\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+   }
+-  assert.equal(existsSync(join(dist, "bundle.js")), true, `${fixture} bundle is missing`);
+-  assert.equal(existsSync(join(dist, "widget.json")), true, `${fixture} manifest is missing`);
++  assert.equal(existsSync(join(dist, "bundle.js")), true, `${surface} bundle is missing`);
++  assert.equal(existsSync(join(dist, "widget.json")), true, `${surface} manifest is missing`);
+   if (!distExisted) rmSync(dist, { recursive: true, force: true });
+ }
+ 
+-process.stdout.write(`Checked and bundled ${fixtures.length} portable example surfaces.\n`);
++process.stdout.write(`Checked and bundled ${surfaces.length} portable widget surfaces.\n`);
+diff --git a/docs/agent-widget-capture.md b/docs/agent-widget-capture.md
+index 809e0a1..dbe2f98 100644
+--- a/docs/agent-widget-capture.md
++++ b/docs/agent-widget-capture.md
+@@ -77,7 +77,7 @@ node cli/bin/weaver.js capture examples/pomodoro \
+   --action-file test/capture/pomodoro.actions \
+   --out /tmp/pomodoro.png
+ 
+-node cli/bin/weaver.js capture examples/styling-interaction \
++node cli/bin/weaver.js capture test/fixtures/styling-interaction \
+   --action-file test/capture/styling-interaction.actions \
+   --out /tmp/styling-interaction.png
+ ```
+diff --git a/docs/dpi-scaling.md b/docs/dpi-scaling.md
+index d68a700..30c00d3 100644
+--- a/docs/dpi-scaling.md
++++ b/docs/dpi-scaling.md
+@@ -140,7 +140,7 @@ clean version-mismatch failure instead of framing deadlock.
+ 
+ ## Deterministic and live verification
+ 
+-`examples/dpi-diagnostic` is a transparent 480 x 320 DIP fixture with a
++`test/fixtures/dpi-diagnostic` is a transparent 480 x 320 DIP fixture with a
+ retained card, immediate canvas, four colored edge markers and corners, content
+ crossing the retained/immediate seam, and right/bottom clickable targets.
+ `scripts/verify-dpi.ps1` launches the real host, widget runtime, named pipe,
+diff --git a/docs/media-v2-results.md b/docs/media-v2-results.md
+index ad7b07a..19a9433 100644
+--- a/docs/media-v2-results.md
++++ b/docs/media-v2-results.md
+@@ -80,7 +80,7 @@ The Windows slice is complete through the noro gate:
+ - Existing previous, play/pause, and next buttons deliver real SMTC commands.
+ - The former static 312x3 progress stack is a pixel-matched click-to-seek
+   button using the press event's normalized local `event.u`.
+-- `skills/conjure-widget/SKILL.md` teaches `MediaData.artPath`,
++- `.agents/skills/conjure-widget/SKILL.md` teaches `MediaData.artPath`,
+   `useMediaTransport`, the `media-transport` capability, and promise semantics.
+ 
+ The full viewed visual checklist and capture inventory are in
+diff --git a/examples/clock/bundle.js b/examples/clock/bundle.js
+deleted file mode 100644
+index de3b075..0000000
+--- a/examples/clock/bundle.js
++++ /dev/null
+@@ -1,52 +0,0 @@
+-"use strict";
+-
+-const card = native.createNode("panel");
+-native.setProp(card, "padding", 14);
+-native.setProp(card, "radius", 18);
+-native.setProp(card, "background", "#11141cdb");
+-
+-const content = native.createNode("column");
+-native.setProp(content, "gap", 1);
+-
+-const timeRow = native.createNode("row");
+-native.setProp(timeRow, "gap", 7);
+-
+-const hoursMinutes = native.createNode("text");
+-native.setProp(hoursMinutes, "fontScale", 2.2);
+-native.setProp(hoursMinutes, "fontWeight", "medium");
+-
+-const seconds = native.createNode("text");
+-native.setProp(seconds, "fontScale", 1.05);
+-native.setProp(seconds, "fontWeight", "medium");
+-native.setProp(seconds, "opacity", 0.72);
+-
+-const dateLine = native.createNode("text");
+-native.setProp(dateLine, "fontScale", 0.84);
+-native.setProp(dateLine, "opacity", 0.64);
+-
+-native.appendChild(timeRow, hoursMinutes);
+-native.appendChild(timeRow, seconds);
+-native.appendChild(content, timeRow);
+-native.appendChild(content, dateLine);
+-native.appendChild(card, content);
+-native.setRoot(card);
+-
+-function pad2(value) {
+-  return String(value).padStart(2, "0");
+-}
+-
+-function tick() {
+-  const now = new Date();
+-  native.setText(hoursMinutes, pad2(now.getHours()) + ":" + pad2(now.getMinutes()));
+-  native.setText(seconds, ":" + pad2(now.getSeconds()));
+-  native.setText(dateLine, now.toLocaleDateString(undefined, {
+-    weekday: "short",
+-    month: "short",
+-    day: "numeric"
+-  }));
+-}
+-
+-tick();
+-native.setInterval(1000);
+-native.onTimer(tick);
+-native.log("clock mounted");
+diff --git a/examples/clock/widget.json b/examples/clock/widget.json
+deleted file mode 100644
+index 8114aa5..0000000
+--- a/examples/clock/widget.json
++++ /dev/null
+@@ -1,8 +0,0 @@
+-{
+-  "name": "Clock",
+-  "size": [240, 110],
+-  "anchor": { "corner": "top-right", "offset": [24, 24] },
+-  "layer": "desktop",
+-  "transparent": true
+-}
+-
+diff --git a/examples/clock/widget.tsx b/examples/clock/widget.tsx
+index cb5bb49..add6eae 100644
+--- a/examples/clock/widget.tsx
++++ b/examples/clock/widget.tsx
+@@ -1,19 +1,77 @@
+-import { useProvider, widget } from "@weaver/sdk";
++import { useProvider, widget, type CanvasCtx, type TimeData } from "@weaver/sdk";
++
++// The first widget: one provider, one canvas, no timers of its own.
++// The `time` provider ticks once per second while subscribed; each tick
++// re-renders the text nodes and redraws the dial. Nothing else runs.
++
++const weekdays: Record<string, string> = {
++  Sun: "Sunday", Mon: "Monday", Tue: "Tuesday", Wed: "Wednesday",
++  Thu: "Thursday", Fri: "Friday", Sat: "Saturday",
++};
++const months: Record<string, string> = {
++  Jan: "January", Feb: "February", Mar: "March", Apr: "April", May: "May", Jun: "June",
++  Jul: "July", Aug: "August", Sep: "September", Oct: "October", Nov: "November", Dec: "December",
++};
++
++function longDate(time: TimeData): string {
++  return `${weekdays[time.weekday] ?? time.weekday}, ${months[time.month] ?? time.month} ${time.day}`;
++}
++
++// Draws a small analog dial. Runs once per render (no `fps`), so it costs
++// nothing between provider ticks.
++function drawDial(ctx: CanvasCtx, time: TimeData): void {
++  ctx.clear();
++  const cx = ctx.width / 2;
++  const cy = ctx.height / 2;
++  const radius = Math.min(cx, cy) - 2;
++  const hours = Number(time.hh) % 12;
++  const minutes = Number(time.mm);
++  const seconds = Number(time.ss);
++
++  for (let index = 0; index < 12; index += 1) {
++    const angle = (index / 12) * Math.PI * 2 - Math.PI / 2;
++    const outer = radius;
++    const inner = index % 3 === 0 ? radius - 7 : radius - 4;
++    ctx.line(
++      cx + Math.cos(angle) * inner, cy + Math.sin(angle) * inner,
++      cx + Math.cos(angle) * outer, cy + Math.sin(angle) * outer,
++      index % 3 === 0 ? 2 : 1, index % 3 === 0 ? "#ffffffb3" : "#ffffff4d",
++    );
++  }
++
++  const hand = (turns: number, length: number, width: number, color: string) => {
++    const angle = turns * Math.PI * 2 - Math.PI / 2;
++    ctx.line(cx, cy, cx + Math.cos(angle) * length, cy + Math.sin(angle) * length, width, color);
++  };
++  hand((hours + minutes / 60) / 12, radius * 0.52, 3, "#f5f6f8");
++  hand((minutes + seconds / 60) / 60, radius * 0.78, 2, "#f5f6f8");
++  hand(seconds / 60, radius * 0.86, 1, "#f59e0b");
++  ctx.fillCircle(cx, cy, 3, "#f59e0b");
++}
+ 
+ export default widget({
+   name: "Clock",
+-  size: [240, 110],
++  size: [320, 132],
+   anchor: { corner: "top-right", offset: [24, 24] },
+   subscribe: ["time"],
+ }, () => {
+   const time = useProvider("time");
+   return (
+-    <column class="w-[240px] h-[110px] p-4 gap-1 bg-[#11141c]/86 rounded-2xl">
+-      <row class="items-baseline gap-2">
+-        <text class="text-3xl text-[#f8fafc] font-light">{time.hh}:{time.mm}</text>
+-        <text class="text-sm text-[#cbd5e1] opacity-70">:{time.ss}</text>
+-      </row>
+-      <text class="text-xs text-[#94a3b8]">{time.weekday}, {time.month} {time.day}</text>
+-    </column>
++    <row
++      class="size-full px-[24px] py-[20px] items-center justify-between border border-[#ffffff]/10 rounded-[28px]"
++      background={[
++        { type: "linear", stops: [{ offset: 0, color: "#0b0d12e6" }, { offset: 1, color: "#0b0d12e6" }] },
++        { type: "linear", start: [0, 0], end: [0, 1], stops: [{ offset: 0, color: "#ffffff12" }, { offset: 0.6, color: "#ffffff00" }] },
++      ]}
++    >
++      <column class="gap-[6px]">
++        <row class="items-baseline gap-[8px]">
++          <text class="text-[56px] leading-none font-light tracking-[-2px] tabular-nums text-[#f5f6f8]">{time.hh}:{time.mm}</text>
++          <text class="text-[18px] leading-none tabular-nums text-[#f5f6f8]/45">{time.ss}</text>
++        </row>
++        <text class="text-[14px] text-[#f5f6f8]/60">{longDate(time)}</text>
++      </column>
++      <canvas class="size-[88px]" onFrame={(ctx) => drawDial(ctx, time)} />
++    </row>
+   );
+ });
+diff --git a/examples/gradient-stack/tsconfig.json b/examples/gradient-stack/tsconfig.json
+deleted file mode 100644
+index fb8488e..0000000
+--- a/examples/gradient-stack/tsconfig.json
++++ /dev/null
+@@ -1,17 +0,0 @@
+-{
+-  "compilerOptions": {
+-    "target": "ES2020",
+-    "module": "ESNext",
+-    "moduleResolution": "Bundler",
+-    "strict": true,
+-    "noEmit": true,
+-    "jsx": "react-jsx",
+-    "jsxImportSource": "@weaver/sdk",
+-    "baseUrl": ".",
+-    "paths": {
+-      "@weaver/sdk": ["../../sdk/index.d.ts"],
+-      "@weaver/sdk/jsx-runtime": ["../../sdk/jsx-runtime.d.ts"]
+-    }
+-  },
+-  "include": ["widget.tsx"]
+-}
+diff --git a/examples/myclock/tsconfig.json b/examples/myclock/tsconfig.json
+deleted file mode 100644
+index bb61204..0000000
+--- a/examples/myclock/tsconfig.json
++++ /dev/null
+@@ -1,12 +0,0 @@
+-{
+-  "compilerOptions": {
+-    "target": "ES2020",
+-    "module": "ESNext",
+-    "moduleResolution": "Bundler",
+-    "strict": true,
+-    "jsx": "react-jsx",
+-    "jsxImportSource": "@weaver/sdk",
+-    "types": ["@weaver/sdk"]
+-  },
+-  "include": ["widget.tsx"]
+-}
+diff --git a/examples/myclock/widget.tsx b/examples/myclock/widget.tsx
+deleted file mode 100644
+index 878dead..0000000
+--- a/examples/myclock/widget.tsx
++++ /dev/null
+@@ -1,34 +0,0 @@
+-import { useProviderSignal, widget, type TimeData } from "@weaver/sdk";
+-
+-function hourMinute(value: TimeData): string {
+-  return `${value.hh}:${value.mm}`;
+-}
+-
+-function seconds(value: TimeData): string {
+-  return value.ss;
+-}
+-
+-function date(value: TimeData): string {
+-  return `${value.weekday}, ${value.month} ${value.day}`;
+-}
+-
+-export default widget({
+-  name: "Myclock",
+-  size: [240, 110],
+-  anchor: { corner: "top-right", offset: [24, 24] },
+-  subscribe: ["time"],
+-}, () => {
+-  const time = useProviderSignal("time");
+-  const hourMinuteSignal = time.map(hourMinute);
+-  const secondsSignal = time.map(seconds);
+-  const dateSignal = time.map(date);
+-  return (
+-    <column class="p-4 gap-1 bg-[#11141c]/86 rounded-2xl">
+-      <row class="items-baseline gap-2">
+-        <text class="text-3xl font-light">{hourMinuteSignal}</text>
+-        <text class="text-sm opacity-70">{secondsSignal}</text>
+-      </row>
+-      <text class="text-xs opacity-60">{dateSignal}</text>
+-    </column>
+-  );
+-});
+diff --git a/examples/now-playing/widget.tsx b/examples/now-playing/widget.tsx
+index 4711c27..c8f5921 100644
+--- a/examples/now-playing/widget.tsx
++++ b/examples/now-playing/widget.tsx
+@@ -1,58 +1,105 @@
+-import { useMediaTransport, useProvider, widget } from "@weaver/sdk";
++import { useMediaTransport, useProvider, widget, type CanvasCtx } from "@weaver/sdk";
+ 
+-const segmentCount = 24;
++// System media: artwork, metadata, and transport. `media` is change-pushed
++// (1 Hz position while playing), so the progress canvas redraws only when a
++// frame arrives. Seeking uses the press event's normalized `u` coordinate.
++
++function timestamp(ms: number): string {
++  const seconds = Math.max(0, Math.floor(ms / 1000));
++  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
++}
++
++function drawProgress(ctx: CanvasCtx, fraction: number): void {
++  ctx.clear();
++  const radius = ctx.height / 2;
++  ctx.fillRoundRect(0, 0, ctx.width, ctx.height, radius, "#ffffff1f");
++  const width = Math.max(0, Math.min(1, fraction)) * ctx.width;
++  if (width > 0) ctx.fillRoundRect(0, 0, Math.max(ctx.height, width), ctx.height, radius, "#f5f6f8");
++}
+ 
+ export default widget({
+   name: "Now Playing",
+-  size: [440, 160],
++  size: [400, 132],
+   anchor: { corner: "bottom-left", offset: [24, 24] },
+-  layer: "desktop",
+   subscribe: ["media"],
+   capabilities: ["media-transport"],
+ }, () => {
+   const media = useProvider("media");
+   const transport = useMediaTransport();
+-  const progress = media.durationMs > 0 ? Math.max(0, Math.min(1, media.positionMs / media.durationMs)) : 0;
+-  const filled = Math.round(progress * segmentCount);
++  const playing = media.status === "playing";
++  const hasTrack = media.title.length > 0;
++  const progress = media.durationMs > 0 ? media.positionMs / media.durationMs : 0;
++
+   return (
+-    <column class="w-[440px] h-[160px] p-4 gap-3 bg-[#10131c]/90 rounded-2xl">
+-      <row class="w-[408px] justify-between items-center">
+-        <row class="gap-2 items-center">
+-          <canvas
+-            class="w-[14px] h-[14px]"
+-            fps={media.playing ? 30 : 0}
+-            onFrame={(ctx, frame) => {
+-              ctx.clear();
+-              const pulse = media.playing ? 0.72 + Math.sin(frame.t * Math.PI * 2) * 0.18 : 0.45;
+-              ctx.fillCircle(7, 7, 5 * pulse, "#8b5cf6");
+-            }}
+-          />
+-          <text class="text-xs text-[#8b5cf6] font-semibold">NOW PLAYING</text>
+-        </row>
+-        <button
+-          class="w-[104px] h-[22px] bg-[#273244] hover:bg-[#334155] pressed:bg-[#1e293b] rounded-full"
+-          onPress={() => { void (media.playing ? transport.pause() : transport.play()); }}
+-        >
+-          <text class="text-xs text-[#cbd5e1]">{media.status.toUpperCase()} · {media.playing ? "PAUSE" : "PLAY"}</text>
+-        </button>
+-      </row>
+-      <row class="w-[408px] h-[72px] gap-3 items-center">
++    <row
++      class="size-full p-[14px] gap-[14px] items-center border border-[#ffffff]/10 rounded-[28px]"
++      background={[
++        { type: "linear", stops: [{ offset: 0, color: "#0b0d12e6" }, { offset: 1, color: "#0b0d12e6" }] },
++        { type: "linear", start: [0, 0], end: [0, 1], stops: [{ offset: 0, color: "#ffffff12" }, { offset: 0.6, color: "#ffffff00" }] },
++      ]}
++    >
++      <stack class="size-[104px] shrink-0 rounded-[18px] overflow-hidden bg-[#ffffff]/6">
+         {media.artPath
+-          ? <image src={media.artPath} fit="cover" class="w-[72px] h-[72px] rounded-xl" />
+-          : <panel class="w-[72px] h-[72px] bg-[#273244] rounded-xl" />}
+-        <column class="w-[324px] gap-1">
+-          <text class="text-xl text-[#f8fafc] font-medium truncate">{media.title || "Nothing playing"}</text>
+-          <text class="text-sm text-[#94a3b8] truncate">{media.artist || media.album || (media.title ? "Unknown artist" : "Open a media app to begin")}</text>
+-          <text class="text-xs text-[#64748b] truncate">{media.sourceApp || "Unknown source"}</text>
++          ? <image src={media.artPath} fit="cover" class="size-full" />
++          : (
++            <column class="size-full items-center justify-center">
++              <icon name="music" class="size-[30px] text-[#f5f6f8]/30" />
++            </column>
++          )}
++      </stack>
++
++      <column class="grow min-w-0 h-full justify-between py-[2px]">
++        <column class="w-full gap-[2px]">
++          <text class="w-full truncate text-[17px] leading-tight font-semibold text-[#f5f6f8]">{hasTrack ? media.title : "Nothing playing"}</text>
++          <text class="w-full truncate text-[13px] text-[#f5f6f8]/55">{hasTrack ? (media.artist || media.album || "Unknown artist") : "Play something in any app"}</text>
++        </column>
++
++        <column class="w-full gap-[6px]">
++          <stack class="w-full h-[14px]">
++            <column class="size-full justify-center">
++              <canvas class="w-[254px] h-[4px]" onFrame={(ctx) => drawProgress(ctx, progress)} />
++            </column>
++            <button
++              accessibilityLabel="Seek"
++              class="size-full bg-transparent"
++              onPress={(event) => {
++                if (media.durationMs <= 0) return;
++                void transport.seek(Math.max(0, Math.min(1, event?.u ?? 0)) * media.durationMs);
++              }}
++            />
++          </stack>
++          <row class="w-full items-center justify-between">
++            <row class="items-center gap-[2px]">
++              <button
++                accessibilityLabel="Previous"
++                class="size-[30px] rounded-full items-center justify-center bg-transparent hover:bg-[#ffffff]/10 pressed:bg-[#ffffff]/16"
++                onPress={() => { void transport.previous(); }}
++              >
++                <icon name="skip-back" class="size-[16px] text-[#f5f6f8]/80 pressed:text-[#f5f6f8]" />
++              </button>
++              <button
++                accessibilityLabel={playing ? "Pause" : "Play"}
++                class="size-[34px] rounded-full items-center justify-center bg-[#f5f6f8] hover:bg-[#ffffff] pressed:bg-[#d4d6db]"
++                onPress={() => { void (playing ? transport.pause() : transport.play()); }}
++              >
++                {playing
++                  ? <icon name="pause" class="size-[16px] text-[#0b0d12]" />
++                  : <icon name="play" class="size-[16px] ml-[2px] text-[#0b0d12]" />}
++              </button>
++              <button
++                accessibilityLabel="Next"
++                class="size-[30px] rounded-full items-center justify-center bg-transparent hover:bg-[#ffffff]/10 pressed:bg-[#ffffff]/16"
++                onPress={() => { void transport.next(); }}
++              >
++                <icon name="skip-forward" class="size-[16px] text-[#f5f6f8]/80 pressed:text-[#f5f6f8]" />
++              </button>
++            </row>
++            <text class="text-[11px] tabular-nums text-[#f5f6f8]/45">
++              {media.durationMs > 0 ? `${timestamp(media.positionMs)} / ${timestamp(media.durationMs)}` : media.sourceApp}
++            </text>
++          </row>
+         </column>
+-      </row>
+-      <row class="w-[408px] h-[4px] gap-1">
+-        {Array.from({ length: segmentCount }, (_, index) => (
+-          index < filled
+-            ? <panel class="w-[13px] h-[4px] bg-[#8b5cf6] rounded-full" />
+-            : <panel class="w-[13px] h-[4px] bg-[#273244] rounded-full" />
+-        ))}
+-      </row>
+-    </column>
++      </column>
++    </row>
+   );
+ });
+diff --git a/examples/pomodoro/widget.tsx b/examples/pomodoro/widget.tsx
+index 58d3cf3..5084a0c 100644
+--- a/examples/pomodoro/widget.tsx
++++ b/examples/pomodoro/widget.tsx
+@@ -1,71 +1,129 @@
+-import { useInterval, useStorage, widget } from "@weaver/sdk";
++import { useInterval, useStorage, widget, type CanvasCtx } from "@weaver/sdk";
+ 
+-interface PomodoroState {
+-  minutes: number;
+-  remaining: number;
++// A tiny app: persisted state, one timer, buttons with native hover and
++// pressed states, and a canvas ring that redraws once per second.
++
++type Mode = "focus" | "short" | "long";
++
++const minutes: Record<Mode, number> = { focus: 25, short: 5, long: 15 };
++const headings: Record<Mode, string> = { focus: "FOCUS", short: "SHORT BREAK", long: "LONG BREAK" };
++const focusColor = "#ff7a59";
++const breakColor = "#5eead4";
++
++interface TimerState {
++  mode: Mode;
++  remaining: number;   // seconds
+   running: boolean;
+ }
+ 
++function clock(seconds: number): string {
++  return `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
++}
++
++// 60 ticks around the dial; the lit arc shrinks clockwise as time runs out.
++function drawRing(ctx: CanvasCtx, fraction: number, color: string): void {
++  ctx.clear();
++  const cx = ctx.width / 2;
++  const cy = ctx.height / 2;
++  const outer = Math.min(cx, cy) - 2;
++  const inner = outer - 11;
++  const lit = Math.ceil(Math.max(0, Math.min(1, fraction)) * 60);
++  for (let index = 0; index < 60; index += 1) {
++    const angle = (index / 60) * Math.PI * 2 - Math.PI / 2;
++    const cos = Math.cos(angle);
++    const sin = Math.sin(angle);
++    ctx.line(cx + cos * inner, cy + sin * inner, cx + cos * outer, cy + sin * outer, 2.5, index < lit ? color : "#ffffff1f");
++  }
++}
++
+ export default widget({
+   name: "Pomodoro",
+-  size: [320, 210],
+-  anchor: { corner: "top-right", offset: [24, 158] },
++  size: [300, 344],
++  anchor: { corner: "top-right", offset: [24, 180] },
+ }, () => {
+-  const [timer, setTimer] = useStorage<PomodoroState>("timer", {
+-    minutes: 25,
+-    remaining: 25 * 60,
+-    running: false,
+-  });
++  const [timer, setTimer] = useStorage<TimerState>("timer", { mode: "focus", remaining: minutes.focus * 60, running: false });
++  const total = minutes[timer.mode] * 60;
++  const focus = timer.mode === "focus";
++  const color = focus ? focusColor : breakColor;
+ 
++  // Ticks once per second while running. While paused the interval is
++  // stretched to an hour so the widget does not wake up for nothing.
+   useInterval(() => {
+-    if (!timer.running) return;
+     setTimer((current) => {
++      if (!current.running) return current;
+       if (current.remaining <= 1) return { ...current, remaining: 0, running: false };
+       return { ...current, remaining: current.remaining - 1 };
+     });
+-  }, 1000);
++  }, timer.running ? 1000 : 3_600_000);
+ 
+-  const shownMinutes = Math.floor(timer.remaining / 60);
+-  const shownSeconds = timer.remaining % 60;
+-  const clock = `${String(shownMinutes).padStart(2, "0")}:${String(shownSeconds).padStart(2, "0")}`;
++  const select = (mode: Mode) => setTimer({ mode, remaining: minutes[mode] * 60, running: false });
++  const chip = (mode: Mode, label: string) => {
++    const selected = timer.mode === mode;
++    return (
++      <button
++        accessibilityLabel={label}
++        class={selected
++          ? "w-[80px] h-[28px] rounded-full items-center justify-center bg-[#ffffff]/14"
++          : "w-[80px] h-[28px] rounded-full items-center justify-center bg-transparent hover:bg-[#ffffff]/8 pressed:bg-[#ffffff]/12"}
++        onPress={() => select(mode)}
++      >
++        <row class="size-full items-center">
++          <text class={selected ? "w-full text-center text-[11px] font-medium text-[#f5f6f8]" : "w-full text-center text-[11px] font-medium text-[#f5f6f8]/50"}>{label}</text>
++        </row>
++      </button>
++    );
++  };
+ 
+   return (
+-    <column class="w-[320px] h-[210px] p-4 gap-3 bg-[#11141c]/92 rounded-2xl">
+-      <row class="w-[288px] items-center justify-between">
+-        <column class="gap-1">
+-          <text class="text-xs text-[#a78bfa] font-semibold">FOCUS TIMER</text>
+-          <text class="text-4xl text-[#f8fafc] font-light">{clock}</text>
++    <column
++      class="size-full p-[20px] gap-[14px] items-center border border-[#ffffff]/10 rounded-[28px]"
++      background={[
++        { type: "linear", stops: [{ offset: 0, color: "#0b0d12e6" }, { offset: 1, color: "#0b0d12e6" }] },
++        { type: "linear", start: [0, 0], end: [0, 1], stops: [{ offset: 0, color: "#ffffff12" }, { offset: 0.6, color: "#ffffff00" }] },
++      ]}
++    >
++      <row class="w-full items-center justify-between">
++        <text class={focus ? "text-[11px] tracking-[2px] text-[#ff7a59]" : "text-[11px] tracking-[2px] text-[#5eead4]"}>{headings[timer.mode]}</text>
++        <text class="text-[11px] tracking-[1px] tabular-nums text-[#f5f6f8]/40">{minutes[timer.mode]} MIN</text>
++      </row>
++
++      <stack class="size-[172px]">
++        <canvas class="size-[172px]" onFrame={(ctx) => drawRing(ctx, timer.remaining / total, color)} />
++        <column class="size-full items-center justify-center gap-[2px]">
++          <text class="text-[42px] leading-none font-light tracking-[-1px] tabular-nums text-[#f5f6f8]">{clock(timer.remaining)}</text>
++          <text class="text-[11px] tracking-[1px] text-[#f5f6f8]/40">
++            {timer.remaining === 0 ? "DONE" : timer.running ? "RUNNING" : "PAUSED"}
++          </text>
+         </column>
+-        <text class="text-sm text-[#94a3b8]">{timer.running ? "Focusing" : "Ready"}</text>
++      </stack>
++
++      <row class="gap-[6px]">
++        {chip("focus", "Focus")}
++        {chip("short", "Short break")}
++        {chip("long", "Long break")}
+       </row>
+-      <column class="gap-2">
+-        <row class="w-[288px] justify-between">
+-          <text class="text-xs text-[#94a3b8]">Session length</text>
+-          <text class="text-xs text-[#e2e8f0]">{timer.minutes} min</text>
+-        </row>
+-        <slider
+-          accessibilityLabel="Session length"
+-          class="w-[288px] h-[24px]"
+-          value={timer.minutes}
+-          max={60}
+-          onChange={(minutes) => {
+-            const rounded = Math.max(5, Math.round(minutes));
+-            setTimer((current) => ({ ...current, minutes: rounded, remaining: current.running ? current.remaining : rounded * 60 }));
+-          }}
+-        />
+-      </column>
+-      <row class="w-[288px] gap-2">
++
++      <row class="w-full gap-[8px]">
+         <button
+-          class="grow p-2 bg-[#7c3aed] rounded-lg items-center"
+-          onPress={() => setTimer((current) => ({ ...current, running: !current.running }))}
++          class={focus
++            ? "w-[206px] h-[46px] rounded-[16px] bg-[#ff7a59] hover:opacity-90 pressed:opacity-75"
++            : "w-[206px] h-[46px] rounded-[16px] bg-[#5eead4] hover:opacity-90 pressed:opacity-75"}
++          onPress={() => setTimer((current) => ({
++            ...current,
++            remaining: current.remaining === 0 ? total : current.remaining,
++            running: !current.running,
++          }))}
+         >
+-          <text class="text-sm text-[#ffffff] font-semibold">{timer.running ? "Pause" : "Start"}</text>
++          <row class="size-full items-center">
++            <text class="w-full text-center text-[14px] font-semibold text-[#0b0d12]">{timer.running ? "Pause" : "Start"}</text>
++          </row>
+         </button>
+         <button
+-          class="p-2 bg-[#273244] rounded-lg items-center"
+-          onPress={() => setTimer((current) => ({ ...current, remaining: current.minutes * 60, running: false }))}
++          accessibilityLabel="Reset"
++          class="size-[46px] rounded-[16px] items-center justify-center bg-[#ffffff]/8 hover:bg-[#ffffff]/12 pressed:bg-[#ffffff]/16"
++          onPress={() => select(timer.mode)}
+         >
+-          <text class="text-sm text-[#cbd5e1]">Reset</text>
++          <icon name="rotate-ccw" class="size-[18px] text-[#f5f6f8]/70" />
+         </button>
+       </row>
+     </column>
+diff --git a/examples/retro-player-shell/GeistPixel-Square.ttf b/examples/retro-player-shell/GeistPixel-Square.ttf
+deleted file mode 100644
+index caa0a61..0000000
+Binary files a/examples/retro-player-shell/GeistPixel-Square.ttf and /dev/null differ
+diff --git a/examples/retro-player-shell/OFL.txt b/examples/retro-player-shell/OFL.txt
+deleted file mode 100644
+index 04e95fc..0000000
+--- a/examples/retro-player-shell/OFL.txt
++++ /dev/null
+@@ -1,93 +0,0 @@
+-Copyright 2024 The Geist Project Authors (https://github.com/vercel/geist-font)
+-
+-This Font Software is licensed under the SIL Open Font License, Version 1.1.
+-This license is copied below, and is also available with a FAQ at:
+-https://openfontlicense.org
+-
+-
+------------------------------------------------------------
+-SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007
+------------------------------------------------------------
+-
+-PREAMBLE
+-The goals of the Open Font License (OFL) are to stimulate worldwide
+-development of collaborative font projects, to support the font creation
+-efforts of academic and linguistic communities, and to provide a free and
+-open framework in which fonts may be shared and improved in partnership
+-with others.
+-
+-The OFL allows the licensed fonts to be used, studied, modified and
+-redistributed freely as long as they are not sold by themselves. The
+-fonts, including any derivative works, can be bundled, embedded, 
+-redistributed and/or sold with any software provided that any reserved
+-names are not used by derivative works. The fonts and derivatives,
+-however, cannot be released under any other type of license. The
+-requirement for fonts to remain under this license does not apply
+-to any document created using the fonts or their derivatives.
+-
+-DEFINITIONS
+-"Font Software" refers to the set of files released by the Copyright
+-Holder(s) under this license and clearly marked as such. This may
+-include source files, build scripts and documentation.
+-
+-"Reserved Font Name" refers to any names specified as such after the
+-copyright statement(s).
+-
+-"Original Version" refers to the collection of Font Software components as
+-distributed by the Copyright Holder(s).
+-
+-"Modified Version" refers to any derivative made by adding to, deleting,
+-or substituting -- in part or in whole -- any of the components of the
+-Original Version, by changing formats or by porting the Font Software to a
+-new environment.
+-
+-"Author" refers to any designer, engineer, programmer, technical
+-writer or other person who contributed to the Font Software.
+-
+-PERMISSION & CONDITIONS
+-Permission is hereby granted, free of charge, to any person obtaining
+-a copy of the Font Software, to use, study, copy, merge, embed, modify,
+-redistribute, and sell modified and unmodified copies of the Font
+-Software, subject to the following conditions:
+-
+-1) Neither the Font Software nor any of its individual components,
+-in Original or Modified Versions, may be sold by itself.
+-
+-2) Original or Modified Versions of the Font Software may be bundled,
+-redistributed and/or sold with any software, provided that each copy
+-contains the above copyright notice and this license. These can be
+-included either as stand-alone text files, human-readable headers or
+-in the appropriate machine-readable metadata fields within text or
+-binary files as long as those fields can be easily viewed by the user.
+-
+-3) No Modified Version of the Font Software may use the Reserved Font
+-Name(s) unless explicit written permission is granted by the corresponding
+-Copyright Holder. This restriction only applies to the primary font name as
+-presented to the users.
+-
+-4) The name(s) of the Copyright Holder(s) or the Author(s) of the Font
+-Software shall not be used to promote, endorse or advertise any
+-Modified Version, except to acknowledge the contribution(s) of the
+-Copyright Holder(s) and the Author(s) or with their explicit written
+-permission.
+-
+-5) The Font Software, modified or unmodified, in part or in whole,
+-must be distributed entirely under this license, and must not be
+-distributed under any other license. The requirement for fonts to
+-remain under this license does not apply to any document created
+-using the Font Software.
+-
+-TERMINATION
+-This license becomes null and void if any of the above conditions are
+-not met.
+-
+-DISCLAIMER
+-THE FONT SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+-EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF
+-MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT
+-OF COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL THE
+-COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+-INCLUDING ANY GENERAL, SPECIAL, INDIRECT, INCIDENTAL, OR CONSEQUENTIAL
+-DAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+-FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
+-OTHER DEALINGS IN THE FONT SOFTWARE.
+\ No newline at end of file
+diff --git a/examples/retro-player-shell/assets/grille.png b/examples/retro-player-shell/assets/grille.png
+deleted file mode 100644
+index b264f7d..0000000
+Binary files a/examples/retro-player-shell/assets/grille.png and /dev/null differ
+diff --git a/examples/retro-player-shell/assets/night-bloom.jpg b/examples/retro-player-shell/assets/night-bloom.jpg
+deleted file mode 100644
+index 1f9e46f..0000000
+Binary files a/examples/retro-player-shell/assets/night-bloom.jpg and /dev/null differ
+diff --git a/examples/retro-player-shell/widget.tsx b/examples/retro-player-shell/widget.tsx
+deleted file mode 100644
+index 9f19159..0000000
+--- a/examples/retro-player-shell/widget.tsx
++++ /dev/null
+@@ -1,69 +0,0 @@
+-import { widget } from "@weaver/sdk";
+-
+-const noop = () => {};
+-
+-export default widget({
+-  name: "Retro Player Shell",
+-  size: [820, 580],
+-  anchor: { corner: "top-right", offset: [32, 32] },
+-}, () => (
+-  <stack class="size-full pl-[30px] pt-[10px] pr-[30px] pb-[50px]">
+-  <column class="w-[760px] h-[520px] p-5 gap-4 bg-stone-900 rounded-tl-3xl rounded-tr-lg rounded-br-3xl rounded-bl-xl border-2 border-stone-600 shadow-xl">
+-    <row class="justify-between items-center">
+-      <column class="gap-1">
+-        <text class="text-xs tracking-widest text-amber-300 font-[GeistPixel-Square] text-shadow-sm">WEAVER HI-FI SYSTEM</text>
+-        <text class="text-sm text-stone-400 font-mono">MODEL WR-04 / STATIC SIGNAL</text>
+-      </column>
+-      <panel class="p-2 rounded-lg border border-amber-500 bg-black shadow-inner">
+-        <text class="text-sm tabular-nums tracking-wide text-amber-300 font-[GeistPixel-Square] text-shadow">10:24 PM</text>
+-      </panel>
+-    </row>
+-
+-    <stack class="w-full grow overflow-hidden rounded-tl-3xl rounded-tr-md rounded-br-2xl rounded-bl-lg">
+-      <image src="./assets/night-bloom.jpg" fit="cover" class="size-full rounded-tl-3xl rounded-tr-md rounded-br-2xl rounded-bl-lg border-2 border-stone-500 shadow-lg" />
+-      <panel class="size-full bg-black/25" />
+-      <column class="size-full p-5 justify-between">
+-        <row class="justify-between items-start">
+-          <panel class="p-2 rounded-lg bg-black/65 border border-white/20 shadow-inner">
+-            <text class="text-xs tracking-widest text-stone-200 font-[GeistPixel-Square]">NIGHT BLOOM</text>
+-          </panel>
+-          <text class="text-sm tabular-nums text-white font-[GeistPixel-Square] text-shadow-md">03:18 / 05:42</text>
+-        </row>
+-        <column class="gap-2">
+-          <text class="text-3xl tracking-wide text-white font-[GeistPixel-Square] font-bold text-shadow-lg">SECOND NATURE</text>
+-          <text class="text-sm tracking-wider text-amber-200 font-[GeistPixel-Square] text-shadow-md">CHANNEL SURFING / SIDE A</text>
+-          <panel class="w-full h-2 rounded-full bg-black/70 border border-white/20 overflow-hidden">
+-            <panel class="w-1/2 h-full rounded-full bg-amber-400" />
+-          </panel>
+-        </column>
+-      </column>
+-    </stack>
+-
+-    <image src="./assets/grille.png" tile class="w-full h-14 rounded-lg border border-stone-700 opacity-70" />
+-
+-    <row class="gap-3 justify-center items-center">
+-      <button
+-        accessibilityLabel="Previous track"
+-        onPress={noop}
+-        class="size-14 p-3 items-center justify-center rounded-xl border-2 border-stone-600 bg-stone-800 text-stone-200 shadow-inner hover:bg-stone-700 hover:border-amber-500 pressed:bg-black pressed:text-amber-300 pressed:border-amber-200 pressed:opacity-70"
+-      >
+-        <icon name="skip-back" class="size-full" />
+-      </button>
+-      <button
+-        accessibilityLabel="Play"
+-        onPress={noop}
+-        class="size-16 p-4 items-center justify-center rounded-full border-2 border-amber-500 bg-amber-400 text-stone-950 shadow-inner hover:bg-amber-300 hover:border-amber-200 pressed:bg-amber-700 pressed:text-white pressed:border-white pressed:opacity-70"
+-      >
+-        <icon name="play" class="size-full" />
+-      </button>
+-      <button
+-        accessibilityLabel="Next track"
+-        onPress={noop}
+-        class="size-14 p-3 items-center justify-center rounded-xl border-2 border-stone-600 bg-stone-800 text-stone-200 shadow-inner hover:bg-stone-700 hover:border-amber-500 pressed:bg-black pressed:text-amber-300 pressed:border-amber-200 pressed:opacity-70"
+-      >
+-        <icon name="skip-forward" class="size-full" />
+-      </button>
+-    </row>
+-  </column>
+-  </stack>
+-));
+diff --git a/examples/styling-fonts/GeistPixel-Square.ttf b/examples/styling-fonts/GeistPixel-Square.ttf
+deleted file mode 100644
+index caa0a61..0000000
+Binary files a/examples/styling-fonts/GeistPixel-Square.ttf and /dev/null differ
+diff --git a/examples/styling-fonts/OFL.txt b/examples/styling-fonts/OFL.txt
+deleted file mode 100644
+index 04e95fc..0000000
+--- a/examples/styling-fonts/OFL.txt
++++ /dev/null
+@@ -1,93 +0,0 @@
+-Copyright 2024 The Geist Project Authors (https://github.com/vercel/geist-font)
+-
+-This Font Software is licensed under the SIL Open Font License, Version 1.1.
+-This license is copied below, and is also available with a FAQ at:
+-https://openfontlicense.org
+-
+-
+------------------------------------------------------------
+-SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007
+------------------------------------------------------------
+-
+-PREAMBLE
+-The goals of the Open Font License (OFL) are to stimulate worldwide
+-development of collaborative font projects, to support the font creation
+-efforts of academic and linguistic communities, and to provide a free and
+-open framework in which fonts may be shared and improved in partnership
+-with others.
+-
+-The OFL allows the licensed fonts to be used, studied, modified and
+-redistributed freely as long as they are not sold by themselves. The
+-fonts, including any derivative works, can be bundled, embedded, 
+-redistributed and/or sold with any software provided that any reserved
+-names are not used by derivative works. The fonts and derivatives,
+-however, cannot be released under any other type of license. The
+-requirement for fonts to remain under this license does not apply
+-to any document created using the fonts or their derivatives.
+-
+-DEFINITIONS
+-"Font Software" refers to the set of files released by the Copyright
+-Holder(s) under this license and clearly marked as such. This may
+-include source files, build scripts and documentation.
+-
+-"Reserved Font Name" refers to any names specified as such after the
+-copyright statement(s).
+-
+-"Original Version" refers to the collection of Font Software components as
+-distributed by the Copyright Holder(s).
+-
+-"Modified Version" refers to any derivative made by adding to, deleting,
+-or substituting -- in part or in whole -- any of the components of the
+-Original Version, by changing formats or by porting the Font Software to a
+-new environment.
+-
+-"Author" refers to any designer, engineer, programmer, technical
+-writer or other person who contributed to the Font Software.
+-
+-PERMISSION & CONDITIONS
+-Permission is hereby granted, free of charge, to any person obtaining
+-a copy of the Font Software, to use, study, copy, merge, embed, modify,
+-redistribute, and sell modified and unmodified copies of the Font
+-Software, subject to the following conditions:
+-
+-1) Neither the Font Software nor any of its individual components,
+-in Original or Modified Versions, may be sold by itself.
+-
+-2) Original or Modified Versions of the Font Software may be bundled,
+-redistributed and/or sold with any software, provided that each copy
+-contains the above copyright notice and this license. These can be
+-included either as stand-alone text files, human-readable headers or
+-in the appropriate machine-readable metadata fields within text or
+-binary files as long as those fields can be easily viewed by the user.
+-
+-3) No Modified Version of the Font Software may use the Reserved Font
+-Name(s) unless explicit written permission is granted by the corresponding
+-Copyright Holder. This restriction only applies to the primary font name as
+-presented to the users.
+-
+-4) The name(s) of the Copyright Holder(s) or the Author(s) of the Font
+-Software shall not be used to promote, endorse or advertise any
+-Modified Version, except to acknowledge the contribution(s) of the
+-Copyright Holder(s) and the Author(s) or with their explicit written
+-permission.
+-
+-5) The Font Software, modified or unmodified, in part or in whole,
+-must be distributed entirely under this license, and must not be
+-distributed under any other license. The requirement for fonts to
+-remain under this license does not apply to any document created
+-using the Font Software.
+-
+-TERMINATION
+-This license becomes null and void if any of the above conditions are
+-not met.
+-
+-DISCLAIMER
+-THE FONT SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+-EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF
+-MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT
+-OF COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL THE
+-COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+-INCLUDING ANY GENERAL, SPECIAL, INDIRECT, INCIDENTAL, OR CONSEQUENTIAL
+-DAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+-FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
+-OTHER DEALINGS IN THE FONT SOFTWARE.
+\ No newline at end of file
+diff --git a/examples/styling-fonts/tsconfig.json b/examples/styling-fonts/tsconfig.json
+deleted file mode 100644
+index 4248ebc..0000000
+--- a/examples/styling-fonts/tsconfig.json
++++ /dev/null
+@@ -1,19 +0,0 @@
+-{
+-  "compilerOptions": {
+-    "target": "ES2020",
+-    "module": "ESNext",
+-    "moduleResolution": "Bundler",
+-    "strict": true,
+-    "noEmit": true,
+-    "skipLibCheck": true,
+-    "jsx": "react-jsx",
+-    "jsxImportSource": "@weaver/sdk",
+-    "types": [],
+-    "baseUrl": ".",
+-    "paths": {
+-      "@weaver/sdk": ["../../sdk/index.d.ts"],
+-      "@weaver/sdk/jsx-runtime": ["../../sdk/jsx-runtime.d.ts"]
+-    }
+-  },
+-  "include": ["widget.tsx"]
+-}
+diff --git a/examples/styling-fonts/widget.tsx b/examples/styling-fonts/widget.tsx
+deleted file mode 100644
+index 2758b29..0000000
+--- a/examples/styling-fonts/widget.tsx
++++ /dev/null
+@@ -1,17 +0,0 @@
+-import { widget } from "@weaver/sdk";
+-
+-export default widget({
+-  name: "Styling Fonts",
+-  size: [420, 250],
+-  anchor: { corner: "top-right", offset: [24, 24] },
+-}, () => (
+-  <stack class="size-full pl-[30px] pt-[10px] pr-[30px] pb-[50px]">
+-  <column class="w-[360px] h-[190px] p-5 gap-3 bg-zinc-950 rounded-2xl shadow-xl">
+-    <text class="text-2xl text-emerald-300 font-[GeistPixel-Square] tracking-wide text-shadow-sm">BUNDLED PIXEL FACE</text>
+-    <text class="text-sm text-slate-200 font-sans">Built-in sans · weight ladder</text>
+-    <text class="text-sm text-amber-300 font-mono tabular-nums">Built-in mono 02:47:19</text>
+-    <panel class="w-full h-[1px] bg-slate-700" />
+-    <text class="text-[13px] text-slate-300 font-[GeistPixel-Square] font-bold leading-relaxed">A single custom face keeps its own outlines for every requested weight; add weight-suffixed files to select real variants.</text>
+-  </column>
+-  </stack>
+-));
+diff --git a/examples/styling-icons/widget.tsx b/examples/styling-icons/widget.tsx
+deleted file mode 100644
+index 85f14ba..0000000
+--- a/examples/styling-icons/widget.tsx
++++ /dev/null
+@@ -1,44 +0,0 @@
+-import { widget } from "@weaver/sdk";
+-
+-export default widget({
+-  name: "Styling Icons",
+-  size: [500, 350],
+-  anchor: { corner: "top-right", offset: [24, 24] },
+-}, () => (
+-  <stack class="size-full pl-[30px] pt-[10px] pr-[30px] pb-[50px]">
+-  <column class="w-[440px] h-[290px] p-5 gap-4 rounded-2xl bg-slate-950 border border-slate-700 shadow-xl">
+-    <row class="items-center gap-3">
+-      <icon name="audio-waveform" class="w-10 h-10 text-fuchsia-400" />
+-      <column>
+-        <text class="text-xl font-semibold text-white">Bundle-time vector icons</text>
+-        <text class="text-sm text-slate-400">Full Lucide catalog · tree-shaken M/L/C/Z paths</text>
+-      </column>
+-    </row>
+-    <row class="items-center justify-between p-4 rounded-xl bg-slate-800 border border-slate-700 shadow-sm">
+-      <icon name="radio-tower" class="w-4 h-4 text-cyan-300" />
+-      <icon name="badge-question-mark" class="w-6 h-6 text-emerald-300" />
+-      <icon name="disc-3" class="w-8 h-8 text-amber-300" />
+-      <icon name="wand-sparkles" class="w-10 h-10 text-violet-300" />
+-      <icon name="badge-check" class="w-8 h-8 text-rose-300" />
+-    </row>
+-    <row class="items-center justify-between p-4 rounded-xl bg-slate-900">
+-      <column class="items-center gap-2">
+-        <icon name="skip-back" class="w-6 h-6 text-cyan-400" />
+-        <text class="text-xs text-slate-400">named</text>
+-      </column>
+-      <column class="items-center gap-2">
+-        <icon d="M 7 7 L 9.333 7 L 9.333 21 L 7 21 Z M 11.083 14 L 21 21 L 21 7 Z" class="w-8 h-8 text-emerald-400" />
+-        <text class="text-xs text-slate-400">custom fill</text>
+-      </column>
+-      <column class="items-center gap-2">
+-        <icon d="m 4 12 h 16 m -8 -8 v 16" stroke={2} class="w-10 h-10 text-amber-400" />
+-        <text class="text-xs text-slate-400">custom stroke</text>
+-      </column>
+-      <column class="items-center gap-2">
+-        <icon name="volume-2" class="w-6 h-6 text-slate-200" />
+-        <text class="text-xs text-slate-400">currentColor</text>
+-      </column>
+-    </row>
+-  </column>
+-  </stack>
+-));
+diff --git a/examples/styling-interaction/tsconfig.json b/examples/styling-interaction/tsconfig.json
+deleted file mode 100644
+index fb8488e..0000000
+--- a/examples/styling-interaction/tsconfig.json
++++ /dev/null
+@@ -1,17 +0,0 @@
+-{
+-  "compilerOptions": {
+-    "target": "ES2020",
+-    "module": "ESNext",
+-    "moduleResolution": "Bundler",
+-    "strict": true,
+-    "noEmit": true,
+-    "jsx": "react-jsx",
+-    "jsxImportSource": "@weaver/sdk",
+-    "baseUrl": ".",
+-    "paths": {
+-      "@weaver/sdk": ["../../sdk/index.d.ts"],
+-      "@weaver/sdk/jsx-runtime": ["../../sdk/jsx-runtime.d.ts"]
+-    }
+-  },
+-  "include": ["widget.tsx"]
+-}
+diff --git a/examples/styling-shadows/widget.tsx b/examples/styling-shadows/widget.tsx
+deleted file mode 100644
+index b275803..0000000
+--- a/examples/styling-shadows/widget.tsx
++++ /dev/null
+@@ -1,19 +0,0 @@
+-import { widget } from "@weaver/sdk";
+-
+-export default widget({
+-  name: "Styling Shadows",
+-  size: [380, 250],
+-  anchor: { corner: "top-right", offset: [24, 24] },
+-}, () => (
+-  <stack class="size-full pl-[30px] pt-[10px] pr-[30px] pb-[50px]">
+-  <column class="w-[320px] h-[190px] p-5 gap-4 bg-zinc-900 rounded-2xl shadow-xl shadow-black/70">
+-    <text class="text-xl font-semibold text-white text-shadow-lg">Shadow breadth</text>
+-    <row class="w-full grow gap-4 items-center justify-around">
+-      <panel class="size-[72px] bg-sky-500 rounded-xl shadow-lg shadow-sky-950/70" />
+-      <panel class="size-[72px] bg-violet-500 rounded-xl shadow-inner shadow-violet-950/80" />
+-      <panel class="size-[72px] bg-amber-400 rounded-full shadow-[4px_6px_10px_-2px_#00000080]" />
+-    </row>
+-    <text class="w-full text-center text-sm text-slate-200 text-shadow-sm">outset · inset · arbitrary</text>
+-  </column>
+-  </stack>
+-));
+diff --git a/examples/styling-spacing/tsconfig.json b/examples/styling-spacing/tsconfig.json
+deleted file mode 100644
+index 4248ebc..0000000
+--- a/examples/styling-spacing/tsconfig.json
++++ /dev/null
+@@ -1,19 +0,0 @@
+-{
+-  "compilerOptions": {
+-    "target": "ES2020",
+-    "module": "ESNext",
+-    "moduleResolution": "Bundler",
+-    "strict": true,
+-    "noEmit": true,
+-    "skipLibCheck": true,
+-    "jsx": "react-jsx",
+-    "jsxImportSource": "@weaver/sdk",
+-    "types": [],
+-    "baseUrl": ".",
+-    "paths": {
+-      "@weaver/sdk": ["../../sdk/index.d.ts"],
+-      "@weaver/sdk/jsx-runtime": ["../../sdk/jsx-runtime.d.ts"]
+-    }
+-  },
+-  "include": ["widget.tsx"]
+-}
+diff --git a/examples/styling-spacing/widget.tsx b/examples/styling-spacing/widget.tsx
+deleted file mode 100644
+index 145cc9b..0000000
+--- a/examples/styling-spacing/widget.tsx
++++ /dev/null
+@@ -1,23 +0,0 @@
+-import { widget } from "@weaver/sdk";
+-
+-export default widget({
+-  name: "Styling Spacing",
+-  size: [320, 200],
+-  anchor: { corner: "top-right", offset: [24, 24] },
+-}, () => (
+-  <column class="w-[320px] h-[200px] px-5 pt-4 pb-6 gap-2 bg-zinc-900 rounded-t-[36px] rounded-b-[8px] border-2 border-slate-600">
+-    <text class="text-lg text-slate-50 font-semibold">Styling breadth</text>
+-    <row class="w-full min-h-[48px] max-h-[64px] gap-2">
+-      <panel class="w-1/2 h-full mr-1 bg-blue-600 rounded-tl-2xl rounded-br-2xl border border-blue-300/70" />
+-      <panel class="w-1/2 h-full -ml-1 bg-violet-600 rounded-tr-2xl rounded-bl-2xl border-[3px] border-violet-300" />
+-    </row>
+-    <row class="w-full grow items-center justify-around flex-wrap gap-3">
+-      <panel class="h-[48px] aspect-square shrink-0 self-end bg-[#f59e0b] rounded-full" />
+-      <column class="grow-2 shrink min-w-[80px] max-w-[180px] self-center py-1">
+-        <text class="text-sm text-white">Directional padding</text>
+-        <text class="w-full text-[13px] leading-tight tracking-wide text-center text-slate-300 tabular-nums line-clamp-2">02:47 · Fractions, bounds, aspect ratio, and clamped text</text>
+-      </column>
+-      <panel class="size-[24px] self-start bg-[#10b981] rounded-full" />
+-    </row>
+-  </column>
+-));
+diff --git a/examples/styling-stack/tsconfig.json b/examples/styling-stack/tsconfig.json
+deleted file mode 100644
+index fb8488e..0000000
+--- a/examples/styling-stack/tsconfig.json
++++ /dev/null
+@@ -1,17 +0,0 @@
+-{
+-  "compilerOptions": {
+-    "target": "ES2020",
+-    "module": "ESNext",
+-    "moduleResolution": "Bundler",
+-    "strict": true,
+-    "noEmit": true,
+-    "jsx": "react-jsx",
+-    "jsxImportSource": "@weaver/sdk",
+-    "baseUrl": ".",
+-    "paths": {
+-      "@weaver/sdk": ["../../sdk/index.d.ts"],
+-      "@weaver/sdk/jsx-runtime": ["../../sdk/jsx-runtime.d.ts"]
+-    }
+-  },
+-  "include": ["widget.tsx"]
+-}
+diff --git a/examples/styling-stack/widget.tsx b/examples/styling-stack/widget.tsx
+deleted file mode 100644
+index 8b17b03..0000000
+--- a/examples/styling-stack/widget.tsx
++++ /dev/null
+@@ -1,24 +0,0 @@
+-import { widget } from "@weaver/sdk";
+-
+-export default widget({
+-  name: "Styling Stack",
+-  size: [420, 280],
+-  anchor: { corner: "top-right", offset: [24, 24] },
+-}, () => (
+-  <stack class="size-full pl-[30px] pt-[10px] pr-[30px] pb-[50px]">
+-  <column class="w-[360px] h-[220px] p-5 gap-3 bg-slate-950 rounded-2xl border border-slate-700 shadow-xl">
+-    <text class="text-xl font-semibold text-white">Overlay stack</text>
+-    <stack class="w-full grow overflow-hidden rounded-tl-3xl rounded-tr-lg rounded-br-2xl rounded-bl-md">
+-      <panel class="size-full bg-indigo-700 border border-indigo-400" />
+-      <panel class="w-[112px] h-full bg-fuchsia-500/70 self-end" />
+-      <column class="size-full p-4 justify-between">
+-        <text class="text-sm font-semibold text-white text-shadow-md">Children paint in order</text>
+-        <row class="w-full justify-between items-end">
+-          <text class="text-xs text-indigo-100">rounded clip</text>
+-          <icon name="layers" class="text-2xl text-white" />
+-        </row>
+-      </column>
+-    </stack>
+-  </column>
+-  </stack>
+-));
+diff --git a/examples/styling-text/tsconfig.json b/examples/styling-text/tsconfig.json
+deleted file mode 100644
+index 4248ebc..0000000
+--- a/examples/styling-text/tsconfig.json
++++ /dev/null
+@@ -1,19 +0,0 @@
+-{
+-  "compilerOptions": {
+-    "target": "ES2020",
+-    "module": "ESNext",
+-    "moduleResolution": "Bundler",
+-    "strict": true,
+-    "noEmit": true,
+-    "skipLibCheck": true,
+-    "jsx": "react-jsx",
+-    "jsxImportSource": "@weaver/sdk",
+-    "types": [],
+-    "baseUrl": ".",
+-    "paths": {
+-      "@weaver/sdk": ["../../sdk/index.d.ts"],
+-      "@weaver/sdk/jsx-runtime": ["../../sdk/jsx-runtime.d.ts"]
+-    }
+-  },
+-  "include": ["widget.tsx"]
+-}
+diff --git a/examples/system/widget.tsx b/examples/system/widget.tsx
+index 34f80c6..25932fe 100644
+--- a/examples/system/widget.tsx
++++ b/examples/system/widget.tsx
+@@ -1,27 +1,102 @@
+-import { useProvider, widget } from "@weaver/sdk";
++import { useEffect, useProvider, widget, type CanvasCtx, type CpuData } from "@weaver/sdk";
++
++// CPU and memory from the host at 1 Hz. The text nodes update in the retained
++// tree; the three canvases redraw once per provider frame (no `fps`, so no
++// frame clock of their own).
++
++const historyLength = 60;
++const history: number[] = [];
++
++const accent = "#2dd4bf";
++const accentSoft = "#2dd4bf33";
++const track = "#ffffff14";
++
++function gigabytes(mb: number): string {
++  return (mb / 1024).toFixed(1);
++}
++
++function drawHistory(ctx: CanvasCtx): void {
++  ctx.clear();
++  const step = ctx.width / (historyLength - 1);
++  const floor = ctx.height - 1;
++  const points: number[] = [];
++  const offset = historyLength - history.length;
++  for (let index = 0; index < history.length; index += 1) {
++    const x = (offset + index) * step;
++    const y = floor - (history[index] / 100) * (ctx.height - 4);
++    // Area under the line: one thin column per sample.
++    ctx.fillRect(x, y, Math.max(1, step), floor - y, accentSoft);
++    points.push(x, y);
++  }
++  ctx.line(0, floor, ctx.width, floor, 1, track);
++  if (points.length >= 4) ctx.polyline(points, 1.5, accent);
++}
++
++function drawCores(ctx: CanvasCtx, cpu: CpuData): void {
++  ctx.clear();
++  const count = Math.max(1, cpu.perCore.length);
++  const gap = 3;
++  const width = (ctx.width - gap * (count - 1)) / count;
++  for (let index = 0; index < count; index += 1) {
++    const x = index * (width + gap);
++    const load = Math.max(0, Math.min(1, (cpu.perCore[index] ?? 0) / 100));
++    ctx.fillRoundRect(x, 0, width, ctx.height, 2, track);
++    const height = Math.max(2, load * ctx.height);
++    ctx.fillRoundRect(x, ctx.height - height, width, height, 2, load > 0.85 ? "#fb7185" : accent);
++  }
++}
++
++function drawMemory(ctx: CanvasCtx, percent: number): void {
++  ctx.clear();
++  ctx.fillRoundRect(0, 0, ctx.width, ctx.height, ctx.height / 2, track);
++  const width = Math.max(ctx.height, (Math.max(0, Math.min(100, percent)) / 100) * ctx.width);
++  ctx.fillRoundRect(0, 0, width, ctx.height, ctx.height / 2, "#f5f6f8");
++}
+ 
+ export default widget({
+   name: "System Monitor",
+-  size: [300, 150],
++  size: [340, 196],
+   anchor: { corner: "top-left", offset: [24, 24] },
+   subscribe: ["cpu", "memory"],
+ }, () => {
+   const cpu = useProvider("cpu");
+   const memory = useProvider("memory");
++  useEffect(() => {
++    history.push(cpu.percent);
++    if (history.length > historyLength) history.shift();
++  }, [cpu]);
++
+   return (
+-    <column class="w-[300px] h-[150px] p-4 gap-3 bg-[#10131b]/92 rounded-2xl">
+-      <text class="text-xs text-[#60a5fa] font-semibold">SYSTEM</text>
+-      <row class="w-[268px] justify-between items-end">
+-        <column class="gap-1">
+-          <text class="text-xs text-[#94a3b8]">CPU</text>
+-          <text class="text-3xl text-[#f8fafc] font-light">{cpu.percent.toFixed(1)}%</text>
+-        </column>
+-        <column class="gap-1 items-end">
+-          <text class="text-xs text-[#94a3b8]">MEMORY</text>
+-          <text class="text-xl text-[#f8fafc] font-light">{memory.usedMb} MB</text>
+-          <text class="text-xs text-[#94a3b8]">of {memory.totalMb} MB · {memory.percent.toFixed(1)}%</text>
++    <column
++      class="size-full px-[22px] py-[18px] gap-[14px] border border-[#ffffff]/10 rounded-[28px]"
++      background={[
++        { type: "linear", stops: [{ offset: 0, color: "#0b0d12e6" }, { offset: 1, color: "#0b0d12e6" }] },
++        { type: "linear", start: [0, 0], end: [0, 1], stops: [{ offset: 0, color: "#ffffff12" }, { offset: 0.6, color: "#ffffff00" }] },
++      ]}
++    >
++      <row class="w-full items-end justify-between">
++        <column class="gap-[2px]">
++          <text class="text-[11px] tracking-[2px] text-[#f5f6f8]/45">CPU</text>
++          <row class="items-baseline gap-[3px]">
++            <text class="text-[40px] leading-none font-light tabular-nums text-[#f5f6f8]">{cpu.percent.toFixed(0)}</text>
++            <text class="text-[16px] leading-none text-[#f5f6f8]/45">%</text>
++          </row>
+         </column>
++        <canvas class="w-[176px] h-[48px]" onFrame={drawHistory} />
+       </row>
++
++      <canvas class="w-[296px] h-[22px]" onFrame={(ctx) => drawCores(ctx, cpu)} />
++
++      <column class="w-full gap-[8px]">
++        <row class="w-full items-baseline justify-between">
++          <text class="text-[11px] tracking-[2px] text-[#f5f6f8]/45">MEMORY</text>
++          <row class="items-baseline gap-[4px]">
++            <text class="text-[13px] tabular-nums text-[#f5f6f8]">{gigabytes(memory.usedMb)}</text>
++            <text class="text-[11px] tabular-nums text-[#f5f6f8]/45">/ {gigabytes(memory.totalMb)} GB</text>
++          </row>
++        </row>
++        <canvas class="w-[296px] h-[6px]" onFrame={(ctx) => drawMemory(ctx, memory.percent)} />
++      </column>
+     </column>
+   );
+ });
+diff --git a/scripts/verify-dpi.ps1 b/scripts/verify-dpi.ps1
+index 05745ef..9645c96 100644
+--- a/scripts/verify-dpi.ps1
++++ b/scripts/verify-dpi.ps1
+@@ -131,7 +131,7 @@ $RepoRoot = [IO.Path]::GetFullPath($RepoRoot)
+ $OutputDirectory = [IO.Path]::GetFullPath($OutputDirectory)
+ [IO.Directory]::CreateDirectory($OutputDirectory) | Out-Null
+ $cli = Join-Path $RepoRoot "cli\dist\index.js"
+-$fixture = Join-Path $RepoRoot "examples\dpi-diagnostic"
++$fixture = Join-Path $RepoRoot "test\fixtures\dpi-diagnostic"
+ $results = [ordered]@{
+     startedUtc = [DateTime]::UtcNow.ToString("o")
+     repoRoot = $RepoRoot
+diff --git a/scripts/verify-gradient-gpu.ps1 b/scripts/verify-gradient-gpu.ps1
+index 3038ae8..c3be1f2 100644
+--- a/scripts/verify-gradient-gpu.ps1
++++ b/scripts/verify-gradient-gpu.ps1
+@@ -51,7 +51,7 @@ $OutputDirectory = [IO.Path]::GetFullPath($OutputDirectory)
+ [IO.Directory]::CreateDirectory($OutputDirectory) | Out-Null
+ $NativeRoot = Join-Path $RepoRoot "runtime\native-sdk"
+ $Cli = Join-Path $RepoRoot "cli\dist\index.js"
+-$Example = Join-Path $RepoRoot "examples\gradient-stack"
++$Example = Join-Path $RepoRoot "test\fixtures\gradient-stack"
+ $CaptureHelper = Join-Path $RepoRoot "renderer\zig-out\bin\weaver-window-capture.exe"
+ $StateRoot = Join-Path $OutputDirectory "state"
+ $ResultPath = Join-Path $OutputDirectory "results.json"
+diff --git a/sdk/CONTRACT.md b/sdk/CONTRACT.md
+index aaf8c6e..2d81a34 100644
+--- a/sdk/CONTRACT.md
++++ b/sdk/CONTRACT.md
+@@ -304,7 +304,7 @@ actionable — the primary reader is an agent in a fix-it loop.
+ 
+ ## The conjure skill
+ 
+-`skills/conjure-widget/SKILL.md` in this repo: teaches an agent to go from a
++`.agents/skills/conjure-widget/SKILL.md` in this repo: teaches an agent to go from a
+ user's description to `weaver init` → edit widget.tsx → `weaver check` →
+ `weaver dev`, including this contract inline or by reference, the class table,
+ and the M1 boundaries (no providers beyond time, no input elements yet).
+diff --git a/test/capture-smoke.mjs b/test/capture-smoke.mjs
+index b350e75..66b72cb 100644
+--- a/test/capture-smoke.mjs
++++ b/test/capture-smoke.mjs
+@@ -12,17 +12,17 @@ const fixedClock = "2026-08-24T17:30:00.000Z";
+ 
+ try {
+   const clock = capture("clock", "examples/clock");
+-  assert.deepEqual([clock.output.widthPx, clock.output.heightPx], [240, 110]);
++  assert.deepEqual([clock.output.widthPx, clock.output.heightPx], [320, 132]);
+ 
+   const resizedClock = capture("clock-resized", "examples/clock", [
+     "--action-file", join(root, "test", "capture", "resize.actions"),
+   ]);
+   assert.deepEqual([resizedClock.output.widthPx, resizedClock.output.heightPx], [962, 719]);
+ 
+-  const text = capture("styling-text", "examples/styling-text");
++  const text = capture("styling-text", "test/fixtures/styling-text");
+   assert.ok(text.renderer.pixelsDifferentFromClear > 0);
+ 
+-  const images = capture("styling-images", "examples/styling-images");
++  const images = capture("styling-images", "test/fixtures/styling-images");
+   assert.equal(images.renderer.images, 3);
+   assert.equal(images.pending.images, 0);
+ 
+@@ -34,16 +34,16 @@ try {
+   assert.match(snapshotText(pomodoroAfter), /role=button name="Pause"/);
+   assert.match(snapshotText(pomodoroAfter), /role=text name="24:59"/);
+ 
+-  const interactionBefore = capture("interaction-before", "examples/styling-interaction");
+-  const interactionAfter = capture("interaction-after", "examples/styling-interaction", [
++  const interactionBefore = capture("interaction-before", "test/fixtures/styling-interaction");
++  const interactionAfter = capture("interaction-after", "test/fixtures/styling-interaction", [
+     "--action-file", join(root, "test", "capture", "styling-interaction.actions"),
+   ]);
+   assert.notEqual(imageHash(interactionBefore), imageHash(interactionAfter));
+   assert.match(snapshotText(interactionAfter), /role=slider .* value=0\.9/);
+   assert.match(snapshotText(interactionAfter), /role=text name="90%"/);
+ 
+-  const tideglassBefore = capture("tideglass-before", "examples/tideglass");
+-  const tideglassAfter = capture("tideglass-after", "examples/tideglass", [
++  const tideglassBefore = capture("tideglass-before", "test/fixtures/tideglass");
++  const tideglassAfter = capture("tideglass-after", "test/fixtures/tideglass", [
+     "--action-file", join(root, "test", "capture", "tideglass.actions"),
+   ]);
+   assert.notEqual(imageHash(tideglassBefore), imageHash(tideglassAfter));
+@@ -52,6 +52,24 @@ try {
+   assert.deepEqual(tideglassAfter.interactions.actions, ["click", "click"]);
+   assert.equal(tideglassAfter.pending.timers, 0);
+ 
++  const system = capture("system", "examples/system", [
++    "--provider-fixture", join(root, "test", "capture", "system.provider.json"),
++  ]);
++  assert.match(snapshotText(system), /role=text name="MEMORY"/);
++  assert.match(snapshotText(system), /role=text name="9\.6"/);
++
++  const nowPlaying = capture("now-playing", "examples/now-playing", [
++    "--provider-fixture", join(root, "test", "capture", "noro.provider.json"),
++  ]);
++  assert.match(snapshotText(nowPlaying), /role=button name="Pause"/);
++  assert.match(snapshotText(nowPlaying), /role=button name="Seek"/);
++  assert.match(snapshotText(nowPlaying), /name="0:42 \/ 3:00"/);
++
++  // The forecast fetch is real network and may or may not land inside the
++  // capture window, so only the static frame is asserted.
++  const weather = capture("weather", "examples/weather");
++  assert.match(snapshotText(weather), /role=text name="San Francisco"/);
++
+   const noro = capture("noro", "examples/noro-shell", [
+     "--provider-fixture", join(root, "test", "capture", "noro.provider.json"),
+   ]);
+@@ -158,6 +176,9 @@ try {
+   ]);
+   assert.equal(ambiguous.error?.name, "CaptureTargetAmbiguous");
+   assert.deepEqual(ambiguous.error?.candidates?.map(({ role, name }) => ({ role, name })), [
++    { role: "button", name: "Focus" },
++    { role: "button", name: "Short break" },
++    { role: "button", name: "Long break" },
+     { role: "button", name: "Start" },
+     { role: "button", name: "Reset" },
+   ]);
+diff --git a/examples/m4b-parity/tsconfig.json b/test/fixtures/dpi-diagnostic/tsconfig.json
+similarity index 73%
+rename from examples/m4b-parity/tsconfig.json
+rename to test/fixtures/dpi-diagnostic/tsconfig.json
+index daa9010..47cf729 100644
+--- a/examples/m4b-parity/tsconfig.json
++++ b/test/fixtures/dpi-diagnostic/tsconfig.json
+@@ -1,5 +1,5 @@
+ {
+-  "extends": "../../sdk/tsconfig.json",
++  "extends": "../../../sdk/tsconfig.json",
+   "compilerOptions": {
+     "jsx": "react-jsx",
+     "jsxImportSource": "@weaver/sdk"
+diff --git a/examples/dpi-diagnostic/widget.tsx b/test/fixtures/dpi-diagnostic/widget.tsx
+similarity index 100%
+rename from examples/dpi-diagnostic/widget.tsx
+rename to test/fixtures/dpi-diagnostic/widget.tsx
+diff --git a/examples/retro-player-shell/tsconfig.json b/test/fixtures/gradient-stack/tsconfig.json
+similarity index 70%
+rename from examples/retro-player-shell/tsconfig.json
+rename to test/fixtures/gradient-stack/tsconfig.json
+index fb8488e..3baf8db 100644
+--- a/examples/retro-player-shell/tsconfig.json
++++ b/test/fixtures/gradient-stack/tsconfig.json
+@@ -9,8 +9,8 @@
+     "jsxImportSource": "@weaver/sdk",
+     "baseUrl": ".",
+     "paths": {
+-      "@weaver/sdk": ["../../sdk/index.d.ts"],
+-      "@weaver/sdk/jsx-runtime": ["../../sdk/jsx-runtime.d.ts"]
++      "@weaver/sdk": ["../../../sdk/index.d.ts"],
++      "@weaver/sdk/jsx-runtime": ["../../../sdk/jsx-runtime.d.ts"]
+     }
+   },
+   "include": ["widget.tsx"]
+diff --git a/examples/gradient-stack/widget.tsx b/test/fixtures/gradient-stack/widget.tsx
+similarity index 100%
+rename from examples/gradient-stack/widget.tsx
+rename to test/fixtures/gradient-stack/widget.tsx
+diff --git a/examples/dpi-diagnostic/tsconfig.json b/test/fixtures/m4b-parity/tsconfig.json
+similarity index 73%
+rename from examples/dpi-diagnostic/tsconfig.json
+rename to test/fixtures/m4b-parity/tsconfig.json
+index daa9010..47cf729 100644
+--- a/examples/dpi-diagnostic/tsconfig.json
++++ b/test/fixtures/m4b-parity/tsconfig.json
+@@ -1,5 +1,5 @@
+ {
+-  "extends": "../../sdk/tsconfig.json",
++  "extends": "../../../sdk/tsconfig.json",
+   "compilerOptions": {
+     "jsx": "react-jsx",
+     "jsxImportSource": "@weaver/sdk"
+diff --git a/examples/m4b-parity/widget.tsx b/test/fixtures/m4b-parity/widget.tsx
+similarity index 100%
+rename from examples/m4b-parity/widget.tsx
+rename to test/fixtures/m4b-parity/widget.tsx
+diff --git a/examples/m4b-synthetic/tsconfig.json b/test/fixtures/m4b-synthetic/tsconfig.json
+similarity index 100%
+rename from examples/m4b-synthetic/tsconfig.json
+rename to test/fixtures/m4b-synthetic/tsconfig.json
+diff --git a/examples/m4b-synthetic/widget.tsx b/test/fixtures/m4b-synthetic/widget.tsx
+similarity index 100%
+rename from examples/m4b-synthetic/widget.tsx
+rename to test/fixtures/m4b-synthetic/widget.tsx
+diff --git a/examples/styling-images/assets/weaver.png b/test/fixtures/styling-images/assets/weaver.png
+similarity index 100%
+rename from examples/styling-images/assets/weaver.png
+rename to test/fixtures/styling-images/assets/weaver.png
+diff --git a/examples/styling-icons/tsconfig.json b/test/fixtures/styling-images/tsconfig.json
+similarity index 70%
+rename from examples/styling-icons/tsconfig.json
+rename to test/fixtures/styling-images/tsconfig.json
+index fb8488e..3baf8db 100644
+--- a/examples/styling-icons/tsconfig.json
++++ b/test/fixtures/styling-images/tsconfig.json
+@@ -9,8 +9,8 @@
+     "jsxImportSource": "@weaver/sdk",
+     "baseUrl": ".",
+     "paths": {
+-      "@weaver/sdk": ["../../sdk/index.d.ts"],
+-      "@weaver/sdk/jsx-runtime": ["../../sdk/jsx-runtime.d.ts"]
++      "@weaver/sdk": ["../../../sdk/index.d.ts"],
++      "@weaver/sdk/jsx-runtime": ["../../../sdk/jsx-runtime.d.ts"]
+     }
+   },
+   "include": ["widget.tsx"]
+diff --git a/examples/styling-images/widget.tsx b/test/fixtures/styling-images/widget.tsx
+similarity index 100%
+rename from examples/styling-images/widget.tsx
+rename to test/fixtures/styling-images/widget.tsx
+diff --git a/examples/styling-images/tsconfig.json b/test/fixtures/styling-interaction/tsconfig.json
+similarity index 70%
+rename from examples/styling-images/tsconfig.json
+rename to test/fixtures/styling-interaction/tsconfig.json
+index fb8488e..3baf8db 100644
+--- a/examples/styling-images/tsconfig.json
++++ b/test/fixtures/styling-interaction/tsconfig.json
+@@ -9,8 +9,8 @@
+     "jsxImportSource": "@weaver/sdk",
+     "baseUrl": ".",
+     "paths": {
+-      "@weaver/sdk": ["../../sdk/index.d.ts"],
+-      "@weaver/sdk/jsx-runtime": ["../../sdk/jsx-runtime.d.ts"]
++      "@weaver/sdk": ["../../../sdk/index.d.ts"],
++      "@weaver/sdk/jsx-runtime": ["../../../sdk/jsx-runtime.d.ts"]
+     }
+   },
+   "include": ["widget.tsx"]
+diff --git a/examples/styling-interaction/widget.tsx b/test/fixtures/styling-interaction/widget.tsx
+similarity index 100%
+rename from examples/styling-interaction/widget.tsx
+rename to test/fixtures/styling-interaction/widget.tsx
+diff --git a/examples/styling-shadows/tsconfig.json b/test/fixtures/styling-text/tsconfig.json
+similarity index 73%
+rename from examples/styling-shadows/tsconfig.json
+rename to test/fixtures/styling-text/tsconfig.json
+index 4248ebc..318a70a 100644
+--- a/examples/styling-shadows/tsconfig.json
++++ b/test/fixtures/styling-text/tsconfig.json
+@@ -11,8 +11,8 @@
+     "types": [],
+     "baseUrl": ".",
+     "paths": {
+-      "@weaver/sdk": ["../../sdk/index.d.ts"],
+-      "@weaver/sdk/jsx-runtime": ["../../sdk/jsx-runtime.d.ts"]
++      "@weaver/sdk": ["../../../sdk/index.d.ts"],
++      "@weaver/sdk/jsx-runtime": ["../../../sdk/jsx-runtime.d.ts"]
+     }
+   },
+   "include": ["widget.tsx"]
+diff --git a/examples/styling-text/widget.tsx b/test/fixtures/styling-text/widget.tsx
+similarity index 100%
+rename from examples/styling-text/widget.tsx
+rename to test/fixtures/styling-text/widget.tsx
+diff --git a/examples/tideglass/tsconfig.json b/test/fixtures/tideglass/tsconfig.json
+similarity index 74%
+rename from examples/tideglass/tsconfig.json
+rename to test/fixtures/tideglass/tsconfig.json
+index 8c42381..e02d05f 100644
+--- a/examples/tideglass/tsconfig.json
++++ b/test/fixtures/tideglass/tsconfig.json
+@@ -11,8 +11,8 @@
+     "types": [],
+     "baseUrl": ".",
+     "paths": {
+-      "@weaver/sdk": ["../../sdk/index.d.ts"],
+-      "@weaver/sdk/jsx-runtime": ["../../sdk/jsx-runtime.d.ts"]
++      "@weaver/sdk": ["../../../sdk/index.d.ts"],
++      "@weaver/sdk/jsx-runtime": ["../../../sdk/jsx-runtime.d.ts"]
+     }
+   },
+   "include": [
+diff --git a/examples/tideglass/widget.tsx b/test/fixtures/tideglass/widget.tsx
+similarity index 100%
+rename from examples/tideglass/widget.tsx
+rename to test/fixtures/tideglass/widget.tsx

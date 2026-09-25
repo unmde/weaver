@@ -1,0 +1,79 @@
+A  .agents/skills/conjure-widget/SKILL.md
+A  .agents/skills/conjure-widget/agents/openai.yaml
+ M README.md
+ M cli/test/example-surface-smoke.mjs
+ M docs/agent-widget-capture.md
+ M docs/dpi-scaling.md
+ M docs/media-v2-results.md
+ D examples/clock/bundle.js
+ D examples/clock/widget.json
+ M examples/clock/widget.tsx
+ D examples/dpi-diagnostic/tsconfig.json
+ D examples/dpi-diagnostic/widget.tsx
+ D examples/gradient-stack/tsconfig.json
+ D examples/gradient-stack/widget.tsx
+ D examples/m4b-parity/tsconfig.json
+ D examples/m4b-parity/widget.tsx
+ D examples/m4b-synthetic/tsconfig.json
+ D examples/m4b-synthetic/widget.tsx
+ D examples/myclock/tsconfig.json
+ D examples/myclock/widget.tsx
+ M examples/now-playing/widget.tsx
+ M examples/pomodoro/widget.tsx
+ D examples/retro-player-shell/GeistPixel-Square.ttf
+ D examples/retro-player-shell/OFL.txt
+ D examples/retro-player-shell/assets/grille.png
+ D examples/retro-player-shell/assets/night-bloom.jpg
+ D examples/retro-player-shell/tsconfig.json
+ D examples/retro-player-shell/widget.tsx
+ D examples/styling-fonts/GeistPixel-Square.ttf
+ D examples/styling-fonts/OFL.txt
+ D examples/styling-fonts/tsconfig.json
+ D examples/styling-fonts/widget.tsx
+ D examples/styling-icons/tsconfig.json
+ D examples/styling-icons/widget.tsx
+ D examples/styling-images/assets/weaver.png
+ D examples/styling-images/tsconfig.json
+ D examples/styling-images/widget.tsx
+ D examples/styling-interaction/tsconfig.json
+ D examples/styling-interaction/widget.tsx
+ D examples/styling-shadows/tsconfig.json
+ D examples/styling-shadows/widget.tsx
+ D examples/styling-spacing/tsconfig.json
+ D examples/styling-spacing/widget.tsx
+ D examples/styling-stack/tsconfig.json
+ D examples/styling-stack/widget.tsx
+ D examples/styling-text/tsconfig.json
+ D examples/styling-text/widget.tsx
+ M examples/system/widget.tsx
+ D examples/tideglass/tsconfig.json
+ D examples/tideglass/widget.tsx
+ M scripts/verify-dpi.ps1
+ M scripts/verify-gradient-gpu.ps1
+ M sdk/CONTRACT.md
+ D skills/conjure-widget/SKILL.md
+ D skills/conjure-widget/agents/openai.yaml
+ M test/capture-smoke.mjs
+A  test/fixtures/dpi-diagnostic/tsconfig.json
+A  test/fixtures/dpi-diagnostic/widget.tsx
+A  test/fixtures/gradient-stack/tsconfig.json
+A  test/fixtures/gradient-stack/widget.tsx
+A  test/fixtures/m4b-parity/tsconfig.json
+A  test/fixtures/m4b-parity/widget.tsx
+A  test/fixtures/m4b-synthetic/tsconfig.json
+A  test/fixtures/m4b-synthetic/widget.tsx
+A  test/fixtures/styling-images/assets/weaver.png
+A  test/fixtures/styling-images/tsconfig.json
+A  test/fixtures/styling-images/widget.tsx
+A  test/fixtures/styling-interaction/tsconfig.json
+A  test/fixtures/styling-interaction/widget.tsx
+A  test/fixtures/styling-text/tsconfig.json
+A  test/fixtures/styling-text/widget.tsx
+A  test/fixtures/tideglass/tsconfig.json
+A  test/fixtures/tideglass/widget.tsx
+?? .claude/skills/conjure-widget/
+?? .claude/worktrees/
+?? examples/weather/
+?? experiments/
+?? test/capture/media-stopped.provider.json
+?? test/capture/system.provider.json

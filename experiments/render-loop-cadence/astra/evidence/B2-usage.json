@@ -1,0 +1,459 @@
+{
+  "run": "B2",
+  "thread": {
+    "id": "01a07237-244a-7de3-a0ec-bfea36feb07c",
+    "rollout_path": "/Users/dara/.codex/sessions/2026/09/05/rollout-2026-09-05T11-36-51-01a07237-244a-7de3-a0ec-bfea36feb07c.jsonl",
+    "created_at": 1788622611,
+    "agent_path": "/root/astra_b2",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "high",
+    "tokens_used": 558155
+  },
+  "dispatch_utc": "2026-09-05T15:36:44.150022+00:00",
+  "harness_start_utc": "2026-09-05T15:36:51.630Z",
+  "completion_utc": "2026-09-05T15:40:56.691Z",
+  "usage_timestamp": "2026-09-05T15:40:56.688Z",
+  "total_token_usage": {
+    "input_tokens": 553963,
+    "cached_input_tokens": 502016,
+    "cache_write_input_tokens": 0,
+    "output_tokens": 4192,
+    "reasoning_output_tokens": 478,
+    "total_tokens": 558155
+  },
+  "tool_call_counts": {
+    "exec": 14
+  },
+  "tool_calls": [
+    {
+      "timestamp": "2026-09-05T15:37:00.242Z",
+      "type": "custom_tool_call",
+      "call_id": "call_VjiSOJWLuywb25cwDPwvsAud",
+      "name": "exec",
+      "input": "text(await tools.exec_command({cmd:\"cat /tmp/weaver-exp-astra/prompts/B2.md\",max_output_tokens:12000}));\n"
+    },
+    {
+      "timestamp": "2026-09-05T15:37:14.083Z",
+      "type": "custom_tool_call",
+      "call_id": "call_cv0YVJVx5SP0EyIXiZJ23G36",
+      "name": "exec",
+      "input": "text(await tools.exec_command({cmd:\"cat .agents/skills/conjure-widget/SKILL.md\",max_output_tokens:15000}));\ntext(await tools.exec_command({cmd:\"rg -n '^#{1,6} .*([Mm]odule shape|widget\\\\(config, component\\\\)|Hooks|Consolidated v0.4 authoring tables|useStorage|PR 11)' sdk/CONTRACT.md\\ncat examples/pomodoro/widget.tsx examples/clock/widget.tsx\",max_output_tokens:15000}));\n"
+    },
+    {
+      "timestamp": "2026-09-05T15:37:23.661Z",
+      "type": "custom_tool_call",
+      "call_id": "call_ey0soro57V6bZEcuDo9u2una",
+      "name": "exec",
+      "input": "text(await tools.exec_command({cmd:\"sed -n '20,135p' sdk/CONTRACT.md\\nsed -n '410,451p' sdk/CONTRACT.md\\nsed -n '538,740p' sdk/CONTRACT.md\\ncat docs/agent-widget-capture.md\",max_output_tokens:22000}));\ntext(await tools.exec_command({cmd:\"npx --no-install weaver init /tmp/weaver-exp-astra/runs/B2\",max_output_tokens:2000}));\n"
+    },
+    {
+      "timestamp": "2026-09-05T15:37:53.735Z",
+      "type": "custom_tool_call",
+      "call_id": "call_lVIW0ovLKvb0avj84ApemYXz",
+      "name": "exec",
+      "input": "text(await tools.exec_command({cmd:\"cat /tmp/weaver-exp-astra/runs/B2/widget.tsx\",max_output_tokens:2000}));\ntext(await tools.exec_command({cmd:\"rg -n 'dynamic|template|arbitrary|accessibilityLabel|key=' sdk/CONTRACT.md | head -35\",max_output_tokens:3000}));\n"
+    },
+    {
+      "timestamp": "2026-09-05T15:38:42.859Z",
+      "type": "custom_tool_call",
+      "call_id": "call_WV44B1YGx9XlN2PMYZOYYMDg",
+      "name": "exec",
+      "input": "text(await tools.exec_command({cmd:\"cat > /tmp/weaver-exp-astra/runs/B2/widget.tsx <<'EOF'\\nimport { useProvider, useStorage, widget } from \\\"@weaver/sdk\\\";\\n\\nconst days = [\\n  { key: \\\"Mon\\\", letter: \\\"M\\\" },\\n  { key: \\\"Tue\\\", letter: \\\"T\\\" },\\n  { key: \\\"Wed\\\", letter: \\\"W\\\" },\\n  { key: \\\"Thu\\\", letter: \\\"T\\\" },\\n  { key: \\\"Fri\\\", letter: \\\"F\\\" },\\n  { key: \\\"Sat\\\", letter: \\\"S\\\" },\\n  { key: \\\"Sun\\\", letter: \\\"S\\\" },\\n];\\nconst emptyWeek: Record<string, number> = {\\n  Mon: 0, Tue: 0, Wed: 0, Thu: 0, Fri: 0, Sat: 0, Sun: 0,\\n};\\n\\nexport default widget({\\n  name: \\\"Focus Week\\\",\\n  size: [320, 200],\\n  anchor: { corner: \\\"top-right\\\", offset: [24, 24] },\\n  subscribe: [\\\"time\\\"],\\n}, () => {\\n  const time = useProvider(\\\"time\\\");\\n  const [sessions, setSessions] = useStorage<Record<string, number>>(\\\"sessions-by-weekday\\\", emptyWeek);\\n  const total = days.reduce((sum, day) => sum + sessions[day.key], 0);\\n  const fraction = Math.min(1, total / 20);\\n\\n  return (\\n    <column class=\\\"size-full p-[16px] gap-[10px] rounded-[24px] border border-[#ffffff]/10 bg-[#0b0d12]/92\\\">\\n      <row class=\\\"w-full h-[20px] items-baseline justify-between\\\">\\n        <text class=\\\"text-[15px] font-semibold text-[#f5f6f8]\\\">Focus week</text>\\n        <text class=\\\"text-[12px] text-[#f5f6f8]/65\\\">{time.weekday}, {time.month} {time.day}</text>\\n      </row>\\n\\n      <row class=\\\"w-full h-[54px] gap-[4px]\\\">\\n        {days.map((day) => (\\n          <column key={day.key} class={day.key === time.weekday\\n            ? \\\"w-[0px] grow h-full items-center justify-center gap-[3px] rounded-[10px] bg-[#5eead4]/16\\\"\\n            : \\\"w-[0px] grow h-full items-center justify-center gap-[3px] rounded-[10px] bg-[#ffffff]/4\\\"}>\\n            <text class={day.key === time.weekday\\n              ? \\\"w-full text-center text-[11px] font-medium text-[#5eead4]\\\"\\n              : \\\"w-full text-center text-[11px] font-medium text-[#f5f6f8]/55\\\"}>{day.letter}</text>\\n            <text class={day.key === time.weekday\\n              ? \\\"w-full text-center text-[18px] font-semibold tabular-nums text-[#5eead4]\\\"\\n              : \\\"w-full text-center text-[18px] font-medium tabular-nums text-[#f5f6f8]\\\"}>{sessions[day.key]}</text>\\n          </column>\\n        ))}\\n      </row>\\n\\n      <column class=\\\"w-full h-[28px] gap-[6px]\\\">\\n        <row class=\\\"w-full h-[16px] items-baseline justify-between\\\">\\n          <text class=\\\"text-[11px] text-[#f5f6f8]/55\\\">WEEKLY SESSIONS</text>\\n          <text class=\\\"text-[12px] font-medium tabular-nums text-[#f5f6f8]/80\\\">{total} / 20</text>\\n        </row>\\n        <stack class=\\\"w-full h-[6px] rounded-full bg-[#ffffff]/10 overflow-hidden\\\">\\n          <panel class={`w-[${fraction * 286}px] h-full rounded-full bg-[#5eead4]`} />\\n        </stack>\\n      </column>\\n\\n      <row class=\\\"w-full h-[34px] gap-[8px]\\\">\\n        <button accessibilityLabel=\\\"Log session\\\"\\n          class=\\\"w-[0px] grow h-full rounded-[10px] bg-[#5eead4] hover:opacity-90 pressed:opacity-75\\\"\\n          onPress={() => setSessions((current) => ({ ...current, [time.weekday]: current[time.weekday] + 1 }))}>\\n          <row class=\\\"size-full items-center\\\">\\n            <text class=\\\"w-full text-center text-[12px] font-semibold text-[#0b0d12]\\\">Log session</text>\\n          </row>\\n        </button>\\n        <button accessibilityLabel=\\\"Reset week\\\"\\n          class=\\\"w-[0px] grow h-full rounded-[10px] bg-[#ffffff]/8 hover:bg-[#ffffff]/12 pressed:bg-[#ffffff]/16\\\"\\n          onPress={() => setSessions({ ...emptyWeek })}>\\n          <row class=\\\"size-full items-center\\\">\\n            <text class=\\\"w-full text-center text-[12px] font-medium text-[#f5f6f8]/85\\\">Reset week</text>\\n          </row>\\n        </button>\\n      </row>\\n    </column>\\n  );\\n});\\nEOF\\nnpx --no-install weaver check /tmp/weaver-exp-astra/runs/B2\",max_output_tokens:4000}));\n"
+    },
+    {
+      "timestamp": "2026-09-05T15:38:50.296Z",
+      "type": "custom_tool_call",
+      "call_id": "call_jL3yUypaLc3wHUz8WvyVbNMx",
+      "name": "exec",
+      "input": "text(await tools.exec_command({cmd:\"rg -n 'fillRect|fillRound|CanvasCtx|##.*canvas' sdk/CONTRACT.md\",max_output_tokens:1500}));\n"
+    },
+    {
+      "timestamp": "2026-09-05T15:39:01.909Z",
+      "type": "custom_tool_call",
+      "call_id": "call_z57ZkKm7QAB3B0Y7mU74ua0u",
+      "name": "exec",
+      "input": "text(await tools.exec_command({cmd:\"sed -n '322,365p' sdk/CONTRACT.md\",max_output_tokens:3000}));\ntext(await tools.exec_command({cmd:\"python3 - <<'PY'\\np='/tmp/weaver-exp-astra/runs/B2/widget.tsx'\\ns=open(p).read().replace('<column key={day.key} class=', '<column class=')\\ns=s.replace('<panel class={`w-[${fraction * 286}px] h-full rounded-full bg-[#5eead4]`} />', '<canvas class=\\\"size-full\\\" onFrame={(ctx) => {\\\\n            ctx.clear();\\\\n            if (fraction > 0) ctx.fillRoundRect(0, 0, ctx.width * fraction, ctx.height, 3, \\\"#5eead4\\\");\\\\n          }} />')\\nopen(p,'w').write(s)\\nPY\\nnpx --no-install weaver check /tmp/weaver-exp-astra/runs/B2\",max_output_tokens:4000}));\n"
+    },
+    {
+      "timestamp": "2026-09-05T15:39:10.984Z",
+      "type": "custom_tool_call",
+      "call_id": "call_DH7yXD3z5xEBcmn2QcrJSDfy",
+      "name": "exec",
+      "input": "text(await tools.exec_command({cmd:\"python3 - <<'PY'\\np='/tmp/weaver-exp-astra/runs/B2/widget.tsx'\\ns=open(p).read().replace('<canvas class=\\\"size-full\\\"', '<canvas class=\\\"w-[286px] h-[6px]\\\"')\\nopen(p,'w').write(s)\\nPY\\nnpx --no-install weaver check /tmp/weaver-exp-astra/runs/B2\\nmkdir -p /tmp/weaver-exp-astra/runs/B2/captures\\ncp /tmp/weaver-exp-astra/clicks.actions /tmp/weaver-exp-astra/runs/B2/clicks.actions\",max_output_tokens:2000}));\n"
+    },
+    {
+      "timestamp": "2026-09-05T15:39:25.557Z",
+      "type": "custom_tool_call",
+      "call_id": "call_VBTc51c35nbamXacRUKHiOJv",
+      "name": "exec",
+      "input": "text(await tools.exec_command({cmd:\"npx --no-install weaver capture /tmp/weaver-exp-astra/runs/B2 --clock 2026-09-04T09:41:00.000Z --out /tmp/weaver-exp-astra/runs/B2/captures/01-initial.png\",max_output_tokens:5000,yield_time_ms:1000}));\n"
+    },
+    {
+      "timestamp": "2026-09-05T15:39:34.016Z",
+      "type": "custom_tool_call",
+      "call_id": "call_8AjJxvBrcBva4sNgnpdU1PzA",
+      "name": "exec",
+      "input": "text(await tools.exec_command({cmd:\"npx --no-install weaver capture /tmp/weaver-exp-astra/runs/B2 --clock 2026-09-04T09:41:00.000Z --action-file /tmp/weaver-exp-astra/runs/B2/clicks.actions --out /tmp/weaver-exp-astra/runs/B2/captures/02-after-clicks.png\",max_output_tokens:4000,yield_time_ms:1000}));\n"
+    },
+    {
+      "timestamp": "2026-09-05T15:39:44.224Z",
+      "type": "custom_tool_call",
+      "call_id": "call_KLShYZUD8hmpHCRWv2D5YUSx",
+      "name": "exec",
+      "input": "for (const path of [\"/tmp/weaver-exp-astra/runs/B2/captures/01-initial.png\",\"/tmp/weaver-exp-astra/runs/B2/captures/02-after-clicks.png\"]) image((await tools.view_image({path})).image_url);\ntext(await tools.exec_command({cmd:\"cat /tmp/weaver-exp-astra/runs/B2/captures/01-initial.snapshot.txt /tmp/weaver-exp-astra/runs/B2/captures/02-after-clicks.snapshot.txt /tmp/weaver-exp-astra/runs/B2/captures/01-initial.receipt.json /tmp/weaver-exp-astra/runs/B2/captures/02-after-clicks.receipt.json\",max_output_tokens:9000}));\n"
+    },
+    {
+      "timestamp": "2026-09-05T15:40:07.205Z",
+      "type": "custom_tool_call",
+      "call_id": "call_khJ0fl5CPk24PdfP7dAP1aQw",
+      "name": "exec",
+      "input": "text(await tools.exec_command({cmd:\"python3 - <<'PY'\\nimport json\\np='/tmp/weaver-exp-astra/runs/B2/widget.tsx'\\ns=open(p).read().replace('w-[286px] h-[6px]', 'w-[288px] h-[6px]')\\nopen(p,'w').write(s)\\np='/tmp/weaver-exp-astra/runs/B2/clicks.actions'\\na=json.load(open(p))\\na['actions'].append({'action':'click','target':{'role':'button','name':'Reset week'}})\\njson.dump(a,open('/tmp/weaver-exp-astra/runs/B2/reset.actions','w'),indent=2)\\nPY\\nnpx --no-install weaver check /tmp/weaver-exp-astra/runs/B2\",max_output_tokens:1000}));\ntext(await tools.exec_command({cmd:\"npx --no-install weaver capture /tmp/weaver-exp-astra/runs/B2 --clock 2026-09-04T09:41:00.000Z --out /tmp/weaver-exp-astra/runs/B2/captures/03-initial.png\",max_output_tokens:2000}));\ntext(await tools.exec_command({cmd:\"npx --no-install weaver capture /tmp/weaver-exp-astra/runs/B2 --clock 2026-09-04T09:41:00.000Z --action-file /tmp/weaver-exp-astra/runs/B2/clicks.actions --out /tmp/weaver-exp-astra/runs/B2/captures/04-after-clicks.png\",max_output_tokens:2000}));\ntext(await tools.exec_command({cmd:\"npx --no-install weaver capture /tmp/weaver-exp-astra/runs/B2 --clock 2026-09-04T09:41:00.000Z --action-file /tmp/weaver-exp-astra/runs/B2/reset.actions --out /tmp/weaver-exp-astra/runs/B2/captures/05-after-reset.png\",max_output_tokens:2000}));\n"
+    },
+    {
+      "timestamp": "2026-09-05T15:40:20.436Z",
+      "type": "custom_tool_call",
+      "call_id": "call_iMfEjZJjcmiCdxqfsGHrB7Ai",
+      "name": "exec",
+      "input": "for (const name of [\"03-initial\",\"04-after-clicks\",\"05-after-reset\"]) image((await tools.view_image({path:`/tmp/weaver-exp-astra/runs/B2/captures/${name}.png`})).image_url);\ntext(await tools.exec_command({cmd:\"python3 - <<'PY'\\nimport json\\nfrom pathlib import Path\\nfor name in ['03-initial','04-after-clicks','05-after-reset']:\\n p=Path('/tmp/weaver-exp-astra/runs/B2/captures') / name\\n print(name)\\n print('\\\\n'.join(l for l in p.with_suffix('.snapshot.txt').read_text().splitlines() if '    widget ' in l))\\n r=json.loads(p.with_suffix('.receipt.json').read_text())\\n print(json.dumps(r))\\nPY\",max_output_tokens:12000}));\n"
+    },
+    {
+      "timestamp": "2026-09-05T15:40:49.419Z",
+      "type": "custom_tool_call",
+      "call_id": "call_fS7YbtrY91TcmM35p6f66Efs",
+      "name": "exec",
+      "input": "text(await tools.exec_command({cmd:\"cat > /tmp/weaver-exp-astra/runs/B2/REPORT.md <<'EOF'\\n# Focus Week report\\n\\n- Condition: B (final capture).\\n- Explicit `weaver check` runs: 4. The final check passed.\\n- `weaver capture` runs: 5. Every receipt has status `ok`.\\n- Defects fixed because pixels or a snapshot exposed them:\\n  - The progress canvas was 286 px wide inside a 288 px track. The first snapshots exposed the mismatch; corrected the canvas to 288 px, so three sessions fill exactly 15% of the track.\\n- Spec items not met: none known.\\n- Confidence: 9 / 10.\\n\\nThe complete widget was written before the first capture. Static diagnostics first corrected an unsupported JSX `key`, a computed utility string, and a percentage-sized canvas; those fixes were not discovered through pixels or snapshots.\\n\\nOpened and inspected all five PNGs at their real 320\u00d7200 dimensions. Final evidence is `captures/03-initial.png`, `captures/04-after-clicks.png`, and `captures/05-after-reset.png`, with their matching snapshots and receipts. Friday is highlighted, all seven initial counts are visible zeros, three Log session clicks produce Friday 3 and `3 / 20`, and Reset week restores every count to zero. Text and controls are legible without overlap or clipping, and the progress label stays above the bar. The snapshots confirm seven equal-width cells and both exact accessible button names.\\n\\nBoth buttons declare native hover and pressed styles. Hover feedback is visible in the corresponding interaction captures. Storage uses the documented persistent `useStorage` hook with a weekday-keyed object; cross-process persistence was not separately exercised because capture creates isolated empty storage each run.\\n\\nThe single pending timer is the subscribed time provider. There are no pending fetches, images, external providers, or frame requests. Receipts warn that the shared Weaver checkout already contains uncommitted changes; this task modified no repository files. No live view was started, as instructed.\\nEOF\",max_output_tokens:1000}));\n"
+    }
+  ],
+  "token_usage_events": [
+    {
+      "timestamp": "2026-09-05T15:37:00.354Z",
+      "info": {
+        "total_token_usage": {
+          "input_tokens": 19203,
+          "cached_input_tokens": 7808,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 39,
+          "reasoning_output_tokens": 0,
+          "total_tokens": 19242
+        },
+        "last_token_usage": {
+          "input_tokens": 19203,
+          "cached_input_tokens": 7808,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 39,
+          "reasoning_output_tokens": 0,
+          "total_tokens": 19242
+        },
+        "model_context_window": 258400
+      }
+    },
+    {
+      "timestamp": "2026-09-05T15:37:14.213Z",
+      "info": {
+        "total_token_usage": {
+          "input_tokens": 39802,
+          "cached_input_tokens": 26752,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 222,
+          "reasoning_output_tokens": 28,
+          "total_tokens": 40024
+        },
+        "last_token_usage": {
+          "input_tokens": 20599,
+          "cached_input_tokens": 18944,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 183,
+          "reasoning_output_tokens": 28,
+          "total_tokens": 20782
+        },
+        "model_context_window": 258400
+      }
+    },
+    {
+      "timestamp": "2026-09-05T15:37:24.156Z",
+      "info": {
+        "total_token_usage": {
+          "input_tokens": 65504,
+          "cached_input_tokens": 47232,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 336,
+          "reasoning_output_tokens": 28,
+          "total_tokens": 65840
+        },
+        "last_token_usage": {
+          "input_tokens": 25702,
+          "cached_input_tokens": 20480,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 114,
+          "reasoning_output_tokens": 0,
+          "total_tokens": 25816
+        },
+        "model_context_window": 258400
+      }
+    },
+    {
+      "timestamp": "2026-09-05T15:37:53.844Z",
+      "info": {
+        "total_token_usage": {
+          "input_tokens": 97641,
+          "cached_input_tokens": 72704,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 780,
+          "reasoning_output_tokens": 387,
+          "total_tokens": 98421
+        },
+        "last_token_usage": {
+          "input_tokens": 32137,
+          "cached_input_tokens": 25472,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 444,
+          "reasoning_output_tokens": 359,
+          "total_tokens": 32581
+        },
+        "model_context_window": 258400
+      }
+    },
+    {
+      "timestamp": "2026-09-05T15:38:43.827Z",
+      "info": {
+        "total_token_usage": {
+          "input_tokens": 130783,
+          "cached_input_tokens": 104704,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 2092,
+          "reasoning_output_tokens": 396,
+          "total_tokens": 132875
+        },
+        "last_token_usage": {
+          "input_tokens": 33142,
+          "cached_input_tokens": 32000,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 1312,
+          "reasoning_output_tokens": 9,
+          "total_tokens": 34454
+        },
+        "model_context_window": 258400
+      }
+    },
+    {
+      "timestamp": "2026-09-05T15:38:50.365Z",
+      "info": {
+        "total_token_usage": {
+          "input_tokens": 165420,
+          "cached_input_tokens": 137728,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 2153,
+          "reasoning_output_tokens": 407,
+          "total_tokens": 167573
+        },
+        "last_token_usage": {
+          "input_tokens": 34637,
+          "cached_input_tokens": 33024,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 61,
+          "reasoning_output_tokens": 11,
+          "total_tokens": 34698
+        },
+        "model_context_window": 258400
+      }
+    },
+    {
+      "timestamp": "2026-09-05T15:39:02.647Z",
+      "info": {
+        "total_token_usage": {
+          "input_tokens": 200260,
+          "cached_input_tokens": 172160,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 2381,
+          "reasoning_output_tokens": 407,
+          "total_tokens": 202641
+        },
+        "last_token_usage": {
+          "input_tokens": 34840,
+          "cached_input_tokens": 34432,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 228,
+          "reasoning_output_tokens": 0,
+          "total_tokens": 35068
+        },
+        "model_context_window": 258400
+      }
+    },
+    {
+      "timestamp": "2026-09-05T15:39:11.687Z",
+      "info": {
+        "total_token_usage": {
+          "input_tokens": 236214,
+          "cached_input_tokens": 206848,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 2539,
+          "reasoning_output_tokens": 407,
+          "total_tokens": 238753
+        },
+        "last_token_usage": {
+          "input_tokens": 35954,
+          "cached_input_tokens": 34688,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 158,
+          "reasoning_output_tokens": 0,
+          "total_tokens": 36112
+        },
+        "model_context_window": 258400
+      }
+    },
+    {
+      "timestamp": "2026-09-05T15:39:26.384Z",
+      "info": {
+        "total_token_usage": {
+          "input_tokens": 272401,
+          "cached_input_tokens": 242560,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 2630,
+          "reasoning_output_tokens": 407,
+          "total_tokens": 275031
+        },
+        "last_token_usage": {
+          "input_tokens": 36187,
+          "cached_input_tokens": 35712,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 91,
+          "reasoning_output_tokens": 0,
+          "total_tokens": 36278
+        },
+        "model_context_window": 258400
+      }
+    },
+    {
+      "timestamp": "2026-09-05T15:39:34.858Z",
+      "info": {
+        "total_token_usage": {
+          "input_tokens": 309124,
+          "cached_input_tokens": 278528,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 2740,
+          "reasoning_output_tokens": 407,
+          "total_tokens": 311864
+        },
+        "last_token_usage": {
+          "input_tokens": 36723,
+          "cached_input_tokens": 35968,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 110,
+          "reasoning_output_tokens": 0,
+          "total_tokens": 36833
+        },
+        "model_context_window": 258400
+      }
+    },
+    {
+      "timestamp": "2026-09-05T15:39:44.316Z",
+      "info": {
+        "total_token_usage": {
+          "input_tokens": 346470,
+          "cached_input_tokens": 315136,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 2911,
+          "reasoning_output_tokens": 407,
+          "total_tokens": 349381
+        },
+        "last_token_usage": {
+          "input_tokens": 37346,
+          "cached_input_tokens": 36608,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 171,
+          "reasoning_output_tokens": 0,
+          "total_tokens": 37517
+        },
+        "model_context_window": 258400
+      }
+    },
+    {
+      "timestamp": "2026-09-05T15:40:10.393Z",
+      "info": {
+        "total_token_usage": {
+          "input_tokens": 392021,
+          "cached_input_tokens": 352256,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 3447,
+          "reasoning_output_tokens": 446,
+          "total_tokens": 395468
+        },
+        "last_token_usage": {
+          "input_tokens": 45551,
+          "cached_input_tokens": 37120,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 536,
+          "reasoning_output_tokens": 39,
+          "total_tokens": 46087
+        },
+        "model_context_window": 258400
+      }
+    },
+    {
+      "timestamp": "2026-09-05T15:40:20.552Z",
+      "info": {
+        "total_token_usage": {
+          "input_tokens": 439580,
+          "cached_input_tokens": 397696,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 3639,
+          "reasoning_output_tokens": 446,
+          "total_tokens": 443219
+        },
+        "last_token_usage": {
+          "input_tokens": 47559,
+          "cached_input_tokens": 45440,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 192,
+          "reasoning_output_tokens": 0,
+          "total_tokens": 47751
+        },
+        "model_context_window": 258400
+      }
+    },
+    {
+      "timestamp": "2026-09-05T15:40:49.478Z",
+      "info": {
+        "total_token_usage": {
+          "input_tokens": 496496,
+          "cached_input_tokens": 445184,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 4132,
+          "reasoning_output_tokens": 478,
+          "total_tokens": 500628
+        },
+        "last_token_usage": {
+          "input_tokens": 56916,
+          "cached_input_tokens": 47488,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 493,
+          "reasoning_output_tokens": 32,
+          "total_tokens": 57409
+        },
+        "model_context_window": 258400
+      }
+    },
+    {
+      "timestamp": "2026-09-05T15:40:56.688Z",
+      "info": {
+        "total_token_usage": {
+          "input_tokens": 553963,
+          "cached_input_tokens": 502016,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 4192,
+          "reasoning_output_tokens": 478,
+          "total_tokens": 558155
+        },
+        "last_token_usage": {
+          "input_tokens": 57467,
+          "cached_input_tokens": 56832,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 60,
+          "reasoning_output_tokens": 0,
+          "total_tokens": 57527
+        },
+        "model_context_window": 258400
+      }
+    }
+  ]
+}

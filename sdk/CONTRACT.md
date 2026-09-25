@@ -305,7 +305,7 @@ actionable — the primary reader is an agent in a fix-it loop.
 
 ## The conjure skill
 
-`skills/conjure-widget/SKILL.md` in this repo: teaches an agent to go from a
+`.agents/skills/conjure-widget/SKILL.md` in this repo: teaches an agent to go from a
 user's description to `weaver init` → edit widget.tsx → `weaver check` →
 `weaver dev`, including this contract inline or by reference, the class table,
 and the M1 boundaries (no providers beyond time, no input elements yet).

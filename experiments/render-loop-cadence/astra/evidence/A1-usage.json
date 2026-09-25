@@ -1,0 +1,285 @@
+{
+  "run": "A1",
+  "thread": {
+    "id": "01a07230-a75e-7931-bd23-ded182676ecb",
+    "rollout_path": "/Users/dara/.codex/sessions/2026/09/05/rollout-2026-09-05T11-29-46-01a07230-a75e-7931-bd23-ded182676ecb.jsonl",
+    "created_at": 1788622186,
+    "agent_path": "/root/astra_a1",
+    "model": "gpt-6-astra",
+    "reasoning_effort": "high",
+    "tokens_used": 265646
+  },
+  "dispatch_utc": "2026-09-05T15:29:35.964481+00:00",
+  "harness_start_utc": "2026-09-05T15:29:46.439Z",
+  "completion_utc": "2026-09-05T15:32:36.148Z",
+  "usage_timestamp": "2026-09-05T15:32:36.143Z",
+  "total_token_usage": {
+    "input_tokens": 262911,
+    "cached_input_tokens": 215680,
+    "cache_write_input_tokens": 0,
+    "output_tokens": 2735,
+    "reasoning_output_tokens": 634,
+    "total_tokens": 265646
+  },
+  "tool_call_counts": {
+    "exec": 8
+  },
+  "tool_calls": [
+    {
+      "timestamp": "2026-09-05T15:29:52.685Z",
+      "type": "custom_tool_call",
+      "call_id": "call_K4TcibQMiWDjahlv45S5Hz3y",
+      "name": "exec",
+      "input": "text(await tools.exec_command({cmd:\"cat /tmp/weaver-exp-astra/prompts/A1.md\",max_output_tokens:10000}));\n"
+    },
+    {
+      "timestamp": "2026-09-05T15:30:05.880Z",
+      "type": "custom_tool_call",
+      "call_id": "call_anAwFGOUZSFxs6RsUvSiNlyh",
+      "name": "exec",
+      "input": "text(await tools.exec_command({cmd:\"cat .agents/skills/conjure-widget/SKILL.md; rg -n 'Module shape|widget\\\\(config, component\\\\)|Hooks|Consolidated v0.4 authoring tables|useStorage|PR 11: native interaction states and press events' sdk/CONTRACT.md; cat examples/pomodoro/widget.tsx examples/clock/widget.tsx\",max_output_tokens:20000}));\n"
+    },
+    {
+      "timestamp": "2026-09-05T15:30:12.520Z",
+      "type": "custom_tool_call",
+      "call_id": "call_9yEwtHV77gi0OFTMiQv99WeA",
+      "name": "exec",
+      "input": "text(await tools.exec_command({cmd:\"sed -n '1,115p' sdk/CONTRACT.md; sed -n '398,440p' sdk/CONTRACT.md; sed -n '538,765p' sdk/CONTRACT.md\",max_output_tokens:16000}));\n"
+    },
+    {
+      "timestamp": "2026-09-05T15:30:44.815Z",
+      "type": "custom_tool_call",
+      "call_id": "call_PHsfN1RX2MxSpYfhJV5Ws4Fc",
+      "name": "exec",
+      "input": "text(await tools.exec_command({cmd:\"npx --no-install weaver init /tmp/weaver-exp-astra/runs/A1\",max_output_tokens:4000}));\ntext(await tools.exec_command({cmd:\"rg -n 'fillRect|CanvasCtx|accessibilityLabel' sdk/CONTRACT.md; cat /tmp/weaver-exp-astra/runs/A1/widget.tsx\",max_output_tokens:4000}));\n"
+    },
+    {
+      "timestamp": "2026-09-05T15:30:52.718Z",
+      "type": "custom_tool_call",
+      "call_id": "call_pbqHFPNmXKOZ2jXehZeNnCj8",
+      "name": "exec",
+      "input": "text(await tools.exec_command({cmd:\"sed -n '319,363p' sdk/CONTRACT.md\",max_output_tokens:3000}));\n"
+    },
+    {
+      "timestamp": "2026-09-05T15:31:54.600Z",
+      "type": "custom_tool_call",
+      "call_id": "call_RicrFtazBY3XsK1NDlZH9lrm",
+      "name": "exec",
+      "input": "text(await tools.exec_command({cmd:\"cat > /tmp/weaver-exp-astra/runs/A1/widget.tsx <<'EOF'\\nimport { useProvider, useStorage, widget } from \\\"@weaver/sdk\\\";\\n\\ntype Weekday = \\\"Mon\\\" | \\\"Tue\\\" | \\\"Wed\\\" | \\\"Thu\\\" | \\\"Fri\\\" | \\\"Sat\\\" | \\\"Sun\\\";\\ntype Counts = Record<Weekday, number>;\\nconst days: Weekday[] = [\\\"Mon\\\", \\\"Tue\\\", \\\"Wed\\\", \\\"Thu\\\", \\\"Fri\\\", \\\"Sat\\\", \\\"Sun\\\"];\\nconst emptyWeek: Counts = { Mon: 0, Tue: 0, Wed: 0, Thu: 0, Fri: 0, Sat: 0, Sun: 0 };\\nconst goal = 20;\\n\\nexport default widget({\\n  name: \\\"Focus Week\\\",\\n  size: [320, 200],\\n  anchor: { corner: \\\"top-right\\\", offset: [24, 24] },\\n  subscribe: [\\\"time\\\"],\\n}, () => {\\n  const time = useProvider(\\\"time\\\");\\n  const [counts, setCounts] = useStorage<Counts>(\\\"sessions-by-weekday\\\", emptyWeek);\\n  const today = time.weekday as Weekday;\\n  const total = days.reduce((sum, day) => sum + counts[day], 0);\\n\\n  return (\\n    <column class=\\\"size-full p-[16px] justify-between bg-[#0b0d12]/90 border border-[#ffffff]/10 rounded-[24px]\\\">\\n      <row class=\\\"w-full h-[20px] items-baseline justify-between\\\">\\n        <text class=\\\"text-[16px] font-semibold text-[#f5f6f8]\\\">Focus week</text>\\n        <text class=\\\"text-[12px] text-[#f5f6f8]/60\\\">{time.weekday}, {time.month} {time.day}</text>\\n      </row>\\n\\n      <row class=\\\"w-full h-[52px] gap-[4px]\\\">\\n        {days.map((day) => (\\n          <column key={day} class={day === today\\n            ? \\\"w-[0px] grow h-full items-center justify-center gap-[3px] rounded-[10px] bg-[#5eead4]/16\\\"\\n            : \\\"w-[0px] grow h-full items-center justify-center gap-[3px] rounded-[10px] bg-[#ffffff]/4\\\"}>\\n            <text class={day === today\\n              ? \\\"w-full text-center text-[11px] font-medium text-[#5eead4]\\\"\\n              : \\\"w-full text-center text-[11px] font-medium text-[#f5f6f8]/55\\\"}>{day[0]}</text>\\n            <text class={day === today\\n              ? \\\"w-full text-center text-[18px] leading-none font-semibold tabular-nums text-[#5eead4]\\\"\\n              : \\\"w-full text-center text-[18px] leading-none font-medium tabular-nums text-[#f5f6f8]\\\"}>{counts[day]}</text>\\n          </column>\\n        ))}\\n      </row>\\n\\n      <column class=\\\"w-full h-[26px] justify-between\\\">\\n        <row class=\\\"w-full h-[14px] items-baseline justify-between\\\">\\n          <text class=\\\"text-[11px] text-[#f5f6f8]/55\\\">WEEKLY SESSIONS</text>\\n          <text class=\\\"text-[12px] leading-none tabular-nums text-[#f5f6f8]/80\\\">{total} / {goal}</text>\\n        </row>\\n        <canvas class=\\\"w-full h-[6px]\\\" onFrame={(ctx) => {\\n          ctx.clear();\\n          ctx.fillRoundRect(0, 0, ctx.width, ctx.height, 3, \\\"#ffffff14\\\");\\n          if (total > 0) {\\n            ctx.fillRoundRect(0, 0, ctx.width * Math.min(total / goal, 1), ctx.height, 3, \\\"#5eead4\\\");\\n          }\\n        }} />\\n      </column>\\n\\n      <row class=\\\"w-full h-[36px] gap-[8px]\\\">\\n        <button accessibilityLabel=\\\"Log session\\\"\\n          class=\\\"w-[0px] grow h-full rounded-[11px] bg-[#5eead4] hover:opacity-90 pressed:opacity-75\\\"\\n          onPress={() => setCounts((current) => ({ ...current, [today]: current[today] + 1 }))}>\\n          <row class=\\\"size-full items-center\\\">\\n            <text class=\\\"w-full text-center text-[13px] font-semibold text-[#0b0d12]\\\">Log session</text>\\n          </row>\\n        </button>\\n        <button accessibilityLabel=\\\"Reset week\\\"\\n          class=\\\"w-[110px] h-full rounded-[11px] bg-[#ffffff]/8 hover:bg-[#ffffff]/12 pressed:bg-[#ffffff]/16\\\"\\n          onPress={() => setCounts({ ...emptyWeek })}>\\n          <row class=\\\"size-full items-center\\\">\\n            <text class=\\\"w-full text-center text-[12px] font-medium text-[#f5f6f8]/80\\\">Reset week</text>\\n          </row>\\n        </button>\\n      </row>\\n    </column>\\n  );\\n});\\nEOF\\nnpx --no-install weaver check /tmp/weaver-exp-astra/runs/A1\",max_output_tokens:5000}));\n"
+    },
+    {
+      "timestamp": "2026-09-05T15:32:07.033Z",
+      "type": "custom_tool_call",
+      "call_id": "call_dtYZukSyZl0JyXS05itUFNuJ",
+      "name": "exec",
+      "input": "text(await tools.exec_command({cmd:\"python3 - <<'PY'\\nfrom pathlib import Path\\np = Path('/tmp/weaver-exp-astra/runs/A1/widget.tsx')\\ns = p.read_text().replace('<column key={day} class=', '<column class=').replace('<canvas class=\\\"w-full h-[6px]\\\"', '<canvas class=\\\"w-[286px] h-[6px]\\\"')\\np.write_text(s)\\nPY\\nnpx --no-install weaver check /tmp/weaver-exp-astra/runs/A1\",max_output_tokens:5000}));\n"
+    },
+    {
+      "timestamp": "2026-09-05T15:32:25.757Z",
+      "type": "custom_tool_call",
+      "call_id": "call_nODJugrUeJ3D3Hw3Soe3sTDt",
+      "name": "exec",
+      "input": "text(await tools.exec_command({cmd:\"cat > /tmp/weaver-exp-astra/runs/A1/REPORT.md <<'EOF'\\n# Focus Week report\\n\\n- Condition: A (check-only).\\n- `weaver check` runs: 2. Final check passed.\\n- `weaver capture` runs: 0. No captures directory created.\\n- Defects fixed because of pixels or a snapshot: none.\\n- Check-driven fixes: removed unsupported JSX `key`; gave the canvas an explicit 286 px width, calculated from the 320 px widget minus 32 px horizontal padding and 2 px border.\\n- Spec items not met: none known. Visual layout, click results, native state feedback, and restart persistence were not observed because this condition permits only static checks. The implementation uses weekday-keyed persistent counts, native hover and pressed styles, and the time provider only.\\n- Confidence: 8 / 10. The final source passes the authoritative static check, but visual and interaction behavior remain unverified.\\nEOF\",max_output_tokens:1000}));\n"
+    }
+  ],
+  "token_usage_events": [
+    {
+      "timestamp": "2026-09-05T15:29:52.801Z",
+      "info": {
+        "total_token_usage": {
+          "input_tokens": 19203,
+          "cached_input_tokens": 0,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 39,
+          "reasoning_output_tokens": 0,
+          "total_tokens": 19242
+        },
+        "last_token_usage": {
+          "input_tokens": 19203,
+          "cached_input_tokens": 0,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 39,
+          "reasoning_output_tokens": 0,
+          "total_tokens": 19242
+        },
+        "model_context_window": 258400
+      }
+    },
+    {
+      "timestamp": "2026-09-05T15:30:05.959Z",
+      "info": {
+        "total_token_usage": {
+          "input_tokens": 39801,
+          "cached_input_tokens": 7808,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 229,
+          "reasoning_output_tokens": 54,
+          "total_tokens": 40030
+        },
+        "last_token_usage": {
+          "input_tokens": 20598,
+          "cached_input_tokens": 7808,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 190,
+          "reasoning_output_tokens": 54,
+          "total_tokens": 20788
+        },
+        "model_context_window": 258400
+      }
+    },
+    {
+      "timestamp": "2026-09-05T15:30:12.677Z",
+      "info": {
+        "total_token_usage": {
+          "input_tokens": 65509,
+          "cached_input_tokens": 28288,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 299,
+          "reasoning_output_tokens": 54,
+          "total_tokens": 65808
+        },
+        "last_token_usage": {
+          "input_tokens": 25708,
+          "cached_input_tokens": 20480,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 70,
+          "reasoning_output_tokens": 0,
+          "total_tokens": 25778
+        },
+        "model_context_window": 258400
+      }
+    },
+    {
+      "timestamp": "2026-09-05T15:30:45.166Z",
+      "info": {
+        "total_token_usage": {
+          "input_tokens": 96288,
+          "cached_input_tokens": 53760,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 698,
+          "reasoning_output_tokens": 355,
+          "total_tokens": 96986
+        },
+        "last_token_usage": {
+          "input_tokens": 30779,
+          "cached_input_tokens": 25472,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 399,
+          "reasoning_output_tokens": 301,
+          "total_tokens": 31178
+        },
+        "model_context_window": 258400
+      }
+    },
+    {
+      "timestamp": "2026-09-05T15:30:52.786Z",
+      "info": {
+        "total_token_usage": {
+          "input_tokens": 127835,
+          "cached_input_tokens": 84352,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 754,
+          "reasoning_output_tokens": 369,
+          "total_tokens": 128589
+        },
+        "last_token_usage": {
+          "input_tokens": 31547,
+          "cached_input_tokens": 30592,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 56,
+          "reasoning_output_tokens": 14,
+          "total_tokens": 31603
+        },
+        "model_context_window": 258400
+      }
+    },
+    {
+      "timestamp": "2026-09-05T15:31:55.215Z",
+      "info": {
+        "total_token_usage": {
+          "input_tokens": 160120,
+          "cached_input_tokens": 115712,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 2209,
+          "reasoning_output_tokens": 535,
+          "total_tokens": 162329
+        },
+        "last_token_usage": {
+          "input_tokens": 32285,
+          "cached_input_tokens": 31360,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 1455,
+          "reasoning_output_tokens": 166,
+          "total_tokens": 33740
+        },
+        "model_context_window": 258400
+      }
+    },
+    {
+      "timestamp": "2026-09-05T15:32:07.731Z",
+      "info": {
+        "total_token_usage": {
+          "input_tokens": 194091,
+          "cached_input_tokens": 147840,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 2411,
+          "reasoning_output_tokens": 599,
+          "total_tokens": 196502
+        },
+        "last_token_usage": {
+          "input_tokens": 33971,
+          "cached_input_tokens": 32128,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 202,
+          "reasoning_output_tokens": 64,
+          "total_tokens": 34173
+        },
+        "model_context_window": 258400
+      }
+    },
+    {
+      "timestamp": "2026-09-05T15:32:25.851Z",
+      "info": {
+        "total_token_usage": {
+          "input_tokens": 228337,
+          "cached_input_tokens": 181632,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 2682,
+          "reasoning_output_tokens": 634,
+          "total_tokens": 231019
+        },
+        "last_token_usage": {
+          "input_tokens": 34246,
+          "cached_input_tokens": 33792,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 271,
+          "reasoning_output_tokens": 35,
+          "total_tokens": 34517
+        },
+        "model_context_window": 258400
+      }
+    },
+    {
+      "timestamp": "2026-09-05T15:32:36.143Z",
+      "info": {
+        "total_token_usage": {
+          "input_tokens": 262911,
+          "cached_input_tokens": 215680,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 2735,
+          "reasoning_output_tokens": 634,
+          "total_tokens": 265646
+        },
+        "last_token_usage": {
+          "input_tokens": 34574,
+          "cached_input_tokens": 34048,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 53,
+          "reasoning_output_tokens": 0,
+          "total_tokens": 34627
+        },
+        "model_context_window": 258400
+      }
+    }
+  ]
+}

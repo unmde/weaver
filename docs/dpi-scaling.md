@@ -140,7 +140,7 @@ clean version-mismatch failure instead of framing deadlock.
 
 ## Deterministic and live verification
 
-`examples/dpi-diagnostic` is a transparent 480 x 320 DIP fixture with a
+`test/fixtures/dpi-diagnostic` is a transparent 480 x 320 DIP fixture with a
 retained card, immediate canvas, four colored edge markers and corners, content
 crossing the retained/immediate seam, and right/bottom clickable targets.
 `scripts/verify-dpi.ps1` launches the real host, widget runtime, named pipe,

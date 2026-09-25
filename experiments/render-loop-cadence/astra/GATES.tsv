@@ -1,0 +1,11 @@
+run	condition	check_pass	check_exit	initial_status	initial_exit	initial_error	after_clicks_status	after_clicks_exit	after_clicks_error	initial_both_named_buttons	after_clicks_both_named_buttons	after_clicks_3_of_20	agent_published_pngs	observed_saves	first_observed_save_utc	last_observed_save_utc	widget_sha256	source_unchanged_by_recheck	all_objective_gates
+A1	A	True	0	ok	0		ok	0		True	True	True	0	3	2026-09-05T15:30:45.439Z	2026-09-05T15:32:07.581Z	c6a87be53dfe29ab461036e1bbf369abc17c257306ebef14d6b618433927ce18	True	True
+A2	A	True	0	ok	0		ok	0		True	True	True	0	3	2026-09-05T15:37:28.761Z	2026-09-05T15:38:59.538Z	114dee45fbaeb5f335ef5ed09071a1aea057d3d2edc57fa9677cc5140cbceb3c	True	True
+B1	B	True	0	ok	0		ok	0		True	True	True	5	4	2026-09-05T15:30:29.910Z	2026-09-05T15:32:46.153Z	5dd994506d8345bf1ed89c1fcedfa2722e7ccf415f85ce95de54ac34a7baa619	True	True
+B2	B	True	0	ok	0		ok	0		True	True	True	5	5	2026-09-05T15:37:24.249Z	2026-09-05T15:40:07.738Z	755a31cf203cffe571a784d725d34aab8e2c564db3c322fbf172eb0c0f91409b	True	True
+B3	B	True	0	ok	0		ok	0		True	True	True	5	4	2026-09-05T15:43:03.269Z	2026-09-05T15:45:05.645Z	75ef381b47dacf6c02d6bdf2c52a7fa44ec08b415ccd0247c65a507d0d6d0cd7	True	True
+B4	B	True	0	ok	0		ok	0		True	True	True	3	3	2026-09-05T15:43:16.307Z	2026-09-05T15:44:45.576Z	6e02b5a6ceab77c4384fa4e74fa50073e7426590c79a5909eb20f363b19756d2	True	True
+C1	C	True	0	ok	0		ok	0		True	True	True	7	8	2026-09-05T15:30:44.938Z	2026-09-05T15:34:31.339Z	f53dc0b258f808fe8a7e041c3ac8768bdc58ac691bfcb5bda81e85e7b00dfbbf	True	True
+C2	C	True	0	ok	0		ok	0		True	True	True	6	6	2026-09-05T15:37:36.286Z	2026-09-05T15:40:24.286Z	7eedca57e692580b197beca8233409a1999530345101d462c5e420f8b4df14cb	True	True
+C3	C	True	0	ok	0		ok	0		True	True	True	6	6	2026-09-05T15:42:56.747Z	2026-09-05T15:45:45.763Z	ce12b3d87d406972654b71ad9c82f3ae1e51cf31a81c73a1f27999854818dde7	True	True
+C4	C	True	0	ok	0		ok	0		True	True	True	7	8	2026-09-05T15:48:09.204Z	2026-09-05T15:51:01.726Z	af0df9e06014d0c3e53bd0a0c34be53dae47a96c4037ff20622555bb8a9a50f0	True	True

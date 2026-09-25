@@ -1,0 +1,62 @@
+[
+  {
+    "run": "A1",
+    "batch": 1,
+    "exact_after_path_substitution": true,
+    "sha256": "08ac179928e0f21507cf738023be64b1b94c0183da9355ff2dee279542acbaca"
+  },
+  {
+    "run": "B1",
+    "batch": 1,
+    "exact_after_path_substitution": true,
+    "sha256": "d32cd49ca837057ee7b70a820d26445beb6c51bc5d6492e4bee18d55b84289d6"
+  },
+  {
+    "run": "C1",
+    "batch": 1,
+    "exact_after_path_substitution": true,
+    "sha256": "12d1d80731671d12732f5b16a2b2b93c9a6779195d554843b0bd1b05132843ab"
+  },
+  {
+    "run": "A2",
+    "batch": 2,
+    "exact_after_path_substitution": true,
+    "sha256": "d953f2f647b7e8c7623e97929f7e0cefa49a3518bdb4d92e97de02fde764c34c"
+  },
+  {
+    "run": "B2",
+    "batch": 2,
+    "exact_after_path_substitution": true,
+    "sha256": "cfb51ed98891273de72f3cc91b7568ffb9be5c28f9c0a893a0c3430bca8ff18c"
+  },
+  {
+    "run": "C2",
+    "batch": 2,
+    "exact_after_path_substitution": true,
+    "sha256": "5782e1770ef01c0f4b7d90c6aa74855bf8211170818cc2a2b048c426aa275bc8"
+  },
+  {
+    "run": "B3",
+    "batch": 3,
+    "exact_after_path_substitution": true,
+    "sha256": "df847cb14e05fc3625f5707cc9a9f518a3ce6f75546dc1d9cd8c9a2f80667438"
+  },
+  {
+    "run": "C3",
+    "batch": 3,
+    "exact_after_path_substitution": true,
+    "sha256": "774ca846ae17446fa01a0916ba7b2fccfff57923adfc19ef5b8164b054d52704"
+  },
+  {
+    "run": "B4",
+    "batch": 3,
+    "exact_after_path_substitution": true,
+    "sha256": "434320fbf9f1cd3fa8202558d1e897ce6d7f77f435c8fa646e358d34555a054e"
+  },
+  {
+    "run": "C4",
+    "batch": 4,
+    "exact_after_path_substitution": true,
+    "sha256": "3d079fcd3b4f9bfa5330ed09affafe75390b881c45f3795375e559c26862efc4"
+  }
+]

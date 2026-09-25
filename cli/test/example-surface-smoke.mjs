@@ -6,29 +6,34 @@ import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const cli = join(repoRoot, "cli", "bin", "weaver.js");
-const fixtures = [
-  "clock",
-  "pomodoro",
-  "system",
-  "now-playing",
-  "noro-shell",
-  "visualizer",
-  "dpi-diagnostic",
-  "m4b-parity",
-  "m4b-synthetic",
+// Every shipped example plus the measurement fixtures that scripts/ and docs/
+// still drive. Each must check and bundle on a clean checkout.
+const surfaces = [
+  "examples/clock",
+  "examples/system",
+  "examples/pomodoro",
+  "examples/now-playing",
+  "examples/weather",
+  "examples/noro-shell",
+  "examples/noro-signal",
+  "examples/visualizer",
+  "test/fixtures/dpi-diagnostic",
+  "test/fixtures/m4b-parity",
+  "test/fixtures/m4b-synthetic",
+  "test/fixtures/gradient-stack",
 ];
 
-for (const fixture of fixtures) {
-  const source = join(repoRoot, "examples", fixture);
+for (const surface of surfaces) {
+  const source = join(repoRoot, surface);
   const dist = join(source, "dist");
   const distExisted = existsSync(dist);
   for (const command of ["check", "bundle"]) {
     const result = spawnSync(process.execPath, [cli, command, source], { cwd: repoRoot, encoding: "utf8" });
-    assert.equal(result.status, 0, `${command} failed for ${fixture}\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+    assert.equal(result.status, 0, `${command} failed for ${surface}\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
   }
-  assert.equal(existsSync(join(dist, "bundle.js")), true, `${fixture} bundle is missing`);
-  assert.equal(existsSync(join(dist, "widget.json")), true, `${fixture} manifest is missing`);
+  assert.equal(existsSync(join(dist, "bundle.js")), true, `${surface} bundle is missing`);
+  assert.equal(existsSync(join(dist, "widget.json")), true, `${surface} manifest is missing`);
   if (!distExisted) rmSync(dist, { recursive: true, force: true });
 }
 
-process.stdout.write(`Checked and bundled ${fixtures.length} portable example surfaces.\n`);
+process.stdout.write(`Checked and bundled ${surfaces.length} portable widget surfaces.\n`);

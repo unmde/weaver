@@ -1,0 +1,70 @@
+{
+  "schema": "weaver.capture.v1",
+  "status": "ok",
+  "provenance": {
+    "weaverCommit": "ab20771762be56faff04173ab11a5525a8d89be5",
+    "nativeSdkCommit": "464ff65faa02d36179b34e2252fa2a1cf46f7541",
+    "bundleSha256": "0cebb86f890ee357dcf4de4aad6aff5b999f394d9740de20112ccd8d0baf7991",
+    "platform": "darwin-headless-coretext"
+  },
+  "output": {
+    "image": "/Users/dara/Dev/Projects/weaver/experiments/render-loop-cadence/astra/final/C2/after-clicks.png",
+    "snapshot": "/Users/dara/Dev/Projects/weaver/experiments/render-loop-cadence/astra/final/C2/after-clicks.snapshot.txt",
+    "widthPx": 320,
+    "heightPx": 200,
+    "scale": 1,
+    "pngBytes": 256283
+  },
+  "renderer": {
+    "pixels": "reference",
+    "textMeasurement": "coretext",
+    "eventsDriven": [
+      "app_start",
+      "appearance_changed",
+      "surface_resized",
+      "window_frame_changed",
+      "gpu_surface_resized",
+      "gpu_surface_frame",
+      "app_shutdown"
+    ],
+    "framesDriven": 5,
+    "retainedRevision": 4,
+    "commands": 46,
+    "nodes": 44,
+    "images": 0,
+    "fonts": 0,
+    "pixelsDifferentFromClear": 63572
+  },
+  "pending": {
+    "timers": 1,
+    "fetches": 0,
+    "images": 0,
+    "providers": [],
+    "frameRequests": 0
+  },
+  "timingUs": {
+    "bundle": 321957,
+    "spawn": 54928,
+    "startup": 31288,
+    "render": 1862,
+    "encode": 519,
+    "write": 286,
+    "total": 411573
+  },
+  "inputs": {
+    "clock": "2026-09-04T09:41:00.000Z",
+    "storage": "isolated-empty",
+    "actionFileSha256": "06da27fdf07d9f79ac341bbb70d5593e056b492fca31e4504b7c7b120d7e1c77"
+  },
+  "interactions": {
+    "actions": [
+      "click",
+      "click",
+      "click"
+    ],
+    "mediaCommands": []
+  },
+  "warnings": [
+    "Weaver working tree contains uncommitted changes; provenance names the checkout commit."
+  ]
+}

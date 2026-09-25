@@ -16,3 +16,6 @@ Thumbs.db
 # Syncthing
 .stfolder/
 .stignore
+
+# Agent worktrees
+.claude/worktrees/

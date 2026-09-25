@@ -131,7 +131,7 @@ $RepoRoot = [IO.Path]::GetFullPath($RepoRoot)
 $OutputDirectory = [IO.Path]::GetFullPath($OutputDirectory)
 [IO.Directory]::CreateDirectory($OutputDirectory) | Out-Null
 $cli = Join-Path $RepoRoot "cli\dist\index.js"
-$fixture = Join-Path $RepoRoot "examples\dpi-diagnostic"
+$fixture = Join-Path $RepoRoot "test\fixtures\dpi-diagnostic"
 $results = [ordered]@{
     startedUtc = [DateTime]::UtcNow.ToString("o")
     repoRoot = $RepoRoot

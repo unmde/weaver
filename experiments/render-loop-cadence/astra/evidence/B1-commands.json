@@ -1,0 +1,146 @@
+[
+  {
+    "timestamp": "2026-09-05T15:30:06.372Z",
+    "call_id": "call_Lq7E9B0lHl6vdXvisLx9do1m",
+    "command": "cat /tmp/weaver-exp-astra/prompts/B1.md",
+    "literal": true
+  },
+  {
+    "timestamp": "2026-09-05T15:30:16.558Z",
+    "call_id": "call_gpnrDyDZAoLySVuTrjAv6CoG",
+    "command": "cat .agents/skills/conjure-widget/SKILL.md",
+    "literal": true
+  },
+  {
+    "timestamp": "2026-09-05T15:30:16.558Z",
+    "call_id": "call_gpnrDyDZAoLySVuTrjAv6CoG",
+    "command": "rg -n 'Module shape|widget\\(config, component\\)|Hooks|Consolidated v0.4 authoring tables|useStorage|PR 11: native interaction' sdk/CONTRACT.md",
+    "literal": true
+  },
+  {
+    "timestamp": "2026-09-05T15:30:29.080Z",
+    "call_id": "call_LTRx6wGbQSmPH25xWQVvqFwy",
+    "command": "sed -n '1,130p' sdk/CONTRACT.md",
+    "literal": true
+  },
+  {
+    "timestamp": "2026-09-05T15:30:29.080Z",
+    "call_id": "call_LTRx6wGbQSmPH25xWQVvqFwy",
+    "command": "sed -n '395,445p' sdk/CONTRACT.md",
+    "literal": true
+  },
+  {
+    "timestamp": "2026-09-05T15:30:29.080Z",
+    "call_id": "call_LTRx6wGbQSmPH25xWQVvqFwy",
+    "command": "sed -n '538,790p' sdk/CONTRACT.md",
+    "literal": true
+  },
+  {
+    "timestamp": "2026-09-05T15:30:29.080Z",
+    "call_id": "call_LTRx6wGbQSmPH25xWQVvqFwy",
+    "command": "cat examples/pomodoro/widget.tsx examples/clock/widget.tsx docs/agent-widget-capture.md",
+    "literal": true
+  },
+  {
+    "timestamp": "2026-09-05T15:30:29.080Z",
+    "call_id": "call_LTRx6wGbQSmPH25xWQVvqFwy",
+    "command": "npx --no-install weaver init /tmp/weaver-exp-astra/runs/B1",
+    "literal": true
+  },
+  {
+    "timestamp": "2026-09-05T15:31:28.793Z",
+    "call_id": "call_9D7STZ0eRl1aEqc12zqFPtcP",
+    "command": "cat /tmp/weaver-exp-astra/runs/B1/widget.tsx",
+    "literal": true
+  },
+  {
+    "timestamp": "2026-09-05T15:31:28.793Z",
+    "call_id": "call_9D7STZ0eRl1aEqc12zqFPtcP",
+    "command": "cat > /tmp/weaver-exp-astra/runs/B1/widget.tsx <<'EOF'\nimport { useProvider, useStorage, widget } from \"@weaver/sdk\";\n\ntype Weekday = \"Mon\" | \"Tue\" | \"Wed\" | \"Thu\" | \"Fri\" | \"Sat\" | \"Sun\";\nconst days: Weekday[] = [\"Mon\", \"Tue\", \"Wed\", \"Thu\", \"Fri\", \"Sat\", \"Sun\"];\nconst emptyWeek: Record<Weekday, number> = {\n  Mon: 0, Tue: 0, Wed: 0, Thu: 0, Fri: 0, Sat: 0, Sun: 0,\n};\n\nexport default widget({\n  name: \"Focus Week\",\n  size: [320, 200],\n  anchor: { corner: \"top-right\", offset: [24, 24] },\n  subscribe: [\"time\"],\n}, () => {\n  const time = useProvider(\"time\");\n  const [counts, setCounts] = useStorage<Record<Weekday, number>>(\"sessions-by-weekday\", emptyWeek);\n  const today = time.weekday as Weekday;\n  const total = days.reduce((sum, day) => sum + counts[day], 0);\n  const progress = Math.min(total / 20, 1);\n\n  return (\n    <column class=\"size-full p-[16px] gap-[10px] bg-[#0b0d12]/90 border border-[#ffffff]/10 rounded-[24px]\">\n      <row class=\"w-full h-[20px] shrink-0 items-baseline justify-between\">\n        <text class=\"text-[15px] font-semibold text-[#f5f6f8]\">Focus week</text>\n        <text class=\"text-[12px] text-[#f5f6f8]/65\">{time.weekday}, {time.month} {time.day}</text>\n      </row>\n\n      <row class=\"w-full h-[54px] shrink-0 gap-[4px]\">\n        {days.map((day) => (\n          <column key={day} class={day === today\n            ? \"w-0 grow h-full items-center justify-center gap-[2px] rounded-[10px] bg-[#5eead4]/16\"\n            : \"w-0 grow h-full items-center justify-center gap-[2px] rounded-[10px] bg-[#ffffff]/4\"}>\n            <text class={day === today ? \"w-full text-center text-[12px] font-medium text-[#5eead4]\" : \"w-full text-center text-[12px] text-[#f5f6f8]/60\"}>{day[0]}</text>\n            <text class={day === today ? \"w-full text-center text-[18px] font-medium tabular-nums text-[#5eead4]\" : \"w-full text-center text-[18px] font-medium tabular-nums text-[#f5f6f8]\"}>{counts[day]}</text>\n          </column>\n        ))}\n      </row>\n\n      <row class=\"w-full h-[26px] shrink-0 items-center gap-[12px]\">\n        <row class=\"w-0 grow h-[6px] rounded-full bg-[#ffffff]/10 overflow-hidden\">\n          <panel class={`w-[${progress * 100}%] h-full rounded-full bg-[#5eead4]`} />\n        </row>\n        <text class=\"w-[52px] text-right text-[12px] tabular-nums text-[#f5f6f8]/75\">{total} / 20</text>\n      </row>\n\n      <row class=\"w-full h-[34px] shrink-0 gap-[8px]\">\n        <button accessibilityLabel=\"Log session\"\n          class=\"w-0 grow h-full rounded-[11px] bg-[#5eead4] hover:bg-[#87f1df] pressed:bg-[#3ac6b0]\"\n          onPress={() => setCounts((current) => ({ ...current, [today]: current[today] + 1 }))}>\n          <row class=\"size-full items-center\">\n            <text class=\"w-full text-center text-[13px] font-semibold text-[#0b0d12]\">Log session</text>\n          </row>\n        </button>\n        <button accessibilityLabel=\"Reset week\"\n          class=\"w-[110px] h-full rounded-[11px] bg-[#ffffff]/8 hover:bg-[#ffffff]/14 pressed:bg-[#ffffff]/20\"\n          onPress={() => setCounts({ ...emptyWeek })}>\n          <row class=\"size-full items-center\">\n            <text class=\"w-full text-center text-[13px] font-medium text-[#f5f6f8]/80\">Reset week</text>\n          </row>\n        </button>\n      </row>\n    </column>\n  );\n});\nEOF\nnpx --no-install weaver check /tmp/weaver-exp-astra/runs/B1",
+    "literal": true
+  },
+  {
+    "timestamp": "2026-09-05T15:31:40.166Z",
+    "call_id": "call_ylyvZaLpOWzyV0olQGUdZ2II",
+    "command": "rg -n 'fillRect|fillRound|CanvasCtx|canvas.*retained' sdk/CONTRACT.md",
+    "literal": true
+  },
+  {
+    "timestamp": "2026-09-05T15:31:40.166Z",
+    "call_id": "call_ylyvZaLpOWzyV0olQGUdZ2II",
+    "command": "sed -n '455,505p' sdk/CONTRACT.md",
+    "literal": true
+  },
+  {
+    "timestamp": "2026-09-05T15:32:07.726Z",
+    "call_id": "call_eIBYjz5yxNbLp6XqqTQStW7J",
+    "command": "sed -n '311,362p' sdk/CONTRACT.md",
+    "literal": true
+  },
+  {
+    "timestamp": "2026-09-05T15:32:07.726Z",
+    "call_id": "call_eIBYjz5yxNbLp6XqqTQStW7J",
+    "command": "python3 - <<'PY'\np='/tmp/weaver-exp-astra/runs/B1/widget.tsx'\ns=open(p).read().replace('<column key={day} class=', '<column class=')\ns=s.replace('text-[15px] font-semibold', 'text-[14px] font-semibold')\ns=s.replace('text-[12px] text-[#f5f6f8]/65', 'text-[14px] text-[#f5f6f8]/65')\ns=s.replace('''        <row class=\"w-0 grow h-[6px] rounded-full bg-[#ffffff]/10 overflow-hidden\">\n          <panel class={`w-[${progress * 100}%] h-full rounded-full bg-[#5eead4]`} />\n        </row>''','''        <canvas class=\"w-0 grow h-[6px]\" onFrame={(ctx) => {\n          ctx.clear();\n          ctx.fillRoundRect(0, 0, ctx.width, ctx.height, 3, \"#ffffff1a\");\n          if (progress > 0) ctx.fillRoundRect(0, 0, ctx.width * progress, ctx.height, 3, \"#5eead4\");\n        }} />''')\nopen(p,'w').write(s)\nPY\nnpx --no-install weaver check /tmp/weaver-exp-astra/runs/B1",
+    "literal": true
+  },
+  {
+    "timestamp": "2026-09-05T15:32:07.726Z",
+    "call_id": "call_eIBYjz5yxNbLp6XqqTQStW7J",
+    "command": "mkdir -p /tmp/weaver-exp-astra/runs/B1/captures\ncp /tmp/weaver-exp-astra/clicks.actions /tmp/weaver-exp-astra/runs/B1/clicks.actions\nnpx --no-install weaver capture /tmp/weaver-exp-astra/runs/B1 --clock 2026-09-04T09:41:00.000Z --out /tmp/weaver-exp-astra/runs/B1/captures/01-initial.png",
+    "literal": true
+  },
+  {
+    "timestamp": "2026-09-05T15:32:07.726Z",
+    "call_id": "call_eIBYjz5yxNbLp6XqqTQStW7J",
+    "command": "npx --no-install weaver capture /tmp/weaver-exp-astra/runs/B1 --clock 2026-09-04T09:41:00.000Z --action-file /tmp/weaver-exp-astra/runs/B1/clicks.actions --out /tmp/weaver-exp-astra/runs/B1/captures/02-after-clicks.png",
+    "literal": true
+  },
+  {
+    "timestamp": "2026-09-05T15:32:17.673Z",
+    "call_id": "call_tVSId6vf6Wg1HglZ181Ylc3X",
+    "command": "cat /tmp/weaver-exp-astra/runs/B1/captures/01-initial.snapshot.txt /tmp/weaver-exp-astra/runs/B1/captures/02-after-clicks.snapshot.txt /tmp/weaver-exp-astra/runs/B1/captures/01-initial.receipt.json /tmp/weaver-exp-astra/runs/B1/captures/02-after-clicks.receipt.json",
+    "literal": true
+  },
+  {
+    "timestamp": "2026-09-05T15:32:45.830Z",
+    "call_id": "call_PS3Rs8VtD58RMcUwxcruxmqe",
+    "command": "python3 - <<'PY'\np='/tmp/weaver-exp-astra/runs/B1/widget.tsx'\ns=open(p).read().replace('<canvas class=\"w-0 grow h-[6px]\"', '<canvas class=\"w-[224px] h-[6px]\"')\nopen(p,'w').write(s)\nPY\nnpx --no-install weaver check /tmp/weaver-exp-astra/runs/B1",
+    "literal": true
+  },
+  {
+    "timestamp": "2026-09-05T15:32:45.830Z",
+    "call_id": "call_PS3Rs8VtD58RMcUwxcruxmqe",
+    "command": "npx --no-install weaver capture /tmp/weaver-exp-astra/runs/B1 --clock 2026-09-04T09:41:00.000Z --out /tmp/weaver-exp-astra/runs/B1/captures/03-initial.png",
+    "literal": true
+  },
+  {
+    "timestamp": "2026-09-05T15:32:45.830Z",
+    "call_id": "call_PS3Rs8VtD58RMcUwxcruxmqe",
+    "command": "npx --no-install weaver capture /tmp/weaver-exp-astra/runs/B1 --clock 2026-09-04T09:41:00.000Z --action-file /tmp/weaver-exp-astra/runs/B1/clicks.actions --out /tmp/weaver-exp-astra/runs/B1/captures/04-after-clicks.png",
+    "literal": true
+  },
+  {
+    "timestamp": "2026-09-05T15:32:45.830Z",
+    "call_id": "call_PS3Rs8VtD58RMcUwxcruxmqe",
+    "command": "python3 - <<'PY'\nimport json\nfrom pathlib import Path\np=Path('/tmp/weaver-exp-astra/runs/B1/captures')\nfor name in ['03-initial','04-after-clicks']:\n print(name)\n print('\\n'.join(x for x in (p/(name+'.snapshot.txt')).read_text().splitlines() if 'widget @' in x))\n r=json.loads((p/(name+'.receipt.json')).read_text())\n print(json.dumps(r,indent=2))\nPY",
+    "literal": true
+  },
+  {
+    "timestamp": "2026-09-05T15:33:01.514Z",
+    "call_id": "call_CDeEQFTcdHbtlrGyjvDhwef1",
+    "command": "python3 - <<'PY'\nimport json\nfrom pathlib import Path\np=Path('/tmp/weaver-exp-astra/runs/B1')\na=json.loads((p/'clicks.actions').read_text())\na['actions'].append({'action':'click','target':{'role':'button','name':'Reset week'}})\n(p/'reset.actions').write_text(json.dumps(a,indent=2)+'\\n')\nPY\nnpx --no-install weaver capture /tmp/weaver-exp-astra/runs/B1 --clock 2026-09-04T09:41:00.000Z --action-file /tmp/weaver-exp-astra/runs/B1/reset.actions --out /tmp/weaver-exp-astra/runs/B1/captures/05-after-reset.png",
+    "literal": true
+  },
+  {
+    "timestamp": "2026-09-05T15:33:01.514Z",
+    "call_id": "call_CDeEQFTcdHbtlrGyjvDhwef1",
+    "command": "cat /tmp/weaver-exp-astra/runs/B1/captures/05-after-reset.snapshot.txt /tmp/weaver-exp-astra/runs/B1/captures/05-after-reset.receipt.json",
+    "literal": true
+  },
+  {
+    "timestamp": "2026-09-05T15:33:28.783Z",
+    "call_id": "call_FS886wIwUpywM62Po9BCFWH4",
+    "command": "cat > /tmp/weaver-exp-astra/runs/B1/REPORT.md <<'EOF'\n# Focus Week report\n\n- Condition: B (final capture).\n- `weaver check` runs: 3. First failed on unsupported JSX `key` and a dynamic class; both subsequent runs passed, including the final source.\n- `weaver capture` runs: 5. Every receipt has `status: \"ok\"`.\n- Defects fixed because of pixels or snapshots: the progress bar was invisible in captures 01 and 02 even though its semantic canvas bounds were 224×6. Replacing `w-0 grow` on the canvas with explicit `w-[224px]` made both track and fill visible in captures 03 and 04. The width comes from the measured 288px content row minus its 12px gap and 52px label.\n- Spec items not met: none known. Persistence uses `useStorage` with a weekday-keyed record; restart persistence was not independently exercised because captures use isolated empty storage.\n- Confidence: 9/10.\n\nFinal visual and semantic evidence:\n\n- `captures/03-initial.png`: Friday highlighted, all seven counts zero, `0 / 20`, visible empty track.\n- `captures/04-after-clicks.png`: Friday 3, other days zero, `3 / 20`, fill at 15% of the 224px track.\n- `captures/05-after-reset.png`: three logs followed by Reset week returns every count to zero and empties the track.\n\nAll five PNGs were opened and inspected at their 320×200, scale-1 dimensions; all snapshots and receipts were read. The final captures show aligned header text, equal day cells, legible text, distinct controls, and no clipping or overlap. Both button names match exactly. Native hover feedback is visible after clicks; both controls also declare native pressed styles.\n\nThe single pending timer is the subscribed time provider. No fetches, external providers, unresolved images, or frame requests remain. Receipts warn that the repository already contains uncommitted changes; no repository files were edited. No live development window was started, as requested.\nEOF",
+    "literal": true
+  }
+]

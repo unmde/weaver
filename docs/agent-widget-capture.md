@@ -77,7 +77,7 @@ node cli/bin/weaver.js capture examples/pomodoro \
   --action-file test/capture/pomodoro.actions \
   --out /tmp/pomodoro.png
 
-node cli/bin/weaver.js capture examples/styling-interaction \
+node cli/bin/weaver.js capture test/fixtures/styling-interaction \
   --action-file test/capture/styling-interaction.actions \
   --out /tmp/styling-interaction.png
 ```

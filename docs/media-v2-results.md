@@ -80,7 +80,7 @@ The Windows slice is complete through the noro gate:
 - Existing previous, play/pause, and next buttons deliver real SMTC commands.
 - The former static 312x3 progress stack is a pixel-matched click-to-seek
   button using the press event's normalized local `event.u`.
-- `skills/conjure-widget/SKILL.md` teaches `MediaData.artPath`,
+- `.agents/skills/conjure-widget/SKILL.md` teaches `MediaData.artPath`,
   `useMediaTransport`, the `media-transport` capability, and promise semantics.
 
 The full viewed visual checklist and capture inventory are in

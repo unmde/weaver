@@ -1,0 +1,110 @@
+[
+  {
+    "timestamp": "2026-09-05T15:42:49.693Z",
+    "call_id": "call_VHAgqRgLIip6clGj9RDEnbon",
+    "command": "cat /tmp/weaver-exp-astra/prompts/B4.md",
+    "literal": true
+  },
+  {
+    "timestamp": "2026-09-05T15:43:07.156Z",
+    "call_id": "call_q2PIyUIDzpQRxX2PJwhFhE8H",
+    "command": "cat .agents/skills/conjure-widget/SKILL.md",
+    "literal": true
+  },
+  {
+    "timestamp": "2026-09-05T15:43:07.156Z",
+    "call_id": "call_q2PIyUIDzpQRxX2PJwhFhE8H",
+    "command": "rg -n '^#{1,6} .*|Module shape|widget\\(config|useStorage|PR 11|Consolidated v0.4' sdk/CONTRACT.md",
+    "literal": true
+  },
+  {
+    "timestamp": "2026-09-05T15:43:07.156Z",
+    "call_id": "call_q2PIyUIDzpQRxX2PJwhFhE8H",
+    "command": "cat examples/pomodoro/widget.tsx examples/clock/widget.tsx",
+    "literal": true
+  },
+  {
+    "timestamp": "2026-09-05T15:43:15.606Z",
+    "call_id": "call_3vMILMZZQ686sAkJc6GZORed",
+    "command": "sed -n '20,114p' sdk/CONTRACT.md",
+    "literal": true
+  },
+  {
+    "timestamp": "2026-09-05T15:43:15.606Z",
+    "call_id": "call_3vMILMZZQ686sAkJc6GZORed",
+    "command": "sed -n '410,418p' sdk/CONTRACT.md; sed -n '464,505p' sdk/CONTRACT.md; sed -n '538,632p' sdk/CONTRACT.md",
+    "literal": true
+  },
+  {
+    "timestamp": "2026-09-05T15:43:15.606Z",
+    "call_id": "call_3vMILMZZQ686sAkJc6GZORed",
+    "command": "cat docs/agent-widget-capture.md",
+    "literal": true
+  },
+  {
+    "timestamp": "2026-09-05T15:43:15.606Z",
+    "call_id": "call_3vMILMZZQ686sAkJc6GZORed",
+    "command": "npx --no-install weaver init /tmp/weaver-exp-astra/runs/B4",
+    "literal": true
+  },
+  {
+    "timestamp": "2026-09-05T15:44:22.739Z",
+    "call_id": "call_xZTnCSgGefatR3KrRBlr1rtA",
+    "command": "cat /tmp/weaver-exp-astra/runs/B4/widget.tsx",
+    "literal": true
+  },
+  {
+    "timestamp": "2026-09-05T15:44:22.739Z",
+    "call_id": "call_xZTnCSgGefatR3KrRBlr1rtA",
+    "command": "cat > /tmp/weaver-exp-astra/runs/B4/widget.tsx <<'EOF'\nimport { useProvider, useStorage, widget } from \"@weaver/sdk\";\n\nconst days = [\"Mon\", \"Tue\", \"Wed\", \"Thu\", \"Fri\", \"Sat\", \"Sun\"];\nconst letters = [\"M\", \"T\", \"W\", \"T\", \"F\", \"S\", \"S\"];\nconst emptyWeek: Record<string, number> = { Mon: 0, Tue: 0, Wed: 0, Thu: 0, Fri: 0, Sat: 0, Sun: 0 };\n\nexport default widget({\n  name: \"Focus Week\",\n  size: [320, 200],\n  anchor: { corner: \"top-right\", offset: [24, 24] },\n  subscribe: [\"time\"],\n}, () => {\n  const time = useProvider(\"time\");\n  const [sessions, setSessions] = useStorage<Record<string, number>>(\"sessions\", emptyWeek);\n  const total = days.reduce((sum, day) => sum + sessions[day], 0);\n  const progress = Math.min(total, 20);\n\n  return (\n    <column class=\"size-full p-[18px] gap-[12px] bg-[#0b0d12]/92 rounded-[24px]\">\n      <row class=\"w-full h-[20px] shrink-0 items-baseline justify-between\">\n        <text class=\"text-[14px] leading-[20px] font-semibold text-[#f5f6f8]\">Focus week</text>\n        <text class=\"text-[14px] leading-[20px] text-[#f5f6f8]/65\">{time.weekday}, {time.month} {time.day}</text>\n      </row>\n\n      <row class=\"w-full h-[54px] shrink-0 gap-[4px]\">\n        {days.map((day, index) => (\n          <column class={day === time.weekday\n            ? \"w-[0px] grow h-full items-center justify-center gap-[4px] rounded-[10px] bg-[#5eead4]/18\"\n            : \"w-[0px] grow h-full items-center justify-center gap-[4px] rounded-[10px] bg-[#ffffff]/4\"}>\n            <text class={day === time.weekday ? \"text-[11px] text-[#5eead4] font-medium\" : \"text-[11px] text-[#f5f6f8]/60\"}>{letters[index]}</text>\n            <text class={day === time.weekday ? \"text-[18px] leading-[22px] font-semibold tabular-nums text-[#5eead4]\" : \"text-[18px] leading-[22px] font-medium tabular-nums text-[#f5f6f8]\"}>{sessions[day]}</text>\n          </column>\n        ))}\n      </row>\n\n      <row class=\"w-full h-[20px] shrink-0 items-center gap-[12px]\">\n        <row class=\"w-[0px] grow h-[6px] bg-[#ffffff]/12 rounded-full overflow-hidden\">\n          {progress > 0 ? <panel class={`w-${progress}/20 h-full bg-[#5eead4] rounded-full`} /> : null}\n        </row>\n        <text class=\"w-[60px] shrink-0 text-right text-[12px] tabular-nums text-[#f5f6f8]/75\">{total} / 20</text>\n      </row>\n\n      <row class=\"w-full h-[34px] shrink-0 gap-[8px]\">\n        <button accessibilityLabel=\"Log session\" class=\"w-[0px] grow h-full rounded-[10px] bg-[#5eead4] hover:bg-[#99f6e4] pressed:bg-[#2dd4bf]\" onPress={() => setSessions((current) => ({ ...current, [time.weekday]: current[time.weekday] + 1 }))}>\n          <row class=\"size-full items-center\">\n            <text class=\"w-full text-center text-[12px] font-semibold text-[#0b0d12]\">Log session</text>\n          </row>\n        </button>\n        <button accessibilityLabel=\"Reset week\" class=\"w-[104px] h-full rounded-[10px] bg-[#ffffff]/8 hover:bg-[#ffffff]/14 pressed:bg-[#ffffff]/20\" onPress={() => setSessions({ ...emptyWeek })}>\n          <row class=\"size-full items-center\">\n            <text class=\"w-full text-center text-[12px] font-medium text-[#f5f6f8]/80\">Reset week</text>\n          </row>\n        </button>\n      </row>\n    </column>\n  );\n});\nEOF\nnpx --no-install weaver check /tmp/weaver-exp-astra/runs/B4",
+    "literal": true
+  },
+  {
+    "timestamp": "2026-09-05T15:44:45.155Z",
+    "call_id": "call_2zMfSKZrIeI2JoC53v7U3a9F",
+    "command": "python3 - <<'PY'\np='/tmp/weaver-exp-astra/runs/B4/widget.tsx'\ns=open(p).read()\nwidth='\\n'.join('    progress === '+str(i)+' ? \"w-'+str(i)+'/20 h-full bg-[#5eead4] rounded-full\" :' for i in range(1,20))+'\\n    \"w-full h-full bg-[#5eead4] rounded-full\";'\ns=s.replace('  const progress = Math.min(total, 20);','  const progress = Math.min(total, 20);\\n  const progressClass =\\n'+width)\ns=s.replace('class={`w-${progress}/20 h-full bg-[#5eead4] rounded-full`}', 'class={progressClass}')\nopen(p,'w').write(s)\nPY\nnpx --no-install weaver check /tmp/weaver-exp-astra/runs/B4",
+    "literal": true
+  },
+  {
+    "timestamp": "2026-09-05T15:44:45.155Z",
+    "call_id": "call_2zMfSKZrIeI2JoC53v7U3a9F",
+    "command": "mkdir -p /tmp/weaver-exp-astra/runs/B4/captures\ncp /tmp/weaver-exp-astra/clicks.actions /tmp/weaver-exp-astra/runs/B4/clicks.actions\nnpx --no-install weaver capture /tmp/weaver-exp-astra/runs/B4 --clock 2026-09-04T09:41:00.000Z --out /tmp/weaver-exp-astra/runs/B4/captures/01-initial.png",
+    "literal": true
+  },
+  {
+    "timestamp": "2026-09-05T15:44:55.553Z",
+    "call_id": "call_2gs0oucYUoYTnCdmzIm5d6av",
+    "command": "npx --no-install weaver capture /tmp/weaver-exp-astra/runs/B4 --clock 2026-09-04T09:41:00.000Z --action-file /tmp/weaver-exp-astra/runs/B4/clicks.actions --out /tmp/weaver-exp-astra/runs/B4/captures/02-after-clicks.png",
+    "literal": true
+  },
+  {
+    "timestamp": "2026-09-05T15:44:55.553Z",
+    "call_id": "call_2gs0oucYUoYTnCdmzIm5d6av",
+    "command": "cat /tmp/weaver-exp-astra/runs/B4/captures/01-initial.snapshot.txt /tmp/weaver-exp-astra/runs/B4/captures/01-initial.receipt.json",
+    "literal": true
+  },
+  {
+    "timestamp": "2026-09-05T15:45:03.922Z",
+    "call_id": "call_cnbOBVAj3Nk8qFsXhdLAm5I9",
+    "command": "cat /tmp/weaver-exp-astra/runs/B4/captures/02-after-clicks.snapshot.txt /tmp/weaver-exp-astra/runs/B4/captures/02-after-clicks.receipt.json",
+    "literal": true
+  },
+  {
+    "timestamp": "2026-09-05T15:45:20.431Z",
+    "call_id": "call_VYTzx6YDkqqqji1lklmBjT1w",
+    "command": "python3 - <<'PY'\nimport json\np='/tmp/weaver-exp-astra/runs/B4/'\ndata=json.load(open(p+'clicks.actions'))\ndata['actions'].append({'action':'click','target':{'role':'button','name':'Reset week'}})\njson.dump(data,open(p+'reset.actions','w'),indent=2)\nPY\nnpx --no-install weaver check /tmp/weaver-exp-astra/runs/B4\nnpx --no-install weaver capture /tmp/weaver-exp-astra/runs/B4 --clock 2026-09-04T09:41:00.000Z --action-file /tmp/weaver-exp-astra/runs/B4/reset.actions --out /tmp/weaver-exp-astra/runs/B4/captures/03-after-reset.png",
+    "literal": true
+  },
+  {
+    "timestamp": "2026-09-05T15:45:29.781Z",
+    "call_id": "call_crhMQGsEEnUF5qbL5035Ov8V",
+    "command": "cat /tmp/weaver-exp-astra/runs/B4/captures/03-after-reset.snapshot.txt /tmp/weaver-exp-astra/runs/B4/captures/03-after-reset.receipt.json",
+    "literal": true
+  },
+  {
+    "timestamp": "2026-09-05T15:45:57.826Z",
+    "call_id": "call_aStKTLpYu2yCi3MwxwWGQAhn",
+    "command": "cat > /tmp/weaver-exp-astra/runs/B4/REPORT.md <<'EOF'\n# Focus Week — B4\n\n- Condition: B (final capture). The complete widget was authored before the first capture.\n- `weaver check` runs: 3 (first failed on an unbounded dynamic class; two subsequent runs passed).\n- `weaver capture` runs: 3, all with status `ok`.\n- Defects fixed because of pixels or snapshots: none.\n- Spec items not met: none identified. Persistence uses `useStorage` with a record keyed by weekday; restarting a live widget was not exercised because live execution was prohibited. Reset is manual, as specified.\n- Confidence: 9/10.\n\nOpened and inspected every PNG at its native 320×200 dimensions and read every snapshot and receipt:\n\n- `captures/01-initial.png`: Friday highlighted, seven zero counts, `0 / 20`, empty bar, equal day cells and aligned header. Text, spacing, contrast, and button bounds are clean.\n- `captures/02-after-clicks.png`: Friday 3, every other day 0, `3 / 20`; semantic fill width 31.800001 against track width 212 confirms 15%. Primary native hover color is visible.\n- `captures/03-after-reset.png`: three logs followed by Reset week returns every count and the total to zero and empties the bar. Secondary native hover color is visible.\n\nAccessible button names are exactly `Log session` and `Reset week`. Both declare native hover and pressed styles. The widget subscribes only to time and makes no network calls. All receipts report no pending fetches, images, providers, or frame requests; the time subscription accounts for the pending timer. Their sole warning records pre-existing uncommitted checkout changes; no repository files were modified. `weaver dev` was not run.\n\nThe static-check fix replaced an arbitrary interpolated progress class with an explicit set of validated width classes for the 20-session goal. It happened before the first capture and was not a pixel-driven repair.\nEOF",
+    "literal": true
+  }
+]

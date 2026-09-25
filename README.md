@@ -217,8 +217,31 @@ See [`macos-m12-results.md`](docs/macos-m12-results.md) and the live
 blockers.
 
 Or do it the intended way: point your coding agent at
-[`skills/conjure-widget/SKILL.md`](skills/conjure-widget/SKILL.md) and ask it
+[`.agents/skills/conjure-widget/SKILL.md`](.agents/skills/conjure-widget/SKILL.md) and ask it
 for the widget you actually want.
+
+## Examples
+
+Each directory under [`examples/`](examples) is one complete widget that
+checks and captures on the current runtime. They are the house style, and the
+first thing an agent should read before conjuring something similar.
+
+| Example | Shows |
+|---|---|
+| [`clock`](examples/clock/widget.tsx) | the `time` provider, a layered gradient surface, a canvas dial that redraws once per render |
+| [`system`](examples/system/widget.tsx) | `cpu` and `memory` providers, a minute of history kept in an effect, canvas charts |
+| [`pomodoro`](examples/pomodoro/widget.tsx) | `useStorage`, `useInterval`, buttons with native `hover:` and `pressed:` states |
+| [`now-playing`](examples/now-playing/widget.tsx) | the `media` provider, conditional artwork, `media-transport`, click-to-seek |
+| [`weather`](examples/weather/widget.tsx) | declared `origins` and `wfetch` against Open-Meteo, with honest loading and failure states |
+| [`noro-shell`](examples/noro-shell/widget.tsx), [`noro-signal`](examples/noro-signal/widget.tsx) | pixel-faithful media skins: bundled fonts, tiled image assets, transport |
+| [`visualizer`](examples/visualizer/widget.tsx) | the `audio` signal driving a display-rate canvas that sleeps on silence |
+
+Render any of them without a desktop session:
+
+```sh
+weaver capture examples/system \
+  --provider-fixture test/capture/system.provider.json --out /tmp/system.png
+```
 
 ## How it's put together
 
@@ -227,7 +250,7 @@ for the widget you actually want.
 | `runtime/` | `weaver-widget[.exe]` — Zig, embeds QuickJS-NG, renders via the Native SDK fork (submodule `runtime/native-sdk`) |
 | `sdk/` | `@weaver/sdk` — the authoring API: reconciler, hooks, class compiler. Contract frozen in [`sdk/CONTRACT.md`](sdk/CONTRACT.md) |
 | `cli/` | `weaver` — init / check / bundle / capture / dev / pack / inspect / install / uninstall / logs |
-| `skills/` | agent skills (conjuring is the primary authoring path) |
+| `.agents/skills/` | agent skills, mirrored in `.claude/skills/` (conjuring is the primary authoring path) |
 | `docs/adr/` | why things are the way they are — start here to understand the project |
 | `CONTEXT.md` | the domain glossary |
 

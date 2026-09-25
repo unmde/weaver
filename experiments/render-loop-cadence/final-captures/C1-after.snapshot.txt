@@ -1,0 +1,96 @@
+ready=true protocol=6 frame=0 commands=0 runtime_uptime_ns=103449000 dispatch_errors=0 dropped_trace_records=0 publisher_pid=10874 markup_watch=off
+window @w1 "Focus Week" bounds=(0,0 320x200) focused=true frame=0 commands=0
+  view @w1/widget-canvas kind=gpu_surface role="Weaver widget canvas" accessibility_label="Focus Week" text="Weaver widget canvas" bounds=(0,0 320x200) layer=0 visible=true enabled=true focused=true open=true gpu_size=320x200 gpu_scale=1 gpu_backend=software gpu_pixel_format=bgra8_unorm gpu_present_mode=timer gpu_alpha_mode=premultiplied gpu_color_space=srgb gpu_vsync=false gpu_status=ready gpu_present_path=pixels gpu_frame=5 gpu_timestamp_ns=67666668 gpu_frame_interval_ns=16666667 gpu_input_timestamp_ns=1788571599206982000 gpu_input_latency_ns=15715000 gpu_input_latency_budget_ns=16666667 gpu_input_latency_budget_exceeded=0 gpu_input_latency_budget_ok=true gpu_first_frame_latency_ns=0 gpu_first_frame_latency_budget_ns=150000000 gpu_first_frame_latency_budget_exceeded=0 gpu_first_frame_latency_budget_ok=true gpu_nonblank=false gpu_sample=0x00000000 present_fallback=none present_fallback_needed=0 present_fallback_limit=0 present_fallback_command="" present_fallback_frames=0 present_mode=none present_patch_bytes=0 present_patch_upserts=0 present_patch_evicts=0 present_retained_commands=0 canvas_revision=4 canvas_commands=89 canvas_frame_requires_render=true canvas_frame_full_repaint=true canvas_frame_batches=28 canvas_frame_encoder_commands=181 canvas_frame_encoder_cache_actions=122 canvas_frame_encoder_pipeline_binds=28 canvas_frame_encoder_draws=28 canvas_frame_pipelines=4 canvas_frame_pipeline_uploads=0 canvas_frame_pipeline_retains=4 canvas_frame_pipeline_evicts=0 canvas_frame_path_geometries=0 canvas_frame_path_vertices=0 canvas_frame_path_indices=0 canvas_frame_path_uploads=0 canvas_frame_path_retains=0 canvas_frame_path_evicts=0 canvas_frame_images=0 canvas_frame_image_uploads=0 canvas_frame_image_retains=0 canvas_frame_image_evicts=0 canvas_frame_layers=2 canvas_frame_opacity_layers=1 canvas_frame_clip_layers=1 canvas_frame_transform_layers=0 canvas_frame_layer_uploads=0 canvas_frame_layer_retains=2 canvas_frame_layer_evicts=0 canvas_frame_resources=26 canvas_frame_uploads=0 canvas_frame_retains=26 canvas_frame_evicts=0 canvas_frame_effects=4 canvas_frame_shadows=4 canvas_frame_blurs=0 canvas_frame_effect_uploads=0 canvas_frame_effect_retains=4 canvas_frame_effect_evicts=0 canvas_frame_glyphs=56 canvas_frame_glyph_uploads=0 canvas_frame_glyph_retains=60 canvas_frame_glyph_evicts=0 canvas_frame_text_layouts=20 canvas_frame_text_lines=20 canvas_frame_text_uploads=0 canvas_frame_text_retains=26 canvas_frame_text_evicts=0 canvas_frame_gpu_packet_commands=85 canvas_frame_gpu_packet_cache_actions=122 canvas_frame_gpu_packet_cached_resources=26 canvas_frame_gpu_packet_unsupported=0 canvas_frame_gpu_packet_representable=true canvas_frame_changes=0 canvas_frame_budget_exceeded=0 canvas_frame_budget_ok=true widget_nodes=93/1024 widget_semantics=93/1024 context_menu_items=0/512 text_layout_plans=20/2048 text_layout_lines=20/8192 canvas_frame_dirty=(0,0 320x200) canvas_frame_profile_work_units=707 canvas_frame_profile_risk=high canvas_frame_profile_surface_area=64000 canvas_frame_profile_dirty_area=64000 canvas_frame_profile_dirty_ratio=1 widget_revision=8 widget_nodes=93 widget_semantics=93 widget_cursor=arrow
+    widget @w1/widget-canvas#6194227322212544528 role=group name="" bounds=(0,0 320x200) focused=false enabled=true
+    widget @w1/widget-canvas#8989280229327462431 role=group name="" bounds=(18,16 284x168) focused=false enabled=true parent=#6194227322212544528
+    widget @w1/widget-canvas#17141410367181492475 role=group name="" bounds=(18,16 284x15) focused=false enabled=true parent=#8989280229327462431
+    widget @w1/widget-canvas#16282996836656487105 role=text name="Focus week" bounds=(18,16 87.91674x15) focused=false enabled=true parent=#17141410367181492475
+    widget @w1/widget-canvas#7085508171825967427 role=text name="Fri, Sep 4" bounds=(247.73633,19 54.26367x12) focused=false enabled=true parent=#17141410367181492475
+    widget @w1/widget-canvas#10162277730996300551 role=group name="" bounds=(18,45 284x42) focused=false enabled=true parent=#8989280229327462431
+    widget @w1/widget-canvas#5743744725605747535 role=group name="" bounds=(18,45 40.571426x42) focused=false enabled=true parent=#10162277730996300551
+    widget @w1/widget-canvas#4424186537103983558 role=group name="" bounds=(20,45 36.571426x42) focused=false enabled=true parent=#5743744725605747535
+    widget @w1/widget-canvas#2428102130381644357 role=group name="" bounds=(20,52 36.571426x28) focused=false enabled=true parent=#4424186537103983558
+    widget @w1/widget-canvas#5036925338709116941 role=text name="M" bounds=(33.607002,52 9.357422x10) focused=false enabled=true parent=#2428102130381644357
+    widget @w1/widget-canvas#7445899412393006508 role=text name="0" bounds=(33.57624,65 9.418945x15) focused=false enabled=true parent=#2428102130381644357
+    widget @w1/widget-canvas#12392041750931625881 role=group name="" bounds=(58.571426,45 40.571426x42) focused=false enabled=true parent=#10162277730996300551
+    widget @w1/widget-canvas#9042723113057631623 role=group name="" bounds=(60.571426,45 36.571426x42) focused=false enabled=true parent=#12392041750931625881
+    widget @w1/widget-canvas#1911011459636458852 role=group name="" bounds=(60.571426,52 36.571426x28) focused=false enabled=true parent=#9042723113057631623
+    widget @w1/widget-canvas#13495370015047273503 role=text name="T" bounds=(75.3796,52 6.955078x10) focused=false enabled=true parent=#1911011459636458852
+    widget @w1/widget-canvas#11248424745687431576 role=text name="0" bounds=(74.14767,65 9.418945x15) focused=false enabled=true parent=#1911011459636458852
+    widget @w1/widget-canvas#2798845554877152242 role=group name="" bounds=(99.14285,45 40.571426x42) focused=false enabled=true parent=#10162277730996300551
+    widget @w1/widget-canvas#7296780229786415153 role=group name="" bounds=(101.14285,45 36.571426x42) focused=false enabled=true parent=#2798845554877152242
+    widget @w1/widget-canvas#9271565681298391461 role=group name="" bounds=(101.14285,52 36.571426x28) focused=false enabled=true parent=#7296780229786415153
+    widget @w1/widget-canvas#7285692155281014087 role=text name="W" bounds=(114.281105,52 10.294922x10) focused=false enabled=true parent=#9271565681298391461
+    widget @w1/widget-canvas#802649812111143556 role=text name="0" bounds=(114.71909,65 9.418945x15) focused=false enabled=true parent=#9271565681298391461
+    widget @w1/widget-canvas#10547606456136237439 role=group name="" bounds=(139.71428,45 40.571426x42) focused=false enabled=true parent=#10162277730996300551
+    widget @w1/widget-canvas#3755191306193106791 role=group name="" bounds=(141.71428,45 36.571426x42) focused=false enabled=true parent=#10547606456136237439
+    widget @w1/widget-canvas#9426587283709577362 role=group name="" bounds=(141.71428,52 36.571426x28) focused=false enabled=true parent=#3755191306193106791
+    widget @w1/widget-canvas#1591004126705514636 role=text name="T" bounds=(156.52246,52 6.955078x10) focused=false enabled=true parent=#9426587283709577362
+    widget @w1/widget-canvas#423660634609421494 role=text name="0" bounds=(155.29053,65 9.418945x15) focused=false enabled=true parent=#9426587283709577362
+    widget @w1/widget-canvas#15015154310066103275 role=group name="" bounds=(180.2857,45 40.571426x42) focused=false enabled=true parent=#10162277730996300551
+    widget @w1/widget-canvas#16896545707069005182 role=group name="" bounds=(182.2857,45 36.571426x42) focused=false enabled=true parent=#15015154310066103275
+    widget @w1/widget-canvas#3203703068654794736 role=group name="" bounds=(182.2857,52 36.571426x28) focused=false enabled=true parent=#16896545707069005182
+    widget @w1/widget-canvas#13786191748898983725 role=text name="F" bounds=(197.40149,52 6.3398438x10) focused=false enabled=true parent=#3203703068654794736
+    widget @w1/widget-canvas#13826355370529843847 role=text name="3" bounds=(195.48474,65 10.17334x15) focused=false enabled=true parent=#3203703068654794736
+    widget @w1/widget-canvas#134348505103821528 role=group name="" bounds=(220.85713,45 40.571426x42) focused=false enabled=true parent=#10162277730996300551
+    widget @w1/widget-canvas#2340136145418704815 role=group name="" bounds=(222.85713,45 36.571426x42) focused=false enabled=true parent=#134348505103821528
+    widget @w1/widget-canvas#9812687000789051539 role=group name="" bounds=(222.85713,52 36.571426x28) focused=false enabled=true parent=#2340136145418704815
+    widget @w1/widget-canvas#6733426896005681708 role=text name="S" bounds=(237.64822,52 6.989258x10) focused=false enabled=true parent=#9812687000789051539
+    widget @w1/widget-canvas#15729049687520163901 role=text name="0" bounds=(236.43338,65 9.418945x15) focused=false enabled=true parent=#9812687000789051539
+    widget @w1/widget-canvas#17833843196129393581 role=group name="" bounds=(261.42856,45 40.571426x42) focused=false enabled=true parent=#10162277730996300551
+    widget @w1/widget-canvas#9787074478480440413 role=group name="" bounds=(263.42856,45 36.571426x42) focused=false enabled=true parent=#17833843196129393581
+    widget @w1/widget-canvas#417995898018150637 role=group name="" bounds=(263.42856,52 36.571426x28) focused=false enabled=true parent=#9787074478480440413
+    widget @w1/widget-canvas#9181518193224604988 role=text name="S" bounds=(278.21964,52 6.989258x10) focused=false enabled=true parent=#417995898018150637
+    widget @w1/widget-canvas#2627286533109177756 role=text name="0" bounds=(277.0048,65 9.418945x15) focused=false enabled=true parent=#417995898018150637
+    widget @w1/widget-canvas#11042477908510433656 role=group name="" bounds=(18,101 284x27) focused=false enabled=true parent=#8989280229327462431
+    widget @w1/widget-canvas#13497137971391810392 role=group name="" bounds=(18,101 284x12) focused=false enabled=true parent=#11042477908510433656
+    widget @w1/widget-canvas#10422795391015277995 role=text name="Sessions this week" bounds=(18,102 106.43098x11) focused=false enabled=true parent=#13497137971391810392
+    widget @w1/widget-canvas#3469744615432886383 role=text name="3 / 20" bounds=(267.9273,101 34.0727x12) focused=false enabled=true parent=#13497137971391810392
+    widget @w1/widget-canvas#11464198168306097265 role=group name="" bounds=(18,120 284x8) focused=false enabled=true parent=#11042477908510433656
+    widget @w1/widget-canvas#14075969226659233625 role=group name="" bounds=(18,120 11.35x8) focused=false enabled=true parent=#11464198168306097265
+    widget @w1/widget-canvas#1753948002084364320 role=group name="" bounds=(18,120 11.35x8) focused=false enabled=true parent=#14075969226659233625
+    widget @w1/widget-canvas#6570805353255671499 role=group name="" bounds=(32.35,120 11.35x8) focused=false enabled=true parent=#11464198168306097265
+    widget @w1/widget-canvas#17656023610392828897 role=group name="" bounds=(32.35,120 11.35x8) focused=false enabled=true parent=#6570805353255671499
+    widget @w1/widget-canvas#8701200248999500261 role=group name="" bounds=(46.699997,120 11.35x8) focused=false enabled=true parent=#11464198168306097265
+    widget @w1/widget-canvas#10966752483795794170 role=group name="" bounds=(46.699997,120 11.35x8) focused=false enabled=true parent=#8701200248999500261
+    widget @w1/widget-canvas#13527403412610651720 role=group name="" bounds=(61.049995,120 11.35x8) focused=false enabled=true parent=#11464198168306097265
+    widget @w1/widget-canvas#5753417367632498755 role=group name="" bounds=(61.049995,120 11.35x8) focused=false enabled=true parent=#13527403412610651720
+    widget @w1/widget-canvas#13635469530840347363 role=group name="" bounds=(75.399994,120 11.35x8) focused=false enabled=true parent=#11464198168306097265
+    widget @w1/widget-canvas#8637756170459363286 role=group name="" bounds=(75.399994,120 11.35x8) focused=false enabled=true parent=#13635469530840347363
+    widget @w1/widget-canvas#11783282374073923389 role=group name="" bounds=(89.74999,120 11.35x8) focused=false enabled=true parent=#11464198168306097265
+    widget @w1/widget-canvas#2559976082750952458 role=group name="" bounds=(89.74999,120 11.35x8) focused=false enabled=true parent=#11783282374073923389
+    widget @w1/widget-canvas#17029288176560108917 role=group name="" bounds=(104.09999,120 11.35x8) focused=false enabled=true parent=#11464198168306097265
+    widget @w1/widget-canvas#410150582816905342 role=group name="" bounds=(104.09999,120 11.35x8) focused=false enabled=true parent=#17029288176560108917
+    widget @w1/widget-canvas#11205498459203833176 role=group name="" bounds=(118.44999,120 11.35x8) focused=false enabled=true parent=#11464198168306097265
+    widget @w1/widget-canvas#6316788077998381370 role=group name="" bounds=(118.44999,120 11.35x8) focused=false enabled=true parent=#11205498459203833176
+    widget @w1/widget-canvas#2246091263593899101 role=group name="" bounds=(132.79999,120 11.35x8) focused=false enabled=true parent=#11464198168306097265
+    widget @w1/widget-canvas#10406161108069067221 role=group name="" bounds=(132.79999,120 11.35x8) focused=false enabled=true parent=#2246091263593899101
+    widget @w1/widget-canvas#1426319289549790707 role=group name="" bounds=(147.15,120 11.35x8) focused=false enabled=true parent=#11464198168306097265
+    widget @w1/widget-canvas#884567278473380636 role=group name="" bounds=(147.15,120 11.35x8) focused=false enabled=true parent=#1426319289549790707
+    widget @w1/widget-canvas#14540414246768961099 role=group name="" bounds=(161.5,120 11.35x8) focused=false enabled=true parent=#11464198168306097265
+    widget @w1/widget-canvas#288233966561996061 role=group name="" bounds=(161.5,120 11.35x8) focused=false enabled=true parent=#14540414246768961099
+    widget @w1/widget-canvas#1625034029865857546 role=group name="" bounds=(175.85,120 11.35x8) focused=false enabled=true parent=#11464198168306097265
+    widget @w1/widget-canvas#2837332745728423667 role=group name="" bounds=(175.85,120 11.35x8) focused=false enabled=true parent=#1625034029865857546
+    widget @w1/widget-canvas#17008002128939413576 role=group name="" bounds=(190.20001,120 11.35x8) focused=false enabled=true parent=#11464198168306097265
+    widget @w1/widget-canvas#1332974331711251147 role=group name="" bounds=(190.20001,120 11.35x8) focused=false enabled=true parent=#17008002128939413576
+    widget @w1/widget-canvas#1999499713382163045 role=group name="" bounds=(204.55002,120 11.35x8) focused=false enabled=true parent=#11464198168306097265
+    widget @w1/widget-canvas#6559351030723410460 role=group name="" bounds=(204.55002,120 11.35x8) focused=false enabled=true parent=#1999499713382163045
+    widget @w1/widget-canvas#17641968588901846976 role=group name="" bounds=(218.90002,120 11.35x8) focused=false enabled=true parent=#11464198168306097265
+    widget @w1/widget-canvas#8818928649754076621 role=group name="" bounds=(218.90002,120 11.35x8) focused=false enabled=true parent=#17641968588901846976
+    widget @w1/widget-canvas#1272434707947114252 role=group name="" bounds=(233.25003,120 11.35x8) focused=false enabled=true parent=#11464198168306097265
+    widget @w1/widget-canvas#16298232974652290698 role=group name="" bounds=(233.25003,120 11.35x8) focused=false enabled=true parent=#1272434707947114252
+    widget @w1/widget-canvas#4920910613241451683 role=group name="" bounds=(247.60004,120 11.35x8) focused=false enabled=true parent=#11464198168306097265
+    widget @w1/widget-canvas#11370141573566754118 role=group name="" bounds=(247.60004,120 11.35x8) focused=false enabled=true parent=#4920910613241451683
+    widget @w1/widget-canvas#17897000519267774779 role=group name="" bounds=(261.95004,120 11.35x8) focused=false enabled=true parent=#11464198168306097265
+    widget @w1/widget-canvas#12956105731744913870 role=group name="" bounds=(261.95004,120 11.35x8) focused=false enabled=true parent=#17897000519267774779
+    widget @w1/widget-canvas#10135565979688493150 role=group name="" bounds=(276.30005,120 11.35x8) focused=false enabled=true parent=#11464198168306097265
+    widget @w1/widget-canvas#213595096875862979 role=group name="" bounds=(276.30005,120 11.35x8) focused=false enabled=true parent=#10135565979688493150
+    widget @w1/widget-canvas#13701739376575018508 role=group name="" bounds=(290.65005,120 11.35x8) focused=false enabled=true parent=#11464198168306097265
+    widget @w1/widget-canvas#10889699711043493040 role=group name="" bounds=(290.65005,120 11.35x8) focused=false enabled=true parent=#13701739376575018508
+    widget @w1/widget-canvas#9833334659390856017 role=group name="" bounds=(18,142 284x42) focused=false enabled=true parent=#8989280229327462431
+    widget @w1/widget-canvas#7085761552478848393 role=button name="Log session" bounds=(18,142 172x42) focused=true enabled=true parent=#9833334659390856017 state=[focused,hovered] actions=[focus,press]
+    widget @w1/widget-canvas#9045096818664730114 role=group name="" bounds=(18,142 172x42) focused=false enabled=true parent=#7085761552478848393
+    widget @w1/widget-canvas#17636400897664816725 role=text name="Log session" bounds=(18,154.25 172x17.5) focused=false enabled=true parent=#9045096818664730114
+    widget @w1/widget-canvas#16583274180877314111 role=button name="Reset week" bounds=(198,142 104x42) focused=false enabled=true parent=#9833334659390856017 actions=[focus,press]
+    widget @w1/widget-canvas#5650537466637369561 role=group name="" bounds=(198,142 104x42) focused=false enabled=true parent=#16583274180877314111
+    widget @w1/widget-canvas#14761013090513811271 role=text name="Reset week" bounds=(198,154.25 104x17.5) focused=false enabled=true parent=#5650537466637369561

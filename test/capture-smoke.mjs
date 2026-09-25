@@ -13,14 +13,14 @@ const fixedClock = "2026-08-24T17:30:00.000Z";
 
 try {
   const clock = capture("clock", "examples/clock");
-  assert.deepEqual([clock.output.widthPx, clock.output.heightPx], [240, 110]);
+  assert.deepEqual([clock.output.widthPx, clock.output.heightPx], [320, 132]);
 
   const resizedClock = capture("clock-resized", "examples/clock", [
     "--action-file", join(root, "test", "capture", "resize.actions"),
   ]);
   assert.deepEqual([resizedClock.output.widthPx, resizedClock.output.heightPx], [962, 719]);
 
-  const text = capture("styling-text", "examples/styling-text");
+  const text = capture("styling-text", "test/fixtures/styling-text");
   assert.ok(text.renderer.pixelsDifferentFromClear > 0);
 
   // A layout-sized canvas paints at its laid-out width on the first frame and
@@ -44,7 +44,7 @@ try {
   assert.match(snapshotText(classHoleClicked), /role=group name="" bounds=\(\d+(?:\.\d+)?,\d+(?:\.\d+)? 42x8\)/, "hole fill is 42px after three clicks");
   assert.ok(countPixels(classHoleClicked, [0x5e, 0xea, 0xd4]) > countPixels(classHole, [0x5e, 0xea, 0xd4]), "hole fill painted more accent after clicks");
 
-  const images = capture("styling-images", "examples/styling-images");
+  const images = capture("styling-images", "test/fixtures/styling-images");
   assert.equal(images.renderer.images, 3);
   assert.equal(images.pending.images, 0);
 
@@ -56,16 +56,16 @@ try {
   assert.match(snapshotText(pomodoroAfter), /role=button name="Pause"/);
   assert.match(snapshotText(pomodoroAfter), /role=text name="24:59"/);
 
-  const interactionBefore = capture("interaction-before", "examples/styling-interaction");
-  const interactionAfter = capture("interaction-after", "examples/styling-interaction", [
+  const interactionBefore = capture("interaction-before", "test/fixtures/styling-interaction");
+  const interactionAfter = capture("interaction-after", "test/fixtures/styling-interaction", [
     "--action-file", join(root, "test", "capture", "styling-interaction.actions"),
   ]);
   assert.notEqual(imageHash(interactionBefore), imageHash(interactionAfter));
   assert.match(snapshotText(interactionAfter), /role=slider .* value=0\.9/);
   assert.match(snapshotText(interactionAfter), /role=text name="90%"/);
 
-  const tideglassBefore = capture("tideglass-before", "examples/tideglass");
-  const tideglassAfter = capture("tideglass-after", "examples/tideglass", [
+  const tideglassBefore = capture("tideglass-before", "test/fixtures/tideglass");
+  const tideglassAfter = capture("tideglass-after", "test/fixtures/tideglass", [
     "--action-file", join(root, "test", "capture", "tideglass.actions"),
   ]);
   assert.notEqual(imageHash(tideglassBefore), imageHash(tideglassAfter));
@@ -73,6 +73,24 @@ try {
   assert.match(snapshotText(tideglassAfter), /role=text name="5 glasses logged"/);
   assert.deepEqual(tideglassAfter.interactions.actions, ["click", "click"]);
   assert.equal(tideglassAfter.pending.timers, 0);
+
+  const system = capture("system", "examples/system", [
+    "--provider-fixture", join(root, "test", "capture", "system.provider.json"),
+  ]);
+  assert.match(snapshotText(system), /role=text name="MEMORY"/);
+  assert.match(snapshotText(system), /role=text name="9\.6"/);
+
+  const nowPlaying = capture("now-playing", "examples/now-playing", [
+    "--provider-fixture", join(root, "test", "capture", "noro.provider.json"),
+  ]);
+  assert.match(snapshotText(nowPlaying), /role=button name="Pause"/);
+  assert.match(snapshotText(nowPlaying), /role=button name="Seek"/);
+  assert.match(snapshotText(nowPlaying), /name="0:42 \/ 3:00"/);
+
+  // The forecast fetch is real network and may or may not land inside the
+  // capture window, so only the static frame is asserted.
+  const weather = capture("weather", "examples/weather");
+  assert.match(snapshotText(weather), /role=text name="San Francisco"/);
 
   const noro = capture("noro", "examples/noro-shell", [
     "--provider-fixture", join(root, "test", "capture", "noro.provider.json"),
@@ -180,6 +198,9 @@ try {
   ]);
   assert.equal(ambiguous.error?.name, "CaptureTargetAmbiguous");
   assert.deepEqual(ambiguous.error?.candidates?.map(({ role, name }) => ({ role, name })), [
+    { role: "button", name: "Focus" },
+    { role: "button", name: "Short break" },
+    { role: "button", name: "Long break" },
     { role: "button", name: "Start" },
     { role: "button", name: "Reset" },
   ]);

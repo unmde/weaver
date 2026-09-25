@@ -1,0 +1,31 @@
+{"event": "dispatch_requested", "run": "A1", "batch": 1, "timestamp": "2026-09-05T15:29:35.964481+00:00"}
+{"event": "dispatch_returned", "run": "A1", "batch": 1, "timestamp": "2026-09-05T15:29:54.830566+00:00"}
+{"event": "dispatch_requested", "run": "B1", "batch": 1, "timestamp": "2026-09-05T15:29:54.830782+00:00"}
+{"event": "dispatch_returned", "run": "B1", "batch": 1, "timestamp": "2026-09-05T15:30:10.491370+00:00"}
+{"event": "dispatch_requested", "run": "C1", "batch": 1, "timestamp": "2026-09-05T15:30:10.491607+00:00"}
+{"event": "dispatch_returned", "run": "C1", "batch": 1, "timestamp": "2026-09-05T15:30:32.096306+00:00"}
+{"event": "dispatch_requested", "run": "A2", "batch": 2, "timestamp": "2026-09-05T15:36:26.825993+00:00"}
+{"event": "dispatch_returned", "run": "A2", "batch": 2, "timestamp": "2026-09-05T15:36:44.149819+00:00"}
+{"event": "dispatch_requested", "run": "B2", "batch": 2, "timestamp": "2026-09-05T15:36:44.150022+00:00"}
+{"event": "dispatch_returned", "run": "B2", "batch": 2, "timestamp": "2026-09-05T15:37:02.573843+00:00"}
+{"event": "dispatch_requested", "run": "C2", "batch": 2, "timestamp": "2026-09-05T15:37:02.574068+00:00"}
+{"event": "dispatch_returned", "run": "C2", "batch": 2, "timestamp": "2026-09-05T15:37:29.861569+00:00"}
+{"event": "dispatch_requested", "run": "B3", "batch": 3, "timestamp": "2026-09-05T15:42:04.137924+00:00"}
+{"event": "dispatch_returned", "run": "B3", "batch": 3, "timestamp": "2026-09-05T15:42:21.872053+00:00"}
+{"event": "dispatch_requested", "run": "C3", "batch": 3, "timestamp": "2026-09-05T15:42:21.872287+00:00"}
+{"event": "dispatch_returned", "run": "C3", "batch": 3, "timestamp": "2026-09-05T15:42:38.033053+00:00"}
+{"event": "dispatch_requested", "run": "B4", "batch": 3, "timestamp": "2026-09-05T15:42:38.033291+00:00"}
+{"event": "dispatch_returned", "run": "B4", "batch": 3, "timestamp": "2026-09-05T15:42:58.032359+00:00"}
+{"event": "dispatch_requested", "run": "C4", "batch": 4, "timestamp": "2026-09-05T15:47:28.105174+00:00"}
+{"event": "dispatch_returned", "run": "C4", "batch": 4, "timestamp": "2026-09-05T15:47:51.217062+00:00"}
+{"event": "completed", "run": "A1", "batch": 1, "timestamp": "2026-09-05T15:32:36.148Z", "source": "harness task_complete event"}
+{"event": "completed", "run": "B1", "batch": 1, "timestamp": "2026-09-05T15:33:36.886Z", "source": "harness task_complete event"}
+{"event": "completed", "run": "C1", "batch": 1, "timestamp": "2026-09-05T15:36:16.427Z", "source": "harness task_complete event"}
+{"event": "completed", "run": "A2", "batch": 2, "timestamp": "2026-09-05T15:39:27.604Z", "source": "harness task_complete event"}
+{"event": "completed", "run": "B2", "batch": 2, "timestamp": "2026-09-05T15:40:56.691Z", "source": "harness task_complete event"}
+{"event": "completed", "run": "C2", "batch": 2, "timestamp": "2026-09-05T15:41:56.116Z", "source": "harness task_complete event"}
+{"event": "completed", "run": "B3", "batch": 3, "timestamp": "2026-09-05T15:46:21.261Z", "source": "harness task_complete event"}
+{"event": "completed", "run": "C3", "batch": 3, "timestamp": "2026-09-05T15:47:18.294Z", "source": "harness task_complete event"}
+{"event": "completed", "run": "B4", "batch": 3, "timestamp": "2026-09-05T15:46:05.408Z", "source": "harness task_complete event"}
+{"event": "completed", "run": "C4", "batch": 4, "timestamp": "2026-09-05T15:52:53.110Z", "source": "harness task_complete event"}
+{"event": "watcher_stopped", "timestamp": "2026-09-05T15:53:06.693170+00:00", "pid": 75990}

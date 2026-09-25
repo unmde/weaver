@@ -1,0 +1,82 @@
+[
+  {
+    "run": "A1",
+    "extracted_exec_command_calls": 9,
+    "nonliteral_commands": 0,
+    "check_literal_command_lines": 2,
+    "capture_literal_command_lines": 0,
+    "dev_literal_command_lines": 0
+  },
+  {
+    "run": "B1",
+    "extracted_exec_command_calls": 24,
+    "nonliteral_commands": 0,
+    "check_literal_command_lines": 3,
+    "capture_literal_command_lines": 5,
+    "dev_literal_command_lines": 0
+  },
+  {
+    "run": "C1",
+    "extracted_exec_command_calls": 33,
+    "nonliteral_commands": 0,
+    "check_literal_command_lines": 8,
+    "capture_literal_command_lines": 8,
+    "dev_literal_command_lines": 0
+  },
+  {
+    "run": "A2",
+    "extracted_exec_command_calls": 10,
+    "nonliteral_commands": 0,
+    "check_literal_command_lines": 2,
+    "capture_literal_command_lines": 0,
+    "dev_literal_command_lines": 0
+  },
+  {
+    "run": "B2",
+    "extracted_exec_command_calls": 21,
+    "nonliteral_commands": 0,
+    "check_literal_command_lines": 4,
+    "capture_literal_command_lines": 5,
+    "dev_literal_command_lines": 0
+  },
+  {
+    "run": "C2",
+    "extracted_exec_command_calls": 30,
+    "nonliteral_commands": 0,
+    "check_literal_command_lines": 6,
+    "capture_literal_command_lines": 7,
+    "dev_literal_command_lines": 0
+  },
+  {
+    "run": "B3",
+    "extracted_exec_command_calls": 17,
+    "nonliteral_commands": 0,
+    "check_literal_command_lines": 3,
+    "capture_literal_command_lines": 5,
+    "dev_literal_command_lines": 0
+  },
+  {
+    "run": "C3",
+    "extracted_exec_command_calls": 34,
+    "nonliteral_commands": 0,
+    "check_literal_command_lines": 7,
+    "capture_literal_command_lines": 7,
+    "dev_literal_command_lines": 0
+  },
+  {
+    "run": "B4",
+    "extracted_exec_command_calls": 18,
+    "nonliteral_commands": 0,
+    "check_literal_command_lines": 3,
+    "capture_literal_command_lines": 3,
+    "dev_literal_command_lines": 0
+  },
+  {
+    "run": "C4",
+    "extracted_exec_command_calls": 32,
+    "nonliteral_commands": 0,
+    "check_literal_command_lines": 9,
+    "capture_literal_command_lines": 8,
+    "dev_literal_command_lines": 0
+  }
+]

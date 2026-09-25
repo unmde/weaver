@@ -1,0 +1,12 @@
+{
+  "recorded_at": "2026-09-05T15:29:18.496303+00:00",
+  "head": "ab20771762be56faff04173ab11a5525a8d89be5",
+  "submodule": "464ff65faa02d36179b34e2252fa2a1cf46f7541 runtime/native-sdk (v0.4.4-169-g464ff65f)",
+  "sha256": {
+    "sdk/CONTRACT.md": "f4a7a8bf158b84bef91f9e2dc14620eee86f514a4bebe692b5051622e53551b4",
+    "examples/clock/widget.tsx": "0f5fc380d2cda74b1adfb969fb77f9c672aec61d86427634ad5b2d0d182d803b",
+    "examples/pomodoro/widget.tsx": "e77265ae15bacca60c407a59a87439a093d88915464cbde6a85dd6aebc955a85",
+    "package-lock.json": "65768ada60c9bc56ee269d91a961da0514a10a2fc6c8db330344ce10a3474d8b",
+    "cli/dist/index.js": "6a2e8d44a230f05731aabd0f32f6c065acba93ff1f8358ad1dacd51b485a8af3"
+  }
+}

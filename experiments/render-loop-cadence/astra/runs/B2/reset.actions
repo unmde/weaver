@@ -1,0 +1,33 @@
+{
+  "schema": "weaver.capture.actions.v1",
+  "actions": [
+    {
+      "action": "click",
+      "target": {
+        "role": "button",
+        "name": "Log session"
+      }
+    },
+    {
+      "action": "click",
+      "target": {
+        "role": "button",
+        "name": "Log session"
+      }
+    },
+    {
+      "action": "click",
+      "target": {
+        "role": "button",
+        "name": "Log session"
+      }
+    },
+    {
+      "action": "click",
+      "target": {
+        "role": "button",
+        "name": "Reset week"
+      }
+    }
+  ]
+}

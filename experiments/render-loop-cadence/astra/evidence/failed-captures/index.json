@@ -1,0 +1,58 @@
+[
+  {
+    "run": "C1",
+    "attempt": "02",
+    "call_id": "call_gIzIZPbyryrqZ8ybtcdMjuTN",
+    "timestamp": "2026-09-05T15:31:54.158Z",
+    "command": "npx --no-install weaver capture /tmp/weaver-exp-astra/runs/C1 --clock 2026-09-04T09:41:00.000Z --out /tmp/weaver-exp-astra/runs/C1/captures/02-initial.png",
+    "exit_code": 1,
+    "diagnostic": {
+      "name": "CaptureFailed",
+      "ask": "TypeScript: ../../../../../tmp/weaver-exp-astra/runs/C1/widget.tsx(21,19): error TS2322: Type '{ children: Element[]; key: string; class: string; }' is not assignable to type 'GradientBoxProps'.",
+      "remedy": "fix the named failure, then rerun the same capture command"
+    },
+    "receipt": "evidence/failed-captures/C1-02.receipt.json"
+  },
+  {
+    "run": "C2",
+    "attempt": "03",
+    "call_id": "call_BsfvfTd9cSNn1LuLI6XE4Jmf",
+    "timestamp": "2026-09-05T15:39:24.389Z",
+    "command": "npx --no-install weaver capture /tmp/weaver-exp-astra/runs/C2 --clock 2026-09-04T09:41:00.000Z --out /tmp/weaver-exp-astra/runs/C2/captures/03-initial.png",
+    "exit_code": 1,
+    "diagnostic": {
+      "name": "CaptureFailed",
+      "ask": "/tmp/weaver-exp-astra/runs/C2/widget.tsx:32:18: class must resolve to at most 32 literal strings so weaver check can validate every utility",
+      "remedy": "fix the named failure, then rerun the same capture command"
+    },
+    "receipt": "evidence/failed-captures/C2-03.receipt.json"
+  },
+  {
+    "run": "C3",
+    "attempt": "03",
+    "call_id": "call_g7zBxcXPGFb1oniXkQj6t3jc",
+    "timestamp": "2026-09-05T15:44:27.399Z",
+    "command": "npx --no-install weaver capture /tmp/weaver-exp-astra/runs/C3 --clock 2026-09-04T09:41:00.000Z --out /tmp/weaver-exp-astra/runs/C3/captures/03-initial.png",
+    "exit_code": 1,
+    "diagnostic": {
+      "name": "CaptureFailed",
+      "ask": "/tmp/weaver-exp-astra/runs/C3/widget.tsx:32:18: class must resolve to at most 32 literal strings so weaver check can validate every utility",
+      "remedy": "fix the named failure, then rerun the same capture command"
+    },
+    "receipt": "evidence/failed-captures/C3-03.receipt.json"
+  },
+  {
+    "run": "C4",
+    "attempt": "04",
+    "call_id": "call_tIt5RBe0oL6x5dY80hpS3fGE",
+    "timestamp": "2026-09-05T15:49:50.014Z",
+    "command": "npx --no-install weaver capture /tmp/weaver-exp-astra/runs/C4 --clock 2026-09-04T09:41:00.000Z --out /tmp/weaver-exp-astra/runs/C4/captures/04-initial.png",
+    "exit_code": 1,
+    "diagnostic": {
+      "name": "CaptureFailed",
+      "ask": "/tmp/weaver-exp-astra/runs/C4/widget.tsx:36:18: class must resolve to at most 32 literal strings so weaver check can validate every utility",
+      "remedy": "fix the named failure, then rerun the same capture command"
+    },
+    "receipt": "evidence/failed-captures/C4-04.receipt.json"
+  }
+]

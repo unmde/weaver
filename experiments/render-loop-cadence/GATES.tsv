@@ -1,0 +1,10 @@
+C4	check=weaver check passed: /tmp/weaver-exp/runs/C4	initial=ok	after=ok	buttons=2	label3of20=1	captures=8	saves=12	lines=121	first=2026-09-05T01:16:21.728Z	last=2026-09-05T01:20:21.140Z
+C3	check=weaver check passed: /tmp/weaver-exp/runs/C3	initial=ok	after=ok	buttons=2	label3of20=1	captures=6	saves=7	lines=103	first=2026-09-05T01:16:19.225Z	last=2026-09-05T01:19:42.076Z
+B1	check=weaver check passed: /tmp/weaver-exp/runs/B1	initial=ok	after=ok	buttons=2	label3of20=1	captures=4	saves=5	lines=110	first=2026-09-05T01:16:19.225Z	last=2026-09-05T01:18:48.996Z
+B2	check=weaver check passed: /tmp/weaver-exp/runs/B2	initial=ok	after=ok	buttons=2	label3of20=1	captures=5	saves=4	lines=101	first=2026-09-05T01:16:14.716Z	last=2026-09-05T01:20:34.659Z
+C1	check=weaver check passed: /tmp/weaver-exp/runs/C1	initial=ok	after=ok	buttons=2	label3of20=1	captures=13	saves=12	lines=123	first=2026-09-05T01:16:20.728Z	last=2026-09-05T01:23:16.453Z
+A1	check=weaver check passed: /tmp/weaver-exp/runs/A1	initial=ok	after=ok	buttons=2	label3of20=1	captures=0	saves=6	lines=120	first=2026-09-05T01:18:48.496Z	last=2026-09-05T01:25:49.219Z
+B3	check=weaver check passed: /tmp/weaver-exp/runs/B3	initial=ok	after=ok	buttons=2	label3of20=1	captures=8	saves=3	lines=118	first=2026-09-05T01:16:23.733Z	last=2026-09-05T01:20:52.693Z
+C2	check=weaver check passed: /tmp/weaver-exp/runs/C2	initial=ok	after=ok	buttons=2	label3of20=1	captures=11	saves=15	lines=106	first=2026-09-05T01:16:25.737Z	last=2026-09-05T01:22:56.915Z
+A2	check=weaver check passed: /tmp/weaver-exp/runs/A2	initial=ok	after=ok	buttons=2	label3of20=1	captures=0	saves=5	lines=124	first=2026-09-05T01:20:39.166Z	last=2026-09-05T01:22:55.913Z
+B4	check=weaver check passed: /tmp/weaver-exp/runs/B4	initial=ok	after=ok	buttons=2	label3of20=1	captures=5	saves=4	lines=106	first=2026-09-05T01:16:18.223Z	last=2026-09-05T01:21:27.251Z

@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "jsx": "react-jsx",
+    "jsxImportSource": "@weaver/sdk",
+    "types": [],
+    "baseUrl": ".",
+    "paths": {
+      "@weaver/sdk": [
+        "/Users/dara/Dev/Projects/weaver/sdk/index.d.ts"
+      ],
+      "@weaver/sdk/jsx-runtime": [
+        "/Users/dara/Dev/Projects/weaver/sdk/jsx-runtime.d.ts"
+      ]
+    }
+  },
+  "include": [
+    "widget.tsx"
+  ]
+}

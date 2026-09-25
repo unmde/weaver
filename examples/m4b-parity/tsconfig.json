@@ -1,8 +1,0 @@
-{
-  "extends": "../../sdk/tsconfig.json",
-  "compilerOptions": {
-    "jsx": "react-jsx",
-    "jsxImportSource": "@weaver/sdk"
-  },
-  "include": ["widget.tsx"]
-}

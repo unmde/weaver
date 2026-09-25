@@ -1,0 +1,62 @@
+[
+  {
+    "timestamp": "2026-09-05T15:36:42.075Z",
+    "call_id": "call_3nx7IDwap1gi4esvMS3zwrOR",
+    "command": "cat /tmp/weaver-exp-astra/prompts/A2.md",
+    "literal": true
+  },
+  {
+    "timestamp": "2026-09-05T15:36:52.078Z",
+    "call_id": "call_zSPykTU4Ec9ze7YIBT7OGVBp",
+    "command": "cat .agents/skills/conjure-widget/SKILL.md && rg -n 'Module shape|widget\\(config|Hooks|Consolidated v0.4|useStorage|PR 11' sdk/CONTRACT.md && cat examples/pomodoro/widget.tsx examples/clock/widget.tsx",
+    "literal": true
+  },
+  {
+    "timestamp": "2026-09-05T15:37:01.990Z",
+    "call_id": "call_NtSV0aao84qKny90mRgac2kt",
+    "command": "sed -n '1,126p' sdk/CONTRACT.md && sed -n '400,433p' sdk/CONTRACT.md && sed -n '538,738p' sdk/CONTRACT.md && cat docs/agent-widget-capture.md",
+    "literal": true
+  },
+  {
+    "timestamp": "2026-09-05T15:37:28.031Z",
+    "call_id": "call_XZfPpkQsBP1USnRb97PT4glX",
+    "command": "npx --no-install weaver init /tmp/weaver-exp-astra/runs/A2",
+    "literal": true
+  },
+  {
+    "timestamp": "2026-09-05T15:37:37.570Z",
+    "call_id": "call_NpBCg77dHnU9LXSby4fPO8UQ",
+    "command": "cat /tmp/weaver-exp-astra/runs/A2/widget.tsx",
+    "literal": true
+  },
+  {
+    "timestamp": "2026-09-05T15:38:25.088Z",
+    "call_id": "call_ZZ3yonNywUlNdaor6QXpsIlA",
+    "command": "cat > /tmp/weaver-exp-astra/runs/A2/widget.tsx <<'EOF'\nimport { useProvider, useStorage, widget } from \"@weaver/sdk\";\n\nconst days = [\n  { key: \"Mon\", letter: \"M\" },\n  { key: \"Tue\", letter: \"T\" },\n  { key: \"Wed\", letter: \"W\" },\n  { key: \"Thu\", letter: \"T\" },\n  { key: \"Fri\", letter: \"F\" },\n  { key: \"Sat\", letter: \"S\" },\n  { key: \"Sun\", letter: \"S\" },\n];\nconst emptyWeek: Record<string, number> = {\n  Mon: 0, Tue: 0, Wed: 0, Thu: 0, Fri: 0, Sat: 0, Sun: 0,\n};\n\nexport default widget({\n  name: \"Focus Week\",\n  size: [320, 200],\n  anchor: { corner: \"top-right\", offset: [24, 24] },\n  subscribe: [\"time\"],\n}, () => {\n  const time = useProvider(\"time\");\n  const [counts, setCounts] = useStorage<Record<string, number>>(\"sessions-by-weekday\", emptyWeek);\n  const total = days.reduce((sum, day) => sum + counts[day.key], 0);\n  const fraction = Math.min(1, total / 20);\n\n  return (\n    <column class=\"size-full p-[16px] gap-[10px] rounded-[24px] bg-[#0b0d12]/92\">\n      <row class=\"w-full h-[22px] items-baseline justify-between shrink-0\">\n        <text class=\"text-[16px] font-semibold text-[#f5f6f8]\">Focus week</text>\n        <text class=\"text-[12px] text-[#f5f6f8]/65\">{time.weekday}, {time.month} {time.day}</text>\n      </row>\n\n      <row class=\"w-full h-[56px] gap-[4px] shrink-0\">\n        {days.map((day) => (\n          <column\n            key={day.key}\n            class={day.key === time.weekday\n              ? \"w-[0px] grow h-full items-center justify-center gap-[4px] rounded-[10px] bg-[#5eead4]/18\"\n              : \"w-[0px] grow h-full items-center justify-center gap-[4px] rounded-[10px] bg-[#ffffff]/4\"}\n          >\n            <text class={day.key === time.weekday\n              ? \"w-full text-center text-[11px] font-semibold text-[#5eead4]\"\n              : \"w-full text-center text-[11px] font-medium text-[#f5f6f8]/60\"}>{day.letter}</text>\n            <text class=\"w-full text-center text-[18px] font-medium tabular-nums text-[#f5f6f8]\">{counts[day.key]}</text>\n          </column>\n        ))}\n      </row>\n\n      <row class=\"w-full h-[24px] gap-[12px] items-center shrink-0\">\n        <row class=\"w-[216px] h-[6px] rounded-full bg-[#ffffff]/12 overflow-hidden shrink-0\">\n          <panel class={`w-[${216 * fraction}px] h-full rounded-full bg-[#5eead4] shrink-0`} />\n        </row>\n        <text class=\"w-[60px] text-right text-[12px] tabular-nums text-[#f5f6f8]/80\">{total} / 20</text>\n      </row>\n\n      <row class=\"w-full h-[36px] gap-[8px] shrink-0\">\n        <button\n          accessibilityLabel=\"Log session\"\n          class=\"w-[168px] h-full rounded-[11px] bg-[#5eead4] hover:opacity-90 pressed:opacity-75\"\n          onPress={() => setCounts((current) => ({ ...current, [time.weekday]: current[time.weekday] + 1 }))}\n        >\n          <row class=\"size-full items-center\">\n            <text class=\"w-full text-center text-[13px] font-semibold text-[#0b0d12]\">Log session</text>\n          </row>\n        </button>\n        <button\n          accessibilityLabel=\"Reset week\"\n          class=\"w-[112px] h-full rounded-[11px] bg-[#ffffff]/8 hover:bg-[#ffffff]/12 pressed:bg-[#ffffff]/18\"\n          onPress={() => setCounts({ ...emptyWeek })}\n        >\n          <row class=\"size-full items-center\">\n            <text class=\"w-full text-center text-[12px] font-medium text-[#f5f6f8]/85\">Reset week</text>\n          </row>\n        </button>\n      </row>\n    </column>\n  );\n});\nEOF\nnpx --no-install weaver check /tmp/weaver-exp-astra/runs/A2",
+    "literal": true
+  },
+  {
+    "timestamp": "2026-09-05T15:38:38.711Z",
+    "call_id": "call_1zLkOQzgfDshczEkBV2zrnQW",
+    "command": "rg -n 'fillRect|fillRounded|CanvasCtx|##.*canvas' sdk/CONTRACT.md",
+    "literal": true
+  },
+  {
+    "timestamp": "2026-09-05T15:38:45.569Z",
+    "call_id": "call_ukbyk2darEjgbw6n5R5Dmcw6",
+    "command": "sed -n '322,375p' sdk/CONTRACT.md",
+    "literal": true
+  },
+  {
+    "timestamp": "2026-09-05T15:38:59.185Z",
+    "call_id": "call_hVO0jmIRQTacxjCSJ0aeMmcf",
+    "command": "python3 - <<'PY'\nfrom pathlib import Path\np = Path('/tmp/weaver-exp-astra/runs/A2/widget.tsx')\ns = p.read_text().replace('            key={day.key}\\n', '')\ns = s.replace('''        <row class=\"w-[216px] h-[6px] rounded-full bg-[#ffffff]/12 overflow-hidden shrink-0\">\n          <panel class={`w-[${216 * fraction}px] h-full rounded-full bg-[#5eead4] shrink-0`} />\n        </row>''', '''        <canvas\n          class=\"w-[216px] h-[6px] shrink-0\"\n          onFrame={(ctx) => {\n            ctx.clear();\n            ctx.fillRoundRect(0, 0, ctx.width, ctx.height, 3, \"#ffffff1f\");\n            if (fraction > 0) ctx.fillRoundRect(0, 0, ctx.width * fraction, ctx.height, 3, \"#5eead4\");\n          }}\n        />''')\np.write_text(s)\nPY\nnpx --no-install weaver check /tmp/weaver-exp-astra/runs/A2",
+    "literal": true
+  },
+  {
+    "timestamp": "2026-09-05T15:39:15.426Z",
+    "call_id": "call_MRkHsI1dOX5Kqowq4RWDC5jE",
+    "command": "cat > /tmp/weaver-exp-astra/runs/A2/REPORT.md <<'EOF'\n# Focus Week report\n\n- Condition: A (check-only).\n- `weaver check` runs: 2; final run passed.\n- `weaver capture` runs: 0. The captures directory was not created.\n- Defects fixed because of pixels or a snapshot: none.\n- Spec items not met: none known from contract review and static checking. Visual layout, interaction execution, and restart persistence were not empirically verified because this condition prohibits captures and development sessions.\n- Confidence: 8 / 10.\n\nThe check identified an unsupported JSX key prop and a computed class string; both were corrected. The progress bar uses a canvas drawing on render, without an animation timer. Storage contains weekday-keyed counts. Layout reserves separate space for the progress label, uses seven equal flex widths, and budgets the four rows plus gaps within the 168px inner height.\nEOF",
+    "literal": true
+  }
+]

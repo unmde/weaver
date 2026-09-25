@@ -51,7 +51,7 @@ $OutputDirectory = [IO.Path]::GetFullPath($OutputDirectory)
 [IO.Directory]::CreateDirectory($OutputDirectory) | Out-Null
 $NativeRoot = Join-Path $RepoRoot "runtime\native-sdk"
 $Cli = Join-Path $RepoRoot "cli\dist\index.js"
-$Example = Join-Path $RepoRoot "examples\gradient-stack"
+$Example = Join-Path $RepoRoot "test\fixtures\gradient-stack"
 $CaptureHelper = Join-Path $RepoRoot "renderer\zig-out\bin\weaver-window-capture.exe"
 $StateRoot = Join-Path $OutputDirectory "state"
 $ResultPath = Join-Path $OutputDirectory "results.json"

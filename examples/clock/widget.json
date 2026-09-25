@@ -1,8 +1,0 @@
-{
-  "name": "Clock",
-  "size": [240, 110],
-  "anchor": { "corner": "top-right", "offset": [24, 24] },
-  "layer": "desktop",
-  "transparent": true
-}
-

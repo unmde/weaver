@@ -1,0 +1,40 @@
+You are building one Weaver desktop widget. Weaver is a desktop widget platform authored in TSX; the repository is at /Users/dara/Dev/Projects/weaver and you run all commands from that directory. You have no other context, so read what you need from the files named below.
+
+## Your widget directory
+<DIR>  (create it with `npx --no-install weaver init <DIR>`; it will not exist yet)
+
+## Rules
+- Do NOT run `weaver dev`. Do NOT modify any file inside the repository. Do NOT read or touch any directory under /tmp/weaver-exp other than your own and the file /tmp/weaver-exp/clicks.actions. Do NOT read /Users/dara/Dev/Projects/weaver/experiments.
+- Import Weaver APIs only from "@weaver/sdk". Keep one literal default export: `export default widget({ ... }, () => <... />);`
+- Before writing elements, read these parts of /Users/dara/Dev/Projects/weaver/sdk/CONTRACT.md: "Module shape", "widget(config, component)", "Hooks", "Consolidated v0.4 authoring tables", "useStorage", and "PR 11: native interaction states and press events". Read /Users/dara/Dev/Projects/weaver/examples/pomodoro/widget.tsx and /Users/dara/Dev/Projects/weaver/examples/clock/widget.tsx as the house style. Do not infer browser DOM or CSS behavior the contract does not provide.
+- `npx --no-install weaver check <DIR>` is the authority for statically knowable widget errors. It must pass before you finish.
+
+## Widget spec
+Name: "Focus Week". Size 320×200. Anchor top-right, offset [24, 24]. Subscribe to the `time` provider only. No network, no other providers.
+
+1. Header row. Left: the title "Focus week". Right, aligned to the same baseline: the current weekday and date, for example "Fri, Sep 4" (from time.weekday, time.month, time.day).
+2. Seven day cells in one row, Monday through Sunday, equal width, filling the available width. Each cell shows the weekday letter (M T W T F S S) above that day's session count. Today's cell is visibly highlighted. Days with zero sessions still show "0".
+3. A progress bar showing sessions logged this week against a goal of 20, with a label of the form "12 / 20" placed so that it never overlaps the bar.
+4. Two buttons in one row. Primary: "Log session" adds one session to today. Secondary: "Reset week" sets every day to zero. Both have native `hover:` and `pressed:` styles. Counts persist across restarts with `useStorage`, keyed by weekday.
+5. Visual bar: the shipped examples' house style. Dark translucent surface, rounded corners, restrained palette, clear hierarchy, nothing clipped or overlapping, text legible at 1× scale.
+
+The buttons' accessible names must be exactly "Log session" and "Reset week".
+
+## Capture commands (only if your condition below allows capture)
+Fixed clock for every capture: 2026-09-04T09:41:00.000Z (a Friday). Copy /tmp/weaver-exp/clicks.actions to <DIR>/clicks.actions first. It clicks "Log session" three times; the expected result is Friday showing 3, every other day 0, label "3 / 20", bar at 15%.
+
+```
+mkdir -p <DIR>/captures
+npx --no-install weaver capture <DIR> --clock 2026-09-04T09:41:00.000Z --out <DIR>/captures/NN-initial.png
+npx --no-install weaver capture <DIR> --clock 2026-09-04T09:41:00.000Z --action-file <DIR>/clicks.actions --out <DIR>/captures/NN-after-clicks.png
+```
+NN is a zero-padded counter (01, 02, ...) that increases on every capture you run; never overwrite an earlier capture. Each capture publishes a .png, a .snapshot.txt (semantic tree) and a .receipt.json. When you capture, open the PNG with your image-viewing tool and actually look at it at the widget's real dimensions; check layout, overlap, clipping, alignment, contrast and the requested state. Read the snapshot and confirm the receipt has status "ok". A capture whose receipt says CaptureWidgetFailed prints a `diagnostic:` line naming the widget error.
+
+## When you are done
+Write <DIR>/REPORT.md containing:
+- Condition letter.
+- Number of `weaver check` runs and number of `weaver capture` runs you made.
+- A list of every defect you fixed BECAUSE you saw pixels or a snapshot (write "none" if you never captured or found nothing).
+- Any spec item you could not meet and why.
+- Your confidence (0 to 10) that the widget matches the spec.
+Then reply with a two-line summary. Do not paste code into your reply.

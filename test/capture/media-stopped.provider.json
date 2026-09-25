@@ -1,0 +1,18 @@
+{
+  "schema": "weaver.provider-fixture.v1",
+  "frames": [
+    {
+      "provider": "media",
+      "value": {
+        "title": "",
+        "artist": "",
+        "album": "",
+        "status": "stopped",
+        "playing": false,
+        "sourceApp": "",
+        "positionMs": 0,
+        "durationMs": 0
+      }
+    }
+  ]
+}

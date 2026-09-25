@@ -1,0 +1,104 @@
+[
+  {
+    "timestamp": "2026-09-05T15:42:19.202Z",
+    "call_id": "call_7BXheFuMTH65VWpADXJQvr8Y",
+    "command": "cat /tmp/weaver-exp-astra/prompts/B3.md",
+    "literal": true
+  },
+  {
+    "timestamp": "2026-09-05T15:42:31.378Z",
+    "call_id": "call_j7mkVlTgzO3Rt79bGscGr03P",
+    "command": "cat .agents/skills/conjure-widget/SKILL.md; rg -n 'Module shape|widget\\(config|Hooks|Consolidated v0.4 authoring tables|useStorage|PR 11: native' sdk/CONTRACT.md; cat examples/pomodoro/widget.tsx examples/clock/widget.tsx",
+    "literal": true
+  },
+  {
+    "timestamp": "2026-09-05T15:42:38.391Z",
+    "call_id": "call_elRQYQIQA5MrHuUX68P3RzZ9",
+    "command": "sed -n '1,130p' sdk/CONTRACT.md; sed -n '410,435p' sdk/CONTRACT.md; sed -n '538,750p' sdk/CONTRACT.md; cat docs/agent-widget-capture.md",
+    "literal": true
+  },
+  {
+    "timestamp": "2026-09-05T15:43:02.336Z",
+    "call_id": "call_VbLz3HYGPcIelgaGA3oqEucE",
+    "command": "rg -n 'fillRect|roundRect|fillRound|CanvasCtx|accessibilityLabel' sdk/CONTRACT.md; npx --no-install weaver init /tmp/weaver-exp-astra/runs/B3",
+    "literal": true
+  },
+  {
+    "timestamp": "2026-09-05T15:43:09.448Z",
+    "call_id": "call_qW4cSOvqsVaALho7z3CZpGDk",
+    "command": "cat /tmp/weaver-exp-astra/runs/B3/widget.tsx; sed -n '320,355p' sdk/CONTRACT.md",
+    "literal": true
+  },
+  {
+    "timestamp": "2026-09-05T15:44:04.126Z",
+    "call_id": "call_ak4sUGHuoOSvwWxkJdpv9mMA",
+    "command": "cat > /tmp/weaver-exp-astra/runs/B3/widget.tsx <<'EOF'\nimport { useProvider, useStorage, widget, type CanvasCtx } from \"@weaver/sdk\";\n\nconst days = [\n  { key: \"Mon\", letter: \"M\" },\n  { key: \"Tue\", letter: \"T\" },\n  { key: \"Wed\", letter: \"W\" },\n  { key: \"Thu\", letter: \"T\" },\n  { key: \"Fri\", letter: \"F\" },\n  { key: \"Sat\", letter: \"S\" },\n  { key: \"Sun\", letter: \"S\" },\n];\nconst emptyWeek: Record<string, number> = {\n  Mon: 0, Tue: 0, Wed: 0, Thu: 0, Fri: 0, Sat: 0, Sun: 0,\n};\n\nfunction drawProgress(ctx: CanvasCtx, total: number): void {\n  ctx.clear();\n  ctx.fillRoundRect(0, 0, ctx.width, ctx.height, 3, \"#ffffff20\");\n  if (total > 0) {\n    ctx.fillRoundRect(0, 0, ctx.width * Math.min(total / 20, 1), ctx.height, 3, \"#5eead4\");\n  }\n}\n\nexport default widget({\n  name: \"Focus Week\",\n  size: [320, 200],\n  anchor: { corner: \"top-right\", offset: [24, 24] },\n  subscribe: [\"time\"],\n}, () => {\n  const time = useProvider(\"time\");\n  const [counts, setCounts] = useStorage<Record<string, number>>(\"sessions-by-weekday\", emptyWeek);\n  const total = days.reduce((sum, day) => sum + counts[day.key], 0);\n\n  return (\n    <column class=\"size-full p-[16px] justify-between rounded-[24px] border border-[#ffffff]/10 bg-[#0b0d12]/92\">\n      <row class=\"w-full h-[22px] items-baseline justify-between\">\n        <text class=\"text-[16px] font-semibold text-[#f5f6f8]\">Focus week</text>\n        <text class=\"text-[12px] text-[#f5f6f8]/65\">{time.weekday}, {time.month} {time.day}</text>\n      </row>\n\n      <row class=\"w-full h-[52px] gap-[4px]\">\n        {days.map((day) => (\n          <column\n            key={day.key}\n            class={day.key === time.weekday\n              ? \"w-[0px] grow h-full items-center justify-center gap-[3px] rounded-[10px] bg-[#5eead4]/16\"\n              : \"w-[0px] grow h-full items-center justify-center gap-[3px] rounded-[10px] bg-[#ffffff]/4\"}\n          >\n            <text class={day.key === time.weekday\n              ? \"text-[11px] font-medium text-[#5eead4]\"\n              : \"text-[11px] font-medium text-[#f5f6f8]/60\"}>{day.letter}</text>\n            <text class={day.key === time.weekday\n              ? \"text-[18px] font-semibold tabular-nums text-[#5eead4]\"\n              : \"text-[18px] font-medium tabular-nums text-[#f5f6f8]\"}>{counts[day.key]}</text>\n          </column>\n        ))}\n      </row>\n\n      <row class=\"w-full h-[24px] items-center gap-[12px]\">\n        <canvas class=\"w-[0px] grow h-[6px]\" onFrame={(ctx) => drawProgress(ctx, total)} />\n        <text class=\"text-[12px] font-medium tabular-nums text-[#f5f6f8]/75\">{total} / 20</text>\n      </row>\n\n      <row class=\"w-full h-[34px] gap-[8px]\">\n        <button\n          accessibilityLabel=\"Log session\"\n          class=\"w-[0px] grow-[3] h-full rounded-[11px] bg-[#5eead4] hover:opacity-90 pressed:opacity-75\"\n          onPress={() => setCounts((current) => ({ ...current, [time.weekday]: current[time.weekday] + 1 }))}\n        >\n          <row class=\"size-full items-center\">\n            <text class=\"w-full text-center text-[12px] font-semibold text-[#0b0d12]\">Log session</text>\n          </row>\n        </button>\n        <button\n          accessibilityLabel=\"Reset week\"\n          class=\"w-[0px] grow-[2] h-full rounded-[11px] bg-[#ffffff]/8 hover:bg-[#ffffff]/12 pressed:bg-[#ffffff]/16\"\n          onPress={() => setCounts({ ...emptyWeek })}\n        >\n          <row class=\"size-full items-center\">\n            <text class=\"w-full text-center text-[12px] font-medium text-[#f5f6f8]/80\">Reset week</text>\n          </row>\n        </button>\n      </row>\n    </column>\n  );\n});\nEOF\nnpx --no-install weaver check /tmp/weaver-exp-astra/runs/B3",
+    "literal": true
+  },
+  {
+    "timestamp": "2026-09-05T15:44:15.895Z",
+    "call_id": "call_JyBEA2QaTL0Ubc8tBnM5wGYl",
+    "command": "python3 - <<'PY'\nfrom pathlib import Path\np = Path('/tmp/weaver-exp-astra/runs/B3/widget.tsx')\np.write_text(p.read_text().replace('            key={day.key}\\n', ''))\nPY\nnpx --no-install weaver check /tmp/weaver-exp-astra/runs/B3",
+    "literal": true
+  },
+  {
+    "timestamp": "2026-09-05T15:44:23.925Z",
+    "call_id": "call_G5pjvXMcs8lp2NqqN0WDegoQ",
+    "command": "mkdir -p /tmp/weaver-exp-astra/runs/B3/captures\ncp /tmp/weaver-exp-astra/clicks.actions /tmp/weaver-exp-astra/runs/B3/clicks.actions\nnpx --no-install weaver capture /tmp/weaver-exp-astra/runs/B3 --clock 2026-09-04T09:41:00.000Z --out /tmp/weaver-exp-astra/runs/B3/captures/01-initial.png",
+    "literal": true
+  },
+  {
+    "timestamp": "2026-09-05T15:44:31.350Z",
+    "call_id": "call_ujxNWJaVJHlXNB9iHUQAPaSY",
+    "command": "npx --no-install weaver capture /tmp/weaver-exp-astra/runs/B3 --clock 2026-09-04T09:41:00.000Z --action-file /tmp/weaver-exp-astra/runs/B3/clicks.actions --out /tmp/weaver-exp-astra/runs/B3/captures/02-after-clicks.png",
+    "literal": true
+  },
+  {
+    "timestamp": "2026-09-05T15:44:43.401Z",
+    "call_id": "call_UuMK0ZaA8P2tEey9IfrMMSiZ",
+    "command": "cat /tmp/weaver-exp-astra/runs/B3/captures/01-initial.snapshot.txt /tmp/weaver-exp-astra/runs/B3/captures/01-initial.receipt.json /tmp/weaver-exp-astra/runs/B3/captures/02-after-clicks.snapshot.txt /tmp/weaver-exp-astra/runs/B3/captures/02-after-clicks.receipt.json",
+    "literal": true
+  },
+  {
+    "timestamp": "2026-09-05T15:45:05.162Z",
+    "call_id": "call_ZaOkqF4yBFssomHli0BVeXib",
+    "command": "python3 - <<'PY'\nfrom pathlib import Path\np = Path('/tmp/weaver-exp-astra/runs/B3/widget.tsx')\ns = p.read_text().replace('class=\"w-[0px] grow h-[6px]\"', 'class=\"w-[232px] h-[6px] shrink-0\"')\ns = s.replace('class=\"text-[12px] font-medium tabular-nums text-[#f5f6f8]/75\"', 'class=\"w-[0px] grow text-right text-[12px] font-medium tabular-nums text-[#f5f6f8]/75\"')\np.write_text(s)\nPY\nnpx --no-install weaver check /tmp/weaver-exp-astra/runs/B3",
+    "literal": true
+  },
+  {
+    "timestamp": "2026-09-05T15:45:14.525Z",
+    "call_id": "call_ue2mR55IshIg4YamohAM8lMl",
+    "command": "npx --no-install weaver capture /tmp/weaver-exp-astra/runs/B3 --clock 2026-09-04T09:41:00.000Z --out /tmp/weaver-exp-astra/runs/B3/captures/03-initial.png",
+    "literal": true
+  },
+  {
+    "timestamp": "2026-09-05T15:45:14.525Z",
+    "call_id": "call_ue2mR55IshIg4YamohAM8lMl",
+    "command": "npx --no-install weaver capture /tmp/weaver-exp-astra/runs/B3 --clock 2026-09-04T09:41:00.000Z --action-file /tmp/weaver-exp-astra/runs/B3/clicks.actions --out /tmp/weaver-exp-astra/runs/B3/captures/04-after-clicks.png",
+    "literal": true
+  },
+  {
+    "timestamp": "2026-09-05T15:45:29.067Z",
+    "call_id": "call_r3YiLmzJq6clLmKAitwD2qSd",
+    "command": "cat /tmp/weaver-exp-astra/runs/B3/captures/03-initial.snapshot.txt /tmp/weaver-exp-astra/runs/B3/captures/04-after-clicks.snapshot.txt; python3 - <<'PY'\nimport json\nfrom pathlib import Path\nfor name in ['03-initial', '04-after-clicks']:\n p=Path('/tmp/weaver-exp-astra/runs/B3/captures')/(name+'.receipt.json')\n r=json.loads(p.read_text()); print(name, r['status'], r['pending'], r['warnings'])\nPY",
+    "literal": true
+  },
+  {
+    "timestamp": "2026-09-05T15:45:41.506Z",
+    "call_id": "call_Sr2kaGgMQzB9eL09FcTyrKeA",
+    "command": "python3 - <<'PY'\nimport json\nfrom pathlib import Path\nroot=Path('/tmp/weaver-exp-astra/runs/B3')\na=json.loads((root/'clicks.actions').read_text())\na['actions'].append({'action':'click','target':{'role':'button','name':'Reset week'}})\n(root/'reset.actions').write_text(json.dumps(a, indent=2)+'\\n')\nPY\nnpx --no-install weaver capture /tmp/weaver-exp-astra/runs/B3 --clock 2026-09-04T09:41:00.000Z --action-file /tmp/weaver-exp-astra/runs/B3/reset.actions --out /tmp/weaver-exp-astra/runs/B3/captures/05-after-reset.png",
+    "literal": true
+  },
+  {
+    "timestamp": "2026-09-05T15:45:50.849Z",
+    "call_id": "call_JZA9oiDCn0fBd24xr9hqwYd2",
+    "command": "cat /tmp/weaver-exp-astra/runs/B3/captures/05-after-reset.snapshot.txt /tmp/weaver-exp-astra/runs/B3/captures/05-after-reset.receipt.json",
+    "literal": true
+  },
+  {
+    "timestamp": "2026-09-05T15:46:14.509Z",
+    "call_id": "call_E46VNRbJgulHf3vURJ4EQSLP",
+    "command": "cat > /tmp/weaver-exp-astra/runs/B3/REPORT.md <<'EOF'\n# Focus Week\n\n- Condition: B (final capture).\n- `weaver check` runs: 3. First failed because `column` does not accept a `key` prop; the following two passed.\n- `weaver capture` runs: 5. All receipts have status `ok`; every PNG was opened at its native 320×200 dimensions and every snapshot was read.\n- Defects fixed because pixels or snapshots exposed them:\n  - The progress canvas had `w-[0px] grow`: its semantic bounds grew, but its drawing remained invisible. Changed it to an explicit 232 px drawing width, following the examples' explicit canvas dimensions, and reserved a separate 44 px label region with a 12 px gap. Captures 03 and 04 show the empty track and 15% fill respectively.\n- Spec items not met: none identified. Persistence uses `useStorage` with a weekday-keyed object; capture isolates storage, so restart persistence was not separately exercised. No live dev session was run, as instructed.\n- Confidence: 9/10.\n\nFinal evidence: `captures/03-initial.png` shows Friday highlighted and seven zeros; `captures/04-after-clicks.png` shows Friday 3, six zeros, `3 / 20`, and 15% fill. `captures/05-after-reset.png` verifies three logs followed by Reset week returns all seven days and the total to zero. The semantic trees expose exactly `Log session` and `Reset week` as button names. Both buttons use native hover and pressed styles. No clipping or overlap was observed at 1× scale.\n\nThe receipts' sole warning reports pre-existing uncommitted repository changes; this task modified no repository files. The one pending timer is the subscribed time provider; there are no fetches, unresolved images, external providers, or queued frames.\nEOF",
+    "literal": true
+  }
+]
