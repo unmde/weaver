@@ -29,6 +29,15 @@ const env_renderer_log = std.unicode.utf8ToUtf16LeStringLiteral("WEAVER_RENDERER
 const env_art_cache = std.unicode.utf8ToUtf16LeStringLiteral("WEAVER_ART_CACHE");
 const env_crash_breadcrumb = std.unicode.utf8ToUtf16LeStringLiteral("WEAVER_CRASH_BREADCRUMB");
 const max_widgets = supervisor.max_widgets;
+
+/// Auto-reset event the supervision loop waits on: provider pipe readers
+/// and media executors set it when they queue work, so the loop sleeps
+/// until there is something to do instead of polling.
+var work_event: c.HANDLE = null;
+
+fn signalWork() void {
+    if (work_event) |event| _ = c.SetEvent(event);
+}
 const max_path_bytes: usize = 2048;
 const invalid_handle = c.INVALID_HANDLE_VALUE;
 
@@ -126,6 +135,7 @@ const MediaCommandExecutor = struct {
             self.results[index] = result;
             self.result_count += 1;
             self.mutex.unlock(self.io);
+            signalWork();
         }
     }
 };
@@ -836,6 +846,22 @@ const Host = struct {
         }
     }
 
+    /// Every child process the loop must notice exiting: the shared host,
+    /// the renderer, and `--dev` widgets.
+    fn collectProcessHandles(self: *const Host, handles: *[c.MAXIMUM_WAIT_OBJECTS]c.HANDLE, count: *usize) void {
+        if (self.shared.process.process) |process| append(handles, count, process);
+        if (self.renderer.platform.process) |process| append(handles, count, process);
+        for (&self.slots) |*slot| {
+            if (slot.platform.process) |process| append(handles, count, process);
+        }
+    }
+
+    fn append(handles: *[c.MAXIMUM_WAIT_OBJECTS]c.HANDLE, count: *usize, handle: c.HANDLE) void {
+        if (count.* == handles.len) return;
+        handles[count.*] = handle;
+        count.* += 1;
+    }
+
     fn sampleProviders(self: *Host) void {
         var any = false;
         for (&self.slots, 0..) |*slot, index| if (self.running(index) and (slot.wants_cpu or slot.wants_memory)) {
@@ -1225,12 +1251,29 @@ fn run(init: std.process.Init) !void {
     defer host.audio_provider.deinit();
     defer host.media_provider.deinit();
     try host.loadRegistry();
+    work_event = c.CreateEventW(null, 0, 0, null) orelse return error.CreateEventFailed;
+    defer {
+        _ = c.CloseHandle(work_event);
+        work_event = null;
+    }
     var next_provider_ms: u64 = 0;
     var next_cost_ms: u64 = 0;
     while (true) {
-        const handles = [_]c.HANDLE{ shutdown_event, reload_event };
-        const wait_ms: c.DWORD = if (host.hasAudioSubscribers()) 10 else 250;
-        const wait = c.WaitForMultipleObjects(handles.len, &handles, 0, wait_ms);
+        // Sleep until something happens: a signal, queued pipe work, or a
+        // child process exiting. Live audio needs its 10 ms drain and
+        // media its 250 ms poll; otherwise the loop wakes at most once a
+        // second, for provider samples, status, and backoff restarts.
+        var handles: [c.MAXIMUM_WAIT_OBJECTS]c.HANDLE = undefined;
+        var handle_count: usize = 0;
+        for ([_]c.HANDLE{ shutdown_event, reload_event, work_event }) |handle| {
+            handles[handle_count] = handle;
+            handle_count += 1;
+        }
+        host.collectProcessHandles(&handles, &handle_count);
+        const now_before = c.GetTickCount64();
+        const due_ms = @min(next_provider_ms, next_cost_ms) -| now_before;
+        const wait_ms: c.DWORD = if (host.hasAudioSubscribers()) 10 else if (host.hasMediaSubscribers()) 250 else @intCast(@min(due_ms, 1000));
+        const wait = c.WaitForMultipleObjects(@intCast(handle_count), &handles, 0, wait_ms);
         if (wait == c.WAIT_OBJECT_0) break;
         if (wait == c.WAIT_OBJECT_0 + 1) {
             host.loadRegistry() catch {
@@ -1398,6 +1441,8 @@ fn collectThreadCounts(host: *Host, slot_counts: *[max_widgets]u32, renderer_cou
 fn commandReaderMain(platform: *WindowsSlotState) void {
     const event = c.CreateEventW(null, 0, 0, null) orelse return;
     defer _ = c.CloseHandle(event);
+    // Every exit and every fed chunk is work for the supervision loop.
+    defer signalWork();
     var framer: media_commands.Framer = .{};
     var chunk: [512]u8 = undefined;
     while (true) {
@@ -1439,6 +1484,7 @@ fn commandReaderMain(platform: *WindowsSlotState) void {
             return;
         }
         if (!framer.feed(&platform.command_queue, chunk[0..read])) return;
+        signalWork();
     }
 }
 
