@@ -8,6 +8,7 @@ const media_commands = @import("media_commands.zig");
 const providers = @import("providers.zig");
 const provider_protocol = @import("provider_protocol.zig");
 const registry = @import("registry.zig");
+const small_fs = @import("small_fs.zig");
 
 const c = @cImport({
     @cDefine("WIN32_LEAN_AND_MEAN", "1");
@@ -273,7 +274,7 @@ const Host = struct {
     renderer_failure_reason_len: usize = 0,
 
     fn loadRegistry(self: *Host) !void {
-        const owned_bytes = std.Io.Dir.cwd().readFileAlloc(self.io, self.registry_path, self.allocator, .limited(256 * 1024)) catch |err| switch (err) {
+        const owned_bytes = small_fs.readAlloc(self.allocator, self.registry_path, 256 * 1024) catch |err| switch (err) {
             error.FileNotFound => null,
             else => return err,
         };
@@ -351,7 +352,7 @@ const Host = struct {
         defer self.allocator.free(dist);
         const manifest_path = try std.fs.path.join(self.allocator, &.{ dist, "widget.json" });
         defer self.allocator.free(manifest_path);
-        const manifest_bytes = try std.Io.Dir.cwd().readFileAlloc(self.io, manifest_path, self.allocator, .limited(64 * 1024));
+        const manifest_bytes = try small_fs.readAlloc(self.allocator, manifest_path, 64 * 1024);
         defer self.allocator.free(manifest_bytes);
         const Manifest = struct {
             subscribe: []const []const u8 = &.{},
@@ -387,10 +388,7 @@ const Host = struct {
         const backend_hash = std.hash.Wyhash.hash(0, slot.name());
         const backend_path = try std.fmt.bufPrint(&slot.platform.backend_path_buffer, "{s}.backend-{x}", .{ self.status_path, backend_hash });
         slot.platform.backend_path_len = backend_path.len;
-        std.Io.Dir.cwd().deleteFile(self.io, backend_path) catch |err| switch (err) {
-            error.FileNotFound => {},
-            else => return err,
-        };
+        try small_fs.delete(self.allocator, backend_path);
     }
 
     /// Process-wide environment every widget of a launch shares.
@@ -424,7 +422,7 @@ const Host = struct {
         if (slot.platform.pipe != invalid_handle) {
             // A hosted widget that fails to load reports it in its status
             // file and never connects; stop waiting as soon as it says so.
-            const failure_report: ?FailureReport = if (slot.dev) null else .{ .io = self.io, .path = slot.platform.backendPath() };
+            const failure_report: ?FailureReport = if (slot.dev) null else .{ .allocator = self.allocator, .path = slot.platform.backendPath() };
             if (!connectPipe(slot.platform.pipe, process, pid, 5_000, failure_report)) return error.ConnectPipeFailed;
             slot.platform.write_event = c.CreateEventW(null, 0, 0, null) orelse return error.CreateEventFailed;
             slot.platform.command_shutdown_event = c.CreateEventW(null, 1, 0, null) orelse return error.CreateEventFailed;
@@ -628,10 +626,10 @@ const Host = struct {
     fn stopOnReportedLoadFailure(self: *Host, slot: *Slot) bool {
         if (slot.platform.backend_path_len == 0) return false;
         var buffer: [96]u8 = undefined;
-        const text = std.Io.Dir.cwd().readFile(self.io, slot.platform.backendPath(), &buffer) catch return false;
+        const text = small_fs.readInto(self.allocator, slot.platform.backendPath(), &buffer) catch return false;
         if (!std.mem.startsWith(u8, text, "failed:")) return false;
         // Consumed: the status row carries the error from here on.
-        std.Io.Dir.cwd().deleteFile(self.io, slot.platform.backendPath()) catch {};
+        small_fs.delete(self.allocator, slot.platform.backendPath()) catch {};
         self.releaseHostedSlot(slot);
         slot.state = .stopped;
         slot.setReason("widget did not load in the shared host: {s}; see 'weaver logs {s}'", .{ text["failed:".len..], slot.name() });
@@ -1064,7 +1062,7 @@ const Host = struct {
             const average = slot.platform.averages();
             var backend: []const u8 = "-";
             if ((slot.platform.process != null or slot.platform.hosted) and slot.platform.backend_path_len > 0) {
-                backend_allocations[slot_index] = std.Io.Dir.cwd().readFileAlloc(self.io, slot.platform.backendPath(), self.allocator, .limited(16)) catch null;
+                backend_allocations[slot_index] = small_fs.readAlloc(self.allocator, slot.platform.backendPath(), 16) catch null;
                 if (backend_allocations[slot_index]) |value| backend = value;
             }
             const slot_reason = slot.reason();
@@ -1106,9 +1104,7 @@ const Host = struct {
             .audio_provider_frames = self.audio_provider.frame_count,
             .audio_last_error = self.audio_provider.last_error,
         }, entries[0..entry_count]) catch |err| return self.noteStatusWriteFailure("encode", err);
-        var cwd = std.Io.Dir.cwd();
-        cwd.writeFile(self.io, .{ .sub_path = self.status_temp_path, .data = output.written() }) catch |err| return self.noteStatusWriteFailure("write temporary file", err);
-        cwd.rename(self.status_temp_path, cwd, self.status_path, self.io) catch |err| return self.noteStatusWriteFailure("publish", err);
+        small_fs.writeReplace(self.allocator, self.status_temp_path, self.status_path, output.written()) catch |err| return self.noteStatusWriteFailure("publish", err);
         self.noteStatusWriteRecovery();
     }
 
@@ -1135,10 +1131,10 @@ const Host = struct {
         defer self.allocator.free(bundle_path);
         const manifest_path = try std.fs.path.join(self.allocator, &.{ source, "dist", "widget.json" });
         defer self.allocator.free(manifest_path);
-        const source_stat = try std.Io.Dir.cwd().statFile(self.io, source_path, .{});
-        const bundle_stat = std.Io.Dir.cwd().statFile(self.io, bundle_path, .{}) catch null;
-        const manifest_stat = std.Io.Dir.cwd().statFile(self.io, manifest_path, .{}) catch null;
-        if (bundle_stat != null and manifest_stat != null and bundle_stat.?.mtime.nanoseconds >= source_stat.mtime.nanoseconds) return;
+        const source_mtime = small_fs.mtime(self.allocator, source_path) orelse return error.FileNotFound;
+        const bundle_mtime = small_fs.mtime(self.allocator, bundle_path);
+        const manifest_mtime = small_fs.mtime(self.allocator, manifest_path);
+        if (bundle_mtime != null and manifest_mtime != null and bundle_mtime.? >= source_mtime) return;
         const result = try std.process.run(self.allocator, self.io, .{
             .argv = &.{ "node", self.cli_script, "bundle", source },
             .stdout_limit = .limited(64 * 1024),
@@ -1156,13 +1152,11 @@ const Host = struct {
     pub fn artifactMtime(self: *Host, source: []const u8) i128 {
         const path = std.fs.path.join(self.allocator, &.{ source, "dist", "bundle.js" }) catch return 0;
         defer self.allocator.free(path);
-        const stat = std.Io.Dir.cwd().statFile(self.io, path, .{}) catch return 0;
-        return stat.mtime.nanoseconds;
+        return small_fs.mtime(self.allocator, path) orelse 0;
     }
 
     fn sourceExists(self: *Host, source: []const u8) bool {
-        _ = std.Io.Dir.cwd().statFile(self.io, source, .{}) catch return false;
-        return true;
+        return small_fs.exists(self.allocator, source);
     }
 };
 
@@ -1207,18 +1201,14 @@ fn run(init: std.process.Init) !void {
     const local_app_data = init.environ_map.get("LOCALAPPDATA") orelse return error.MissingLocalAppData;
     const directory = try std.fs.path.join(allocator, &.{ local_app_data, "weaver" });
     defer allocator.free(directory);
-    try std.Io.Dir.cwd().createDirPath(init.io, directory);
     const registry_path = try std.fs.path.join(allocator, &.{ directory, "registry.json" });
     defer allocator.free(registry_path);
     const status_path = try std.fs.path.join(allocator, &.{ directory, "status.json" });
     defer allocator.free(status_path);
     const status_temp_path = try std.fmt.allocPrint(allocator, "{s}.tmp", .{status_path});
     defer allocator.free(status_temp_path);
-    cleanupBackendStatusFiles(init.io, directory);
     const art_cache_root = try std.fs.path.join(allocator, &.{ directory, "artcache" });
     defer allocator.free(art_cache_root);
-    var media_art_cache = try art_cache.Cache.init(init.io, allocator, art_cache_root);
-    defer media_art_cache.deinit();
     const repo_root = try repositoryRoot(allocator);
     defer allocator.free(repo_root);
     const runtime_exe = try std.fs.path.join(allocator, &.{ repo_root, "runtime", "zig-out", "bin", "weaver-widget.exe" });
@@ -1229,10 +1219,22 @@ fn run(init: std.process.Init) !void {
     defer allocator.free(renderer_pipe_name);
     const renderer_log_path = try std.fmt.allocPrint(allocator, "{s}.renderer.log", .{status_path});
     defer allocator.free(renderer_log_path);
-    std.Io.Dir.cwd().deleteFile(init.io, renderer_log_path) catch {};
+    var startup: Startup = .{
+        .io = init.io,
+        .allocator = allocator,
+        .directory = directory,
+        .art_cache_root = art_cache_root,
+        .renderer_log_path = renderer_log_path,
+    };
+    var media_art_cache = try startup.run();
+    defer media_art_cache.deinit();
     const cli_script = try std.fs.path.join(allocator, &.{ repo_root, "cli", "dist", "index.js" });
     defer allocator.free(cli_script);
-    var host: Host = .{
+    // On the heap: as a local, Host made run's frame ~340 KiB, all of it
+    // resident stack for the daemon's life.
+    const host = try allocator.create(Host);
+    defer allocator.destroy(host);
+    host.* = .{
         .io = init.io,
         .allocator = allocator,
         .repo_root = repo_root,
@@ -1308,6 +1310,40 @@ fn run(init: std.process.Init) !void {
     }
     host.writeStatus(c.GetTickCount64());
 }
+
+/// Startup filesystem work, run on a short-lived thread: std.Io's Windows
+/// path calls take 256-512 KiB stack frames, and a thread's stack is
+/// released when it exits, where the main thread's high-water mark would
+/// stay resident for the daemon's whole life.
+const Startup = struct {
+    io: std.Io,
+    allocator: std.mem.Allocator,
+    directory: []const u8,
+    art_cache_root: []const u8,
+    renderer_log_path: []const u8,
+    cache: ?art_cache.Cache = null,
+    failure: ?anyerror = null,
+
+    fn run(self: *Startup) !art_cache.Cache {
+        const thread = try std.Thread.spawn(.{ .stack_size = 2 * 1024 * 1024 }, work, .{self});
+        thread.join();
+        if (self.failure) |err| return err;
+        return self.cache.?;
+    }
+
+    fn work(self: *Startup) void {
+        std.Io.Dir.cwd().createDirPath(self.io, self.directory) catch |err| {
+            self.failure = err;
+            return;
+        };
+        cleanupBackendStatusFiles(self.io, self.directory);
+        std.Io.Dir.cwd().deleteFile(self.io, self.renderer_log_path) catch {};
+        self.cache = art_cache.Cache.init(self.io, self.allocator, self.art_cache_root) catch |err| {
+            self.failure = err;
+            return;
+        };
+    }
+};
 
 fn cleanupBackendStatusFiles(io: std.Io, directory_path: []const u8) void {
     var directory = std.Io.Dir.cwd().openDir(io, directory_path, .{ .iterate = true }) catch |err| {
@@ -1510,12 +1546,12 @@ fn writePipe(platform: *WindowsSlotState, bytes: []const u8) bool {
 /// The status file a hosted widget writes `failed:<error>` to when it does
 /// not load.
 const FailureReport = struct {
-    io: std.Io,
+    allocator: std.mem.Allocator,
     path: []const u8,
 
     fn reported(self: FailureReport) bool {
         var buffer: [16]u8 = undefined;
-        const text = std.Io.Dir.cwd().readFile(self.io, self.path, &buffer) catch return false;
+        const text = small_fs.readInto(self.allocator, self.path, &buffer) catch return false;
         return std.mem.startsWith(u8, text, "failed:");
     }
 };
@@ -1598,6 +1634,7 @@ fn closeWindowsForProcess(pid: u32) void {
 }
 
 test {
+    _ = small_fs;
     _ = audio;
     _ = registry;
     _ = backoff;
