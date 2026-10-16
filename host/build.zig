@@ -146,7 +146,6 @@ pub fn build(b: *std.Build) void {
     exe.root_module.linkSystemLibrary("c++", .{});
     exe.root_module.linkSystemLibrary("c", .{});
     exe.root_module.linkSystemLibrary("kernel32", .{});
-    exe.root_module.linkSystemLibrary("user32", .{});
     exe.root_module.linkSystemLibrary("psapi", .{});
     exe.root_module.linkSystemLibrary("ntdll", .{});
     exe.root_module.linkSystemLibrary("ole32", .{});

@@ -417,7 +417,7 @@ const Host = struct {
     runtime_exe: []const u8,
     cli_script: []const u8,
     runtime_root: []const u8,
-    slots: [max_widgets]Slot = [_]Slot{.{}} ** max_widgets,
+    slots: supervisor.Slots(@FieldType(Slot, "platform")) = .{},
     sampler: system_providers.Sampler = .{},
     previous_cpu: [8192]u8 = undefined,
     previous_cpu_len: usize = 0,
@@ -473,10 +473,10 @@ const Host = struct {
     }
 
     pub fn running(self: *const Host, index: usize) bool {
-        return self.slots[index].platform.process != null;
+        return self.slots.storage[index].platform.process != null;
     }
     pub fn stop(self: *Host, index: usize, graceful: bool) void {
-        self.stopSlot(&self.slots[index], graceful);
+        self.stopSlot(&self.slots.storage[index], graceful);
     }
     pub fn artifactMtime(self: *Host, source: []const u8) i128 {
         const path = std.fs.path.join(self.allocator, &.{ source, "dist", "bundle.js" }) catch return 0;
@@ -491,7 +491,7 @@ const Host = struct {
     }
 
     fn supervise(self: *Host, now_ms: u64) void {
-        for (&self.slots) |*slot| {
+        for (self.slots.all()) |*slot| {
             if (!slot.used or !slot.enabled) continue;
             const process_running = slot.platform.process != null;
             const exited = if (process_running) self.processExited(slot) else false;
@@ -514,7 +514,7 @@ const Host = struct {
 
     fn drainMediaCommands(self: *Host, now_ms: u64) void {
         var ack_buffer: [64]u8 = undefined;
-        for (&self.slots) |*slot| {
+        for (self.slots.all()) |*slot| {
             const endpoint = slot.platform.endpoint orelse continue;
             var channel_failed = false;
             if (slot.platform.media_command_executor) |executor| {
@@ -868,7 +868,7 @@ const Host = struct {
     }
 
     fn sampleCosts(self: *Host, now_ms: u64) void {
-        for (&self.slots) |*slot| {
+        for (self.slots.all()) |*slot| {
             const pid = slot.platform.process orelse continue;
             var footprint: u64 = 0;
             var cpu_time_ns: u64 = 0;
@@ -880,7 +880,7 @@ const Host = struct {
     }
 
     fn sampleProviders(self: *Host) void {
-        if (!supervisor.hasSubscription(&self.slots, .cpu, self) and !supervisor.hasSubscription(&self.slots, .memory, self)) return;
+        if (!supervisor.hasSubscription(self.slots.all(), .cpu, self) and !supervisor.hasSubscription(self.slots.all(), .memory, self)) return;
         const sample = self.sampler.sample() catch return orelse return;
         var cpu_buffer: [8192]u8 = undefined;
         const cpu = provider_protocol.formatCpu(sample.cpu, &cpu_buffer) catch return;
@@ -888,7 +888,7 @@ const Host = struct {
         const memory = provider_protocol.formatMemory(sample.memory, &memory_buffer) catch return;
         const cpu_changed = !std.mem.eql(u8, cpu, self.previous_cpu[0..self.previous_cpu_len]);
         const memory_changed = !std.mem.eql(u8, memory, self.previous_memory[0..self.previous_memory_len]);
-        for (&self.slots) |*slot| {
+        for (self.slots.all()) |*slot| {
             const endpoint = slot.platform.endpoint orelse continue;
             const send_cpu = provider_protocol.deliveryNeeded(slot.wants_cpu, slot.cpu_sent, cpu_changed);
             const send_memory = provider_protocol.deliveryNeeded(slot.wants_memory, slot.memory_sent, memory_changed);
@@ -924,11 +924,11 @@ const Host = struct {
     }
 
     fn hasAudioSubscribers(self: *const Host) bool {
-        return supervisor.hasSubscription(&self.slots, .audio, self);
+        return supervisor.hasSubscription(self.slots.allConst(), .audio, self);
     }
 
     fn hasMediaSubscribers(self: *const Host) bool {
-        return supervisor.hasSubscription(&self.slots, .media, self);
+        return supervisor.hasSubscription(self.slots.allConst(), .media, self);
     }
 
     fn sampleAudio(self: *Host, now_ms: u64) void {
@@ -939,7 +939,7 @@ const Host = struct {
         var buffer: [512]u8 = undefined;
         const encoded = audio.formatFrame(frame, &buffer) catch return;
         var delivered = false;
-        for (&self.slots) |*slot| {
+        for (self.slots.all()) |*slot| {
             const endpoint = slot.platform.endpoint orelse continue;
             if (slot.wants_audio and endpoint.write(encoded)) delivered = true;
         }
@@ -970,7 +970,7 @@ const Host = struct {
         }
 
         var delivered = false;
-        for (&self.slots) |*slot| {
+        for (self.slots.all()) |*slot| {
             const endpoint = slot.platform.endpoint orelse continue;
             if (!slot.wants_media) continue;
             if ((!slot.media_sent or changed or force) and endpoint.write(encoded)) {
@@ -990,7 +990,7 @@ const Host = struct {
         var entry_count: usize = 0;
         var backend_allocations = [_]?[]u8{null} ** max_widgets;
         defer for (backend_allocations) |value| if (value) |bytes| self.allocator.free(bytes);
-        for (&self.slots, 0..) |*slot, index| {
+        for (self.slots.all(), 0..) |*slot, index| {
             if (!slot.used) continue;
             const average = slot.platform.costs.averages();
             var backend: []const u8 = "-";
@@ -1014,7 +1014,7 @@ const Host = struct {
         var output: std.Io.Writer.Allocating = .init(self.allocator);
         defer output.deinit();
         supervisor.writeStatus(&output.writer, @intCast(posix.system.getpid()), .{
-            .system_subscribers = supervisor.systemSubscriberCount(&self.slots, self),
+            .system_subscribers = supervisor.systemSubscriberCount(self.slots.all(), self),
             .system_sample_count = self.sampler.sample_calls,
             .system_frames = self.system_frames,
             .audio_capture_active = self.audio_provider.availability == .live,
@@ -1022,9 +1022,9 @@ const Host = struct {
             .audio_pipe_frames = self.audio_pipe_frames,
             .media_pipe_frames = self.media_pipe_frames,
             .media_availability = self.media_provider.availabilityLabel(),
-            .media_subscribers = supervisor.subscriptionCount(&self.slots, .media, self),
+            .media_subscribers = supervisor.subscriptionCount(self.slots.all(), .media, self),
             .audio_availability = self.audio_provider.availability.label(),
-            .audio_subscribers = supervisor.subscriptionCount(&self.slots, .audio, self),
+            .audio_subscribers = supervisor.subscriptionCount(self.slots.all(), .audio, self),
             .audio_capture_starts = self.audio_provider.capture_starts,
             .audio_provider_frames = self.audio_provider.frame_count,
             .audio_last_error = self.audio_provider.last_error,
@@ -1232,7 +1232,7 @@ fn run(init: std.process.Init) !void {
         if (acknowledge_reload) control.complete(.ok);
         if (!stopping) std.Io.sleep(init.io, .fromMilliseconds(if (host.hasAudioSubscribers()) 30 else 50), .awake) catch {};
     }
-    for (&host.slots) |*slot| if (slot.platform.process != null) host.stopSlot(slot, true);
+    for (host.slots.all()) |*slot| if (slot.platform.process != null) host.stopSlot(slot, true);
     host.stopRenderHost();
     host.audio_provider.setActive(false, monotonicMilliseconds());
     host.media_provider.setActive(false);
@@ -1440,7 +1440,7 @@ test "widget supervision waits for renderer readiness without consuming restart 
     };
     // This empty directory has no widget.tsx. Any attempted launch fails
     // before spawning or accessing the deliberately unused host services.
-    const slot = &host.slots[0];
+    const slot = &host.slots.storage[host.slots.take().?];
     try slot.setRegistration(.{ .name = "waiting", .sourcePath = source, .enabled = true });
     slot.state = .starting;
     host.supervise(100);

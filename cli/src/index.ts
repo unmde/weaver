@@ -1463,6 +1463,7 @@ async function devWidget(directory: string): Promise<void> {
   const presentationWatch = setInterval(() => {
     if (presentationFailureReported || Date.now() < presentationDeadline) return;
     try {
+      refreshStatus();
       const status = readStatus().widgets.find((widget) => widget.name === project.config.name);
       if (status && status.backend !== "-") {
         clearInterval(presentationWatch);
@@ -1846,6 +1847,7 @@ async function downHost(): Promise<void> {
 function showStatus(json: boolean): void {
   assertHostLifecycleAvailable("status");
   if (!hostRunning()) throw new WeaverFailure(['weaverd is not running; run "weaver up"']);
+  refreshStatus();
   try {
     const document = readStatus();
     process.stdout.write(`${json ? JSON.stringify(document, null, 2) : formatStatus(document)}\n`);
@@ -1871,6 +1873,18 @@ function assertHostReloadReady(): void {
   if (!hostReloadReady()) {
     throw new WeaverFailure(["The running weaverd predates acknowledged registry reloads.", 'Run "weaver down", then retry; Weaver will start the current host automatically.']);
   }
+}
+
+/**
+ * On Windows weaverd publishes status.json only when a widget's state
+ * changes or when asked, so a reader asks first: memory as of now, CPU
+ * since the previous request. An older weaverd ignores the request; the
+ * staleness warning then says how old the file is.
+ */
+function refreshStatus(): void {
+  if (process.platform !== "win32") return;
+  const result = spawnSync(hostExecutable, ["--request-status"], { stdio: "ignore", windowsHide: true, env: hostEnvironment() });
+  if (result.status !== 0) process.stderr.write("weaver status warning: weaverd did not refresh status.json; showing the last one it published\n");
 }
 
 function signalHost(signal: "--signal-down" | "--signal-reload"): void {

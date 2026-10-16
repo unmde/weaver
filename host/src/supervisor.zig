@@ -83,12 +83,41 @@ pub fn RendererState(comptime PlatformState: type) type {
     };
 }
 
+/// Widget slots, each written only when first taken: most installs use a
+/// few of max_widgets, and the rest stay untouched pages (5.8 KiB a slot on
+/// Windows, 2026-10-16).
+pub fn Slots(comptime PlatformState: type) type {
+    return struct {
+        const Self = @This();
+        storage: [max_widgets]Slot(PlatformState) = undefined,
+        /// Slots taken so far; a freed one stays here, unused, for reuse.
+        len: usize = 0,
+
+        pub fn all(self: *Self) []Slot(PlatformState) {
+            return self.storage[0..self.len];
+        }
+
+        pub fn allConst(self: *const Self) []const Slot(PlatformState) {
+            return self.storage[0..self.len];
+        }
+
+        /// A free slot, reusing a freed one before writing a new one.
+        pub fn take(self: *Self) ?usize {
+            for (self.all(), 0..) |*slot, index| if (!slot.used) return index;
+            if (self.len == max_widgets) return null;
+            self.storage[self.len] = .{};
+            self.len += 1;
+            return self.len - 1;
+        }
+    };
+}
+
 pub fn reconcile(slots: anytype, registrations: []const registry.Registration, adapter: anytype) !void {
     var seen = [_]bool{false} ** max_widgets;
     for (registrations) |registration| {
-        const index = findSlot(slots, registration.name) orelse findFreeSlot(slots) orelse return error.RegistryFull;
+        const index = findSlot(slots.all(), registration.name) orelse slots.take() orelse return error.RegistryFull;
         seen[index] = true;
-        const slot = &slots[index];
+        const slot = &slots.storage[index];
         const source_changed = slot.used and !std.mem.eql(u8, slot.source(), registration.sourcePath);
         const dev_changed = slot.used and slot.dev != registration.dev;
         if (source_changed or dev_changed) adapter.stop(index, true);
@@ -120,7 +149,7 @@ pub fn reconcile(slots: anytype, registrations: []const registry.Registration, a
             slot.state = .starting;
         }
     }
-    for (slots, 0..) |*slot, index| {
+    for (slots.all(), 0..) |*slot, index| {
         if (!slot.used or seen[index]) continue;
         adapter.stop(index, true);
         slot.* = .{};
@@ -401,95 +430,91 @@ fn findSlot(slots: anytype, name: []const u8) ?usize {
     return null;
 }
 
-fn findFreeSlot(slots: anytype) ?usize {
-    for (slots, 0..) |*slot, index| if (!slot.used) return index;
-    return null;
-}
-
 const FakePlatformState = struct { running: bool = false, mtime: i128 = 0 };
 const FakeSlot = Slot(FakePlatformState);
+const FakeSlots = Slots(FakePlatformState);
 
 const FakeAdapter = struct {
-    slots: *[max_widgets]FakeSlot,
+    slots: *FakeSlots,
     stops: usize = 0,
 
     fn running(self: *@This(), index: usize) bool {
-        return self.slots[index].platform.running;
+        return self.slots.storage[index].platform.running;
     }
     fn artifactMtime(self: *@This(), source: []const u8) i128 {
-        for (self.slots) |slot| if (slot.used and std.mem.eql(u8, slot.source(), source)) return slot.platform.mtime;
+        for (self.slots.all()) |slot| if (slot.used and std.mem.eql(u8, slot.source(), source)) return slot.platform.mtime;
         return 0;
     }
     fn stop(self: *@This(), index: usize, _: bool) void {
         self.stops += 1;
-        self.slots[index].platform.running = false;
+        self.slots.storage[index].platform.running = false;
     }
 };
 
 test "fake adapter drives reconciliation without platform handles" {
-    var slots = [_]FakeSlot{.{}} ** max_widgets;
+    var slots: FakeSlots = .{};
     var fake: FakeAdapter = .{ .slots = &slots };
     const first = [_]registry.Registration{.{ .name = "Clock", .sourcePath = "/owned/clock-v1", .enabled = true, .dev = false }};
     try reconcile(&slots, &first, &fake);
-    try std.testing.expect(slots[0].used);
-    try std.testing.expectEqual(RunState.starting, slots[0].state);
+    try std.testing.expect(slots.storage[0].used);
+    try std.testing.expectEqual(RunState.starting, slots.storage[0].state);
 
-    slots[0].platform.running = true;
-    slots[0].artifact_mtime = 10;
-    slots[0].platform.mtime = 11;
+    slots.storage[0].platform.running = true;
+    slots.storage[0].artifact_mtime = 10;
+    slots.storage[0].platform.mtime = 11;
     try reconcile(&slots, &first, &fake);
     try std.testing.expectEqual(@as(usize, 1), fake.stops);
-    try std.testing.expectEqual(RunState.starting, slots[0].state);
+    try std.testing.expectEqual(RunState.starting, slots.storage[0].state);
 
     try reconcile(&slots, &.{}, &fake);
     try std.testing.expectEqual(@as(usize, 2), fake.stops);
-    try std.testing.expect(!slots[0].used);
+    try std.testing.expect(!slots.storage[0].used);
 }
 
 test "reinstalling from a new owned path cannot leave a running slot with no process" {
-    var slots = [_]FakeSlot{.{}} ** max_widgets;
+    var slots: FakeSlots = .{};
     var fake: FakeAdapter = .{ .slots = &slots };
     const first = [_]registry.Registration{.{ .name = "Clock", .sourcePath = "/owned/clock-v1", .enabled = true, .dev = false }};
     try reconcile(&slots, &first, &fake);
-    slots[0].platform.running = true;
-    markRunning(&slots[0], 100, 10);
+    slots.storage[0].platform.running = true;
+    markRunning(&slots.storage[0], 100, 10);
 
     const replacement = [_]registry.Registration{.{ .name = "Clock", .sourcePath = "/owned/clock-v2", .enabled = true, .dev = false }};
     try reconcile(&slots, &replacement, &fake);
 
     try std.testing.expectEqual(@as(usize, 1), fake.stops);
-    try std.testing.expect(!slots[0].platform.running);
-    try std.testing.expectEqual(RunState.starting, slots[0].state);
-    try std.testing.expectEqual(SlotAction.launch, nextSlotAction(&slots[0], true, false, false, 100));
+    try std.testing.expect(!slots.storage[0].platform.running);
+    try std.testing.expectEqual(RunState.starting, slots.storage[0].state);
+    try std.testing.expectEqual(SlotAction.launch, nextSlotAction(&slots.storage[0], true, false, false, 100));
 }
 
 test "a new artifact revives a crash-latched slot with a fresh crash budget" {
-    var slots = [_]FakeSlot{.{}} ** max_widgets;
+    var slots: FakeSlots = .{};
     var fake: FakeAdapter = .{ .slots = &slots };
     const registrations = [_]registry.Registration{.{ .name = "Meter", .sourcePath = "/owned/meter", .enabled = true, .dev = false }};
     try reconcile(&slots, &registrations, &fake);
 
     // Crash out to the stopped latch.
-    markRunning(&slots[0], 100, 10);
-    slots[0].platform.mtime = 10;
-    recordCrash(&slots[0], 200, 1);
-    recordCrash(&slots[0], 300, 1);
-    recordCrash(&slots[0], 400, 1);
-    recordCrash(&slots[0], 500, 1);
-    try std.testing.expectEqual(RunState.stopped, slots[0].state);
-    try std.testing.expectEqual(SlotAction.none, nextSlotAction(&slots[0], true, false, false, 600));
+    markRunning(&slots.storage[0], 100, 10);
+    slots.storage[0].platform.mtime = 10;
+    recordCrash(&slots.storage[0], 200, 1);
+    recordCrash(&slots.storage[0], 300, 1);
+    recordCrash(&slots.storage[0], 400, 1);
+    recordCrash(&slots.storage[0], 500, 1);
+    try std.testing.expectEqual(RunState.stopped, slots.storage[0].state);
+    try std.testing.expectEqual(SlotAction.none, nextSlotAction(&slots.storage[0], true, false, false, 600));
 
     // Same artifact: the latch holds.
     try reconcile(&slots, &registrations, &fake);
-    try std.testing.expectEqual(RunState.stopped, slots[0].state);
+    try std.testing.expectEqual(RunState.stopped, slots.storage[0].state);
 
     // A reinstall (new artifact mtime) resets the crash budget and relaunches.
-    slots[0].platform.mtime = 11;
+    slots.storage[0].platform.mtime = 11;
     try reconcile(&slots, &registrations, &fake);
-    try std.testing.expectEqual(RunState.starting, slots[0].state);
-    try std.testing.expectEqual(@as(usize, 0), slots[0].crash_count);
-    try std.testing.expectEqual(@as(usize, 0), slots[0].reason().len);
-    try std.testing.expectEqual(SlotAction.launch, nextSlotAction(&slots[0], true, false, false, 600));
+    try std.testing.expectEqual(RunState.starting, slots.storage[0].state);
+    try std.testing.expectEqual(@as(usize, 0), slots.storage[0].crash_count);
+    try std.testing.expectEqual(@as(usize, 0), slots.storage[0].reason().len);
+    try std.testing.expectEqual(SlotAction.launch, nextSlotAction(&slots.storage[0], true, false, false, 600));
 }
 
 test "slot state machine preserves subscriptions renderer policy and crash backoff" {
@@ -512,8 +537,8 @@ test "slot state machine preserves subscriptions renderer policy and crash backo
 }
 
 test "fatal provider channel restarts the slot and restores media delivery and transport" {
-    var slots = [_]FakeSlot{.{}} ** max_widgets;
-    var slot = &slots[0];
+    var slots: FakeSlots = .{};
+    var slot = &slots.storage[slots.take().?];
     try slot.setRegistration(.{ .name = "Player", .sourcePath = "/owned/player", .enabled = true, .dev = false });
     selectManifest(slot, &.{"media"}, &.{"media-transport"}, "software", false);
     slot.platform.running = true;
@@ -532,7 +557,7 @@ test "fatal provider channel restarts the slot and restores media delivery and t
     slot.platform.running = true;
     markRunning(slot, 1200, 1);
     var fake: FakeAdapter = .{ .slots = &slots };
-    try std.testing.expect(hasSubscription(&slots, .media, &fake));
+    try std.testing.expect(hasSubscription(slots.all(), .media, &fake));
     try std.testing.expect(slot.wants_media_transport);
     try std.testing.expect(!slot.media_sent);
 }
