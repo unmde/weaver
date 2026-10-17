@@ -329,7 +329,7 @@ pub const Tree = struct {
 
     pub fn deinit(self: *Tree) void {
         self.keepBatch();
-        if (self.undo.storage) |storage| self.allocator.destroy(storage);
+        if (self.undo.storage) |storage| native_sdk.lazy_commit.destroy(storage);
         self.undo.storage = null;
         self.deinitNodes();
     }
@@ -347,7 +347,8 @@ pub const Tree = struct {
 
     pub fn beginBatch(self: *Tree) Error!void {
         if (self.batch_depth == 0) {
-            if (self.undo.storage == null) self.undo.storage = try self.allocator.create(UndoStorage);
+            // Committed as entries are recorded: a batch touches a few.
+            if (self.undo.storage == null) self.undo.storage = try native_sdk.lazy_commit.create(UndoStorage);
             const undo = &self.undo;
             undo.root = self.root;
             undo.generation = self.generation;
@@ -1934,4 +1935,43 @@ test "asset source paths are bounded, allocate exactly, and survive transaction 
     try std.testing.expectEqualStrings(&long_source, (try tree.nodeConst(image)).sourceSlice());
     const over_limit = [_]u8{'b'} ** (max_source_bytes + 1);
     try std.testing.expectError(error.TextTooLong, tree.setSource(image, &over_limit));
+}
+
+test "an open batch's undo storage is committed as it records" {
+    if (@import("builtin").os.tag != .windows) return error.SkipZigTest;
+    const tree = try std.heap.page_allocator.create(Tree);
+    defer std.heap.page_allocator.destroy(tree);
+    resetEmpty(tree, std.testing.allocator);
+    defer tree.deinit();
+    const before = testPrivateBytes();
+    try tree.beginBatch();
+    // 4.3 MB of entry and canvas capacity; an empty batch touches none of it.
+    try std.testing.expect(@sizeOf(UndoStorage) > 4 * 1024 * 1024);
+    try std.testing.expect(testPrivateBytes() -| before < 1024 * 1024);
+}
+
+/// This process's commit charge (private bytes): what a test pins a
+/// structure's commit against.
+fn testPrivateBytes() usize {
+    const Counters = extern struct {
+        cb: u32,
+        page_fault_count: u32,
+        peak_working_set_size: usize,
+        working_set_size: usize,
+        quota_peak_paged_pool_usage: usize,
+        quota_paged_pool_usage: usize,
+        quota_peak_non_paged_pool_usage: usize,
+        quota_non_paged_pool_usage: usize,
+        pagefile_usage: usize,
+        peak_pagefile_usage: usize,
+        private_usage: usize,
+    };
+    const api = struct {
+        extern "kernel32" fn K32GetProcessMemoryInfo(process: std.os.windows.HANDLE, counters: *Counters, size: u32) callconv(.winapi) std.os.windows.BOOL;
+        extern "kernel32" fn GetCurrentProcess() callconv(.winapi) std.os.windows.HANDLE;
+    };
+    var counters = std.mem.zeroes(Counters);
+    counters.cb = @sizeOf(Counters);
+    _ = api.K32GetProcessMemoryInfo(api.GetCurrentProcess(), &counters, counters.cb);
+    return counters.private_usage;
 }
