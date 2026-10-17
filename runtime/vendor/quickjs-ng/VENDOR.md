@@ -44,3 +44,41 @@ widgets receive Weaver's small `native` global, not QuickJS's OS or std modules.
 - `JS_GetDOMExceptionFields(ctx, val, &name, &message)`: reads a
   DOMException's fields without its prototype getters, so diagnostics can
   show one without running code.
+- `JS_AddLazyIntrinsicTypedArrays(ctx)` and `JS_AddLazyIntrinsicAToB(ctx)`
+  (`quickjs.h`): a widget realm builds the typed array family (ArrayBuffer,
+  SharedArrayBuffer, the typed arrays, DataView, Atomics) and the base64 one
+  (atob, btoa, DOMException) the first time widget code touches one of their
+  globals, saving about 21 KiB in a realm that uses neither. Each global is
+  a QuickJS autoinit property with the new id `JS_AUTOINIT_ID_LAZY_GLOBAL`,
+  so JavaScript sees the data property it will become: reading, assigning,
+  describing or redefining it builds the family first, and deleting it
+  does not. The ids now take three low bits of the realm pointer (mask
+  `JS_AUTOINIT_ID_MASK`), not two.
+  - A family is built once per realm, into its own object
+    (`JSContext.lazy_family`, marked and freed with the context), never onto
+    the global object, and its values are read from there. So building it
+    neither reads nor replaces the family's other globals: a global the
+    widget deleted, redefined or made non-configurable stays as the widget
+    left it. For the same reason `js_uint8array_funcs_init` takes the
+    Uint8Array constructor it is building, not the global.
+  - `TypedArray.prototype.toString` is `JSContext.array_proto_to_string`,
+    Array.prototype.toString as `JS_AddIntrinsicBaseObjects` made it, not
+    the property's current value (a widget may have replaced it before the
+    family is built).
+  - A build that fails (out of memory) frees what it built, resets the
+    family's class prototypes and leaves the global lazy, so the next use
+    builds it again; `JS_AutoInitProperty` keeps a property of this id
+    autoinit when its init fails (other ids still become undefined). The
+    family's own autoinit values (atob, btoa, Atomics) are read during the
+    build, so their failure is the build's too. A build that returns
+    success with an exception pending counts as failed:
+    `JS_SetPropertyFunctionList` does not report a failed definition.
+  - The DOMException setup (`js_add_domexception`, behind
+    `JS_AddIntrinsicDOMException`) and `JS_AddIntrinsicAToB` check every
+    allocation; upstream ignored their failures.
+  - `JS_AddIntrinsicTypedArrays` and `JS_AddIntrinsicAToB` are unchanged for
+    `JS_NewContext`: they build the same family onto the global object.
+  - Before its family is built, C code that makes an ArrayBuffer or a typed
+    array in that realm (`JS_NewArrayBuffer`, `JS_NewTypedArray`) gets one
+    with a null prototype, and `JS_ThrowDOMException` asserts until some
+    realm has built DOMException. Weaver calls none of them.

@@ -472,7 +472,23 @@ typedef enum {
     JS_AUTOINIT_ID_MODULE_NS,
     JS_AUTOINIT_ID_PROP,
     JS_AUTOINIT_ID_BYTECODE,
+    /* Weaver: a global of a family loaded on first use
+       (JS_AddLazyIntrinsicTypedArrays, JS_AddLazyIntrinsicAToB) */
+    JS_AUTOINIT_ID_LAZY_GLOBAL,
 } JSAutoInitIDEnum;
+
+/* Weaver: the id is kept in the low bits of the realm pointer
+   (JSProperty.u.init.realm_and_id). Five ids need three bits; a JSContext
+   allocation is at least 8-byte aligned (asserted where one is stored). */
+#define JS_AUTOINIT_ID_MASK ((uintptr_t)7)
+
+/* Weaver: the families a realm can load on first use, each built into
+   JSContext.lazy_family[] rather than onto the global object. */
+typedef enum {
+    JS_LAZY_FAMILY_TYPED_ARRAYS,
+    JS_LAZY_FAMILY_ATOB,
+    JS_LAZY_FAMILY_COUNT,
+} JSLazyFamilyEnum;
 
 enum {
     JS_BUILTIN_ARRAY_FROMASYNC = 1,
@@ -525,6 +541,13 @@ struct JSContext {
     JSValue iterator_proto;
     JSValue async_iterator_proto;
     JSValue array_proto_values;
+    /* Weaver: Array.prototype.toString as the realm built it. The typed
+       array family shares it; built on first use, it must not pick up a
+       value the widget assigned since. */
+    JSValue array_proto_to_string;
+    /* Weaver: each lazy family's globals by name, in an object built the
+       first time one of them is touched; JS_UNDEFINED until then. */
+    JSValue lazy_family[JS_LAZY_FAMILY_COUNT];
     JSValue throw_type_error;
     JSValue eval_obj;
 
@@ -1017,7 +1040,7 @@ typedef struct JSProperty {
             /* in order to use only 2 pointers, we compress the realm
                and the init function pointer */
             uintptr_t realm_and_id; /* realm and init_id (JS_AUTOINIT_ID_x)
-                                       in the 2 low bits */
+                                       in the 3 low bits (Weaver: was 2) */
             void *opaque;
         } init;
     } u;
@@ -2620,6 +2643,9 @@ JSContext *JS_NewContextRaw(JSRuntime *rt)
     ctx->error_back_trace = JS_UNDEFINED;
     ctx->error_prepare_stack = JS_UNDEFINED;
     ctx->error_stack_trace_limit = js_int32(10);
+    ctx->array_proto_to_string = JS_UNDEFINED;
+    for(i = 0; i < JS_LAZY_FAMILY_COUNT; i++)
+        ctx->lazy_family[i] = JS_UNDEFINED;
     init_list_head(&ctx->loaded_modules);
 
     if (JS_AddIntrinsicBasicObjects(ctx)) {
@@ -2743,6 +2769,10 @@ static void JS_MarkContext(JSRuntime *rt, JSContext *ctx,
     JS_MarkValue(rt, ctx->eval_obj, mark_func);
 
     JS_MarkValue(rt, ctx->array_proto_values, mark_func);
+    JS_MarkValue(rt, ctx->array_proto_to_string, mark_func);
+    for(i = 0; i < JS_LAZY_FAMILY_COUNT; i++) {
+        JS_MarkValue(rt, ctx->lazy_family[i], mark_func);
+    }
     for(i = 0; i < JS_NATIVE_ERROR_COUNT; i++) {
         JS_MarkValue(rt, ctx->native_error_proto[i], mark_func);
     }
@@ -2826,6 +2856,10 @@ void JS_FreeContext(JSContext *ctx)
     JS_FreeValue(ctx, ctx->eval_obj);
 
     JS_FreeValue(ctx, ctx->array_proto_values);
+    JS_FreeValue(ctx, ctx->array_proto_to_string);
+    for(i = 0; i < JS_LAZY_FAMILY_COUNT; i++) {
+        JS_FreeValue(ctx, ctx->lazy_family[i]);
+    }
     for(i = 0; i < JS_NATIVE_ERROR_COUNT; i++) {
         JS_FreeValue(ctx, ctx->native_error_proto[i]);
     }
@@ -6418,12 +6452,12 @@ JSValue JS_NewCFunctionData(JSContext *ctx, JSCFunctionData *func,
 
 static JSContext *js_autoinit_get_realm(JSProperty *pr)
 {
-    return (JSContext *)(pr->u.init.realm_and_id & ~3);
+    return (JSContext *)(pr->u.init.realm_and_id & ~JS_AUTOINIT_ID_MASK);
 }
 
 static JSAutoInitIDEnum js_autoinit_get_id(JSProperty *pr)
 {
-    return pr->u.init.realm_and_id & 3;
+    return pr->u.init.realm_and_id & JS_AUTOINIT_ID_MASK;
 }
 
 static void js_autoinit_free(JSRuntime *rt, JSProperty *pr)
@@ -8754,11 +8788,15 @@ static JSValue js_bytecode_autoinit(JSContext *ctx, JSObject *p, JSAtom atom,
 /* return the value associated to the autoinit property or an exception */
 typedef JSValue JSAutoInitFunc(JSContext *ctx, JSObject *p, JSAtom atom, void *opaque);
 
+static JSValue js_lazy_global_autoinit(JSContext *ctx, JSObject *p,
+                                       JSAtom atom, void *opaque);
+
 static JSAutoInitFunc *const js_autoinit_func_table[] = {
     js_instantiate_prototype, /* JS_AUTOINIT_ID_PROTOTYPE */
     js_module_ns_autoinit, /* JS_AUTOINIT_ID_MODULE_NS */
     JS_InstantiateFunctionListItem2, /* JS_AUTOINIT_ID_PROP */
     js_bytecode_autoinit, /* JS_AUTOINIT_ID_BYTECODE */
+    js_lazy_global_autoinit, /* JS_AUTOINIT_ID_LAZY_GLOBAL */
 };
 
 /* warning: 'prs' is reallocated after it */
@@ -8768,14 +8806,21 @@ static int JS_AutoInitProperty(JSContext *ctx, JSObject *p, JSAtom prop,
     JSValue val;
     JSContext *realm;
     JSAutoInitFunc *func;
+    JSAutoInitIDEnum id;
 
     if (js_shape_prepare_update(ctx, p, &prs))
         return -1;
 
     realm = js_autoinit_get_realm(pr);
-    func = js_autoinit_func_table[js_autoinit_get_id(pr)];
+    id = js_autoinit_get_id(pr);
+    func = js_autoinit_func_table[id];
     /* 'func' shall not modify the object properties 'pr' */
     val = func(realm, p, prop, pr->u.init.opaque);
+    /* Weaver: a lazy global whose family failed to build (out of memory)
+       stays lazy, so a later access builds it again instead of finding
+       undefined. */
+    if (JS_IsException(val) && id == JS_AUTOINIT_ID_LAZY_GLOBAL)
+        return -1;
     js_autoinit_free(ctx->rt, pr);
     prs->flags &= ~JS_PROP_TMASK;
     pr->u.value = JS_UNDEFINED;
@@ -11165,8 +11210,8 @@ static int JS_DefineAutoInitProperty(JSContext *ctx, JSValueConst this_obj,
     if (unlikely(!pr))
         return -1;
     pr->u.init.realm_and_id = (uintptr_t)JS_DupContext(ctx);
-    assert((pr->u.init.realm_and_id & 3) == 0);
-    assert(id <= 3);
+    assert((pr->u.init.realm_and_id & JS_AUTOINIT_ID_MASK) == 0);
+    assert(id <= JS_AUTOINIT_ID_MASK);
     pr->u.init.realm_and_id |= id;
     pr->u.init.opaque = opaque;
     return true;
@@ -57692,6 +57737,13 @@ int JS_AddIntrinsicBaseObjects(JSContext *ctx)
     if (JS_IsException(ctx->array_proto_values))
         return -1;
 
+    /* Weaver: TypedArray.prototype.toString must be this same function
+       however late the typed array family is built */
+    ctx->array_proto_to_string =
+        JS_GetProperty(ctx, ctx->class_proto[JS_CLASS_ARRAY], JS_ATOM_toString);
+    if (JS_IsException(ctx->array_proto_to_string))
+        return -1;
+
     ctx->class_proto[JS_CLASS_ARRAY_ITERATOR] =
         JS_NewObjectProtoList(ctx, ctx->class_proto[JS_CLASS_ITERATOR],
                               js_array_iterator_proto_funcs,
@@ -61512,19 +61564,35 @@ static void js__atomics_init(void) {
 }
 
 /* TODO(saghul) make this public and not dependent on typed arrays? */
-static int JS_AddIntrinsicAtomics(JSContext *ctx)
+/* Weaver: defines Atomics on 'target', the global object or a lazy family */
+static int JS_AddIntrinsicAtomics(JSContext *ctx, JSValueConst target)
 {
     js_once(&js_atomics_once, js__atomics_init);
 
     /* add Atomics as autoinit object */
-    return JS_SetPropertyFunctionList(ctx, ctx->global_obj, js_atomics_obj, countof(js_atomics_obj));
+    return JS_SetPropertyFunctionList(ctx, target, js_atomics_obj, countof(js_atomics_obj));
 }
 
 #endif /* CONFIG_ATOMICS */
 
-static int js_uint8array_funcs_init(JSContext *ctx);
+static int js_uint8array_funcs_init(JSContext *ctx, JSValueConst ctor);
 
-int JS_AddIntrinsicTypedArrays(JSContext *ctx)
+/* Weaver: define one of a family's globals on 'target', with the flags
+   JS_NewCConstructor gives a global constructor. Frees 'val'. */
+static int js_define_family_global(JSContext *ctx, JSValueConst target,
+                                   const char *name, JSValue val)
+{
+    return JS_DefinePropertyValueStr(ctx, target, name, val,
+                                     JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
+}
+
+/* Weaver: builds the typed array family and defines its globals on
+   'target': the global object (JS_AddIntrinsicTypedArrays), or the
+   family's object in a realm that builds it on first use
+   (js_lazy_family_load). Nothing here reads a global or a built-in's
+   current property, which widget code may have changed by the time a
+   lazy family is built. */
+static int js_add_typed_arrays(JSContext *ctx, JSValueConst target)
 {
     JSValue typed_array_base_func, typed_array_base_proto, obj;
     int i, ret;
@@ -61534,20 +61602,22 @@ int JS_AddIntrinsicTypedArrays(JSContext *ctx)
                              JS_UNDEFINED,
                              js_array_buffer_funcs, countof(js_array_buffer_funcs),
                              js_array_buffer_proto_funcs, countof(js_array_buffer_proto_funcs),
-                             0);
+                             JS_NEW_CTOR_NO_GLOBAL);
     if (JS_IsException(obj))
         return -1;
-    JS_FreeValue(ctx, obj);
+    if (js_define_family_global(ctx, target, "ArrayBuffer", obj) < 0)
+        return -1;
 
     obj = JS_NewCConstructor(ctx, JS_CLASS_SHARED_ARRAY_BUFFER, "SharedArrayBuffer",
                              js_shared_array_buffer_constructor, 1, JS_CFUNC_constructor, 0,
                              JS_UNDEFINED,
                              js_shared_array_buffer_funcs, countof(js_shared_array_buffer_funcs),
                              js_shared_array_buffer_proto_funcs, countof(js_shared_array_buffer_proto_funcs),
-                             0);
+                             JS_NEW_CTOR_NO_GLOBAL);
     if (JS_IsException(obj))
         return -1;
-    JS_FreeValue(ctx, obj);
+    if (js_define_family_global(ctx, target, "SharedArrayBuffer", obj) < 0)
+        return -1;
 
     typed_array_base_func =
         JS_NewCConstructor(ctx, -1, "TypedArray",
@@ -61560,14 +61630,14 @@ int JS_AddIntrinsicTypedArrays(JSContext *ctx)
         return -1;
 
     /* TypedArray.prototype.toString must be the same object as Array.prototype.toString */
-    obj = JS_GetProperty(ctx, ctx->class_proto[JS_CLASS_ARRAY], JS_ATOM_toString);
-    if (JS_IsException(obj))
-        goto fail;
+    /* Weaver: the one the realm was built with, whatever the property
+       holds now */
     /* XXX: should use alias method in JSCFunctionListEntry */ //@@@
     typed_array_base_proto = JS_GetProperty(ctx, typed_array_base_func, JS_ATOM_prototype);
     if (JS_IsException(typed_array_base_proto))
         goto fail;
-    ret = JS_DefinePropertyValue(ctx, typed_array_base_proto, JS_ATOM_toString, obj,
+    ret = JS_DefinePropertyValue(ctx, typed_array_base_proto, JS_ATOM_toString,
+                                 js_dup(ctx->array_proto_to_string),
                                  JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
     JS_FreeValue(ctx, typed_array_base_proto);
     if (ret < 0)
@@ -61588,19 +61658,21 @@ int JS_AddIntrinsicTypedArrays(JSContext *ctx)
                                  typed_array_base_func,
                                  bpe, 1,
                                  bpe, 1,
-                                 0);
-        if (JS_IsException(obj)) {
+                                 JS_NEW_CTOR_NO_GLOBAL);
+        if (JS_IsException(obj))
+            goto fail;
+        /* Uint8Array base64/hex methods */
+        if (i == JS_CLASS_UINT8_ARRAY && js_uint8array_funcs_init(ctx, obj)) {
+            JS_FreeValue(ctx, obj);
+            goto fail;
+        }
+        if (js_define_family_global(ctx, target, name, obj) < 0) {
         fail:
             JS_FreeValue(ctx, typed_array_base_func);
             return -1;
         }
-        JS_FreeValue(ctx, obj);
     }
     JS_FreeValue(ctx, typed_array_base_func);
-
-    /* Uint8Array base64/hex methods */
-    if (js_uint8array_funcs_init(ctx))
-        return -1;
 
     /* DataView */
     obj = JS_NewCConstructor(ctx, JS_CLASS_DATAVIEW, "DataView",
@@ -61608,17 +61680,23 @@ int JS_AddIntrinsicTypedArrays(JSContext *ctx)
                              JS_UNDEFINED,
                              NULL, 0,
                              js_dataview_proto_funcs, countof(js_dataview_proto_funcs),
-                             0);
+                             JS_NEW_CTOR_NO_GLOBAL);
     if (JS_IsException(obj))
         return -1;
-    JS_FreeValue(ctx, obj);
+    if (js_define_family_global(ctx, target, "DataView", obj) < 0)
+        return -1;
 
     /* Atomics */
 #ifdef CONFIG_ATOMICS
-    if (JS_AddIntrinsicAtomics(ctx))
+    if (JS_AddIntrinsicAtomics(ctx, target))
         return -1;
 #endif
     return 0;
+}
+
+int JS_AddIntrinsicTypedArrays(JSContext *ctx)
+{
+    return js_add_typed_arrays(ctx, ctx->global_obj);
 }
 
 /* Performance */
@@ -62452,10 +62530,13 @@ JSValue JS_PRINTF_FORMAT_ATTR(3, 4) JS_ThrowDOMException(JSContext *ctx, const c
     return JS_Throw(ctx, obj);
 }
 
-int JS_AddIntrinsicDOMException(JSContext *ctx)
+/* Weaver: defines DOMException on 'target' (the global object or the
+   base64 family's lazy object), and fails on any failed allocation;
+   upstream ignored them, leaving an exception pending behind a 0. */
+static int js_add_domexception(JSContext *ctx, JSValueConst target)
 {
     JSRuntime *rt = ctx->rt;
-    int i;
+    int i, ret;
     JSAtom name;
     JSValue ctor, proto;
 
@@ -62464,25 +62545,50 @@ int JS_AddIntrinsicDOMException(JSContext *ctx)
                              countof(js_domexception_class_def)))
             return -1;
     }
+    ctor = JS_UNDEFINED;
     proto = JS_NewObjectClass(ctx, JS_CLASS_ERROR);
-    JS_SetPropertyFunctionList(ctx, proto,
-                               js_domexception_proto_funcs,
-                               countof(js_domexception_proto_funcs));
+    if (JS_IsException(proto))
+        return -1;
+    if (JS_SetPropertyFunctionList(ctx, proto,
+                                   js_domexception_proto_funcs,
+                                   countof(js_domexception_proto_funcs)))
+        goto fail;
     ctor = JS_NewCFunction2(ctx, js_domexception_constructor, "DOMException", 2,
                             JS_CFUNC_constructor_or_func, 0);
-    JS_SetConstructor(ctx, ctor, proto);
+    if (JS_IsException(ctor))
+        goto fail;
+    if (JS_SetConstructor(ctx, ctor, proto) < 0)
+        goto fail;
     for (i = 0; i < countof(js_dom_exception_names_table); i++) {
         name = JS_NewAtom(ctx, js_dom_exception_names_table[i].code_name);
-        JS_DefinePropertyValue(ctx, proto, name, js_int32(i + 1),
-                               JS_PROP_ENUMERABLE);
-        JS_DefinePropertyValue(ctx, ctor, name, js_int32(i + 1),
-                               JS_PROP_ENUMERABLE);
+        if (name == JS_ATOM_NULL)
+            goto fail;
+        ret = JS_DefinePropertyValue(ctx, proto, name, js_int32(i + 1),
+                                     JS_PROP_ENUMERABLE);
+        if (ret >= 0)
+            ret = JS_DefinePropertyValue(ctx, ctor, name, js_int32(i + 1),
+                                         JS_PROP_ENUMERABLE);
         JS_FreeAtom(ctx, name);
+        if (ret < 0)
+            goto fail;
     }
-    JS_DefinePropertyValue(ctx, ctx->global_obj, JS_ATOM_DOMException, ctor,
-                           JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
+    ret = JS_DefinePropertyValue(ctx, target, JS_ATOM_DOMException, ctor,
+                                 JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
+    ctor = JS_UNDEFINED; /* freed by JS_DefinePropertyValue */
+    if (ret < 0)
+        goto fail;
+    JS_FreeValue(ctx, ctx->class_proto[JS_CLASS_DOM_EXCEPTION]);
     ctx->class_proto[JS_CLASS_DOM_EXCEPTION] = proto;
     return 0;
+ fail:
+    JS_FreeValue(ctx, ctor);
+    JS_FreeValue(ctx, proto);
+    return -1;
+}
+
+int JS_AddIntrinsicDOMException(JSContext *ctx)
+{
+    return js_add_domexception(ctx, ctx->global_obj);
 }
 /* base64 */
 
@@ -63438,39 +63544,169 @@ static const JSCFunctionListEntry js_uint8array_funcs[] = {
     JS_CFUNC_DEF("fromHex", 1, js_uint8array_from_hex),
 };
 
-static int js_uint8array_funcs_init(JSContext *ctx)
+/* Weaver: 'ctor' is the Uint8Array constructor being built. Upstream read
+   it from the global object, which in a realm that builds typed arrays on
+   first use is what the widget left there (or the lazy global itself). */
+static int js_uint8array_funcs_init(JSContext *ctx, JSValueConst ctor)
 {
-    JSValue ctor, proto;
-
-    ctor = JS_GetProperty(ctx, ctx->global_obj, JS_ATOM_Uint8Array);
-    if (JS_IsException(ctor))
+    if (JS_SetPropertyFunctionList(ctx, ctx->class_proto[JS_CLASS_UINT8_ARRAY],
+                                   js_uint8array_proto_funcs,
+                                   countof(js_uint8array_proto_funcs)))
         return -1;
-    proto = JS_GetProperty(ctx, ctor, JS_ATOM_prototype);
-    if (JS_IsException(proto)) {
-        JS_FreeValue(ctx, ctor);
-        return -1;
-    }
-    JS_SetPropertyFunctionList(ctx, proto,
-                               js_uint8array_proto_funcs,
-                               countof(js_uint8array_proto_funcs));
-    JS_FreeValue(ctx, proto);
-    JS_SetPropertyFunctionList(ctx, ctor,
-                               js_uint8array_funcs,
-                               countof(js_uint8array_funcs));
-    JS_FreeValue(ctx, ctor);
-    return 0;
+    return JS_SetPropertyFunctionList(ctx, ctor,
+                                      js_uint8array_funcs,
+                                      countof(js_uint8array_funcs));
 }
 
-int JS_AddIntrinsicAToB(JSContext *ctx)
+/* Weaver: the base64 family (DOMException, atob, btoa) on 'target', as
+   js_add_typed_arrays. */
+static int js_add_atob(JSContext *ctx, JSValueConst target)
 {
     /* Weaver: every context needs its own DOMException global and
        prototype; the class registration is the runtime's, and
        JS_AddIntrinsicDOMException registers it only once. */
-    if (JS_AddIntrinsicDOMException(ctx))
+    if (js_add_domexception(ctx, target))
         return -1;
-    JS_SetPropertyFunctionList(ctx, ctx->global_obj,
-                               js_base64_funcs, countof(js_base64_funcs));
+    return JS_SetPropertyFunctionList(ctx, target,
+                                      js_base64_funcs, countof(js_base64_funcs));
+}
+
+int JS_AddIntrinsicAToB(JSContext *ctx)
+{
+    return js_add_atob(ctx, ctx->global_obj);
+}
+
+/* Weaver: families a realm can build the first time one of their globals is
+   touched (JS_AddLazyIntrinsicTypedArrays, JS_AddLazyIntrinsicAToB). Each
+   global is an autoinit property (JS_AUTOINIT_ID_LAZY_GLOBAL), which reads
+   to JavaScript as the data property it becomes: reading it, describing it
+   or redefining it builds the family first; deleting it does not. The
+   family is built once, into its own object (JSContext.lazy_family), never
+   onto the global object, so the build neither reads nor replaces what
+   widget code did to the family's other globals. */
+
+typedef struct JSLazyFamily {
+    int (*add)(JSContext *ctx, JSValueConst target);
+    /* the globals 'add' defines, in its order; NULL-terminated */
+    const char *const *globals;
+    /* the class prototypes 'add' sets: [first, last] */
+    JSClassID first_class, last_class;
+} JSLazyFamily;
+
+static const char *const js_lazy_typed_array_globals[] = {
+    "ArrayBuffer", "SharedArrayBuffer",
+    "Uint8ClampedArray", "Int8Array", "Uint8Array", "Int16Array",
+    "Uint16Array", "Int32Array", "Uint32Array", "BigInt64Array",
+    "BigUint64Array", "Float16Array", "Float32Array", "Float64Array",
+    "DataView",
+#ifdef CONFIG_ATOMICS
+    "Atomics",
+#endif
+    NULL,
+};
+
+static const char *const js_lazy_atob_globals[] = {
+    "DOMException", "btoa", "atob", NULL,
+};
+
+static const JSLazyFamily js_lazy_families[JS_LAZY_FAMILY_COUNT] = {
+    [JS_LAZY_FAMILY_TYPED_ARRAYS] = {
+        js_add_typed_arrays, js_lazy_typed_array_globals,
+        JS_CLASS_ARRAY_BUFFER, JS_CLASS_DATAVIEW,
+    },
+    [JS_LAZY_FAMILY_ATOB] = {
+        js_add_atob, js_lazy_atob_globals,
+        JS_CLASS_DOM_EXCEPTION, JS_CLASS_DOM_EXCEPTION,
+    },
+};
+
+/* Build 'family' into ctx->lazy_family[family]. A failure (out of memory)
+   leaves nothing behind, so the next access can try again. */
+static int js_lazy_family_load(JSContext *ctx, JSLazyFamilyEnum family)
+{
+    const JSLazyFamily *f = &js_lazy_families[family];
+    const char *const *name;
+    JSValue values, val;
+    JSClassID class_id;
+
+    values = JS_NewObjectProto(ctx, JS_NULL);
+    if (JS_IsException(values))
+        return -1;
+    /* JS_SetPropertyFunctionList can return 0 after a definition failed,
+       so a pending exception is a failure too. */
+    if (f->add(ctx, values) < 0 || JS_HasException(ctx))
+        goto fail;
+    /* Some of the family's values are autoinit properties of 'values' too
+       (atob, btoa, Atomics). Realize them now: an autoinit that fails
+       later would leave its name undefined for good. */
+    for (name = f->globals; *name; name++) {
+        val = JS_GetPropertyStr(ctx, values, *name);
+        if (JS_IsException(val))
+            goto fail;
+        JS_FreeValue(ctx, val);
+    }
+    ctx->lazy_family[family] = values;
     return 0;
+ fail:
+    JS_FreeValue(ctx, values);
+    /* the partly built prototypes go with it */
+    for (class_id = f->first_class; class_id <= f->last_class; class_id++) {
+        JS_FreeValue(ctx, ctx->class_proto[class_id]);
+        ctx->class_proto[class_id] = JS_NULL;
+    }
+    if (!JS_HasException(ctx))
+        JS_ThrowOutOfMemory(ctx);
+    return -1;
+}
+
+/* JS_AUTOINIT_ID_LAZY_GLOBAL: the value of one of a lazy family's globals,
+   building the family first if this realm has not yet. */
+static JSValue js_lazy_global_autoinit(JSContext *ctx, JSObject *p,
+                                       JSAtom atom, void *opaque)
+{
+    JSLazyFamilyEnum family = (JSLazyFamilyEnum)(uintptr_t)opaque;
+
+    if (JS_IsUndefined(ctx->lazy_family[family]) &&
+        js_lazy_family_load(ctx, family) < 0)
+        return JS_EXCEPTION;
+    return JS_GetProperty(ctx, ctx->lazy_family[family], atom);
+}
+
+/* Define each of the family's globals as an autoinit property, with the
+   flags the family's own definitions use. A name the global object already
+   has keeps its value. */
+static int js_add_lazy_family(JSContext *ctx, JSLazyFamilyEnum family)
+{
+    JSObject *p = JS_VALUE_GET_OBJ(ctx->global_obj);
+    const char *const *name;
+    JSAtom atom;
+    int ret;
+
+    for (name = js_lazy_families[family].globals; *name; name++) {
+        atom = JS_NewAtom(ctx, *name);
+        if (atom == JS_ATOM_NULL)
+            return -1;
+        ret = 0;
+        if (!find_own_property1(p, atom))
+            ret = JS_DefineAutoInitProperty(ctx, ctx->global_obj, atom,
+                                            JS_AUTOINIT_ID_LAZY_GLOBAL,
+                                            (void *)(uintptr_t)family,
+                                            JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE);
+        JS_FreeAtom(ctx, atom);
+        if (ret < 0)
+            return -1;
+    }
+    return 0;
+}
+
+int JS_AddLazyIntrinsicTypedArrays(JSContext *ctx)
+{
+    return js_add_lazy_family(ctx, JS_LAZY_FAMILY_TYPED_ARRAYS);
+}
+
+int JS_AddLazyIntrinsicAToB(JSContext *ctx)
+{
+    return js_add_lazy_family(ctx, JS_LAZY_FAMILY_ATOB);
 }
 
 bool JS_DetectModule(const char *input, size_t input_len)

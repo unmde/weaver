@@ -541,6 +541,12 @@ JS_EXTERN int JS_AddIntrinsicWeakRef(JSContext *ctx);
 JS_EXTERN int JS_AddPerformance(JSContext *ctx);
 JS_EXTERN int JS_AddIntrinsicDOMException(JSContext *ctx);
 JS_EXTERN int JS_AddIntrinsicAToB(JSContext *ctx);
+/* Weaver: like JS_AddIntrinsicTypedArrays and JS_AddIntrinsicAToB, but the
+   family is built the first time one of its globals is read, assigned,
+   described or redefined (deleting one does not); until then each global
+   costs one property. See VENDOR.md. */
+JS_EXTERN int JS_AddLazyIntrinsicTypedArrays(JSContext *ctx);
+JS_EXTERN int JS_AddLazyIntrinsicAToB(JSContext *ctx);
 
 /* for equality comparisons and sameness */
 JS_EXTERN int JS_IsEqual(JSContext *ctx, JSValueConst op1, JSValueConst op2);
