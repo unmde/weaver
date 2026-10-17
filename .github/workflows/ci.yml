@@ -244,7 +244,9 @@ jobs:
           }
           exit $testExit
 
-      - name: Build and test Windows host
+      # Windows has no weaverd (ADR 0022): this builds nothing, and tests the
+      # supervisor and host contract the runtime compiles from host/.
+      - name: Test Windows supervisor and host contract
         working-directory: host
         run: |
           zig build -Dcpu=baseline -Doptimize=ReleaseFast

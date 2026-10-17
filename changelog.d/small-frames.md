@@ -1,0 +1,1 @@
+fix: **Less resident stack in the widget host on Windows**: building the widget tree no longer spends ~67 KiB of stack per tree level, and the 8 KiB log-line buffer is no longer part of every function that logs. Together with Native's matching change, a host with 10 clocks keeps 260 KiB of main-thread stack resident after a working-set trim instead of 532 KiB.

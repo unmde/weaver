@@ -145,7 +145,11 @@ test("widget renders one native generation and providers use native timers", asy
   });
   assert.equal(operations.filter(([name]) => name === "beginBatch").length, 1);
   assert.equal(operations.filter(([name]) => name === "endBatch").length, 1);
-  assert.deepEqual(operations.filter(([name]) => name === "setInterval").map((operation) => operation[1]), [1000, 2500]);
+  const [timeInterval, hookInterval] = operations.filter(([name]) => name === "setInterval").map((operation) => operation[1]);
+  assert.equal(hookInterval, 2500);
+  // Where the time provider's ticks land is pinned by its own test, on a
+  // controlled clock; here it only has to have armed one.
+  assert.ok(timeInterval >= 40 && timeInterval <= 1020, `time interval ${timeInterval}`);
   assert.equal(callbacks.size, 2);
   const rootColumnId = operations.find((operation) => operation[0] === "createNode" && operation[1] === "column")[2];
   for (const [key, value] of [
@@ -364,6 +368,59 @@ test("styling 11 button handlers reject invalid callbacks before native mutation
   assert.throws(() => sdk.h("button", { accessibilityLabel: "  ", onPress: () => {} }), /accessibilityLabel must be a non-empty string naming the action/);
   assert.throws(() => sdk.h("slider", { accessibilityLabel: 42, value: 1, max: 10, onChange: () => {} }), /accessibilityLabel must be a non-empty string naming the action/);
   assert.equal(operations.length, operationCount);
+});
+
+test("the time provider shows every second once, just after it turns, from any starting phase", async () => {
+  const source = `
+    import { h, useProvider, widget } from "./src/index.ts";
+    widget({ name: "Time ticks", size: [100, 50], subscribe: ["time"] }, () => {
+      const time = useProvider("time");
+      globalThis.shown.push(time.epochMs);
+      return h("text", null, time.ss);
+    });
+  `;
+  const output = await build({
+    stdin: { contents: source, resolveDir: fileURLToPath(new URL("..", import.meta.url)), sourcefile: "time-ticks-fixture.ts" },
+    bundle: true, format: "iife", platform: "neutral", write: false,
+  });
+  const start = Date.parse("2026-08-24T17:30:00.000Z");
+  // Windows timers fire up to a 15.6 ms tick early or late; a busy host
+  // can be later still.
+  for (const lateness of [-15, 0, 36]) {
+    // Across the second, and every millisecond of its last 60, where the
+    // 40 ms floor bites.
+    const phases = [...Array.from({ length: 135 }, (_, index) => index * 7), ...Array.from({ length: 60 }, (_, index) => 940 + index)];
+    for (const phase of phases) {
+      const timers = new Map();
+      let nextTimer = 1;
+      const delays = [];
+      const native = {
+        ...isolatedNative(),
+        setInterval(milliseconds) { delays.push(milliseconds); const id = nextTimer++; timers.set(id, null); return id; },
+        clearInterval(id) { timers.delete(id); },
+        onTimer(id, callback) { timers.set(id, callback); },
+      };
+      const context = { native, shown: [], __weaverCaptureNowMs: start + phase };
+      vm.runInNewContext(output.outputFiles[0].text, context);
+      for (let tick = 0; tick < 4; tick += 1) {
+        assert.equal(timers.size, 1, "one time provider timer");
+        const [callback] = timers.values();
+        context.__weaverCaptureNowMs += delays.at(-1) + lateness;
+        callback();
+        await Promise.resolve();
+      }
+      const where = `phase ${phase}, lateness ${lateness}`;
+      // Never a sub-40 ms timer (Native's thread-pool path on Windows).
+      assert.ok(delays.every((delay) => delay >= 40), `${where}: delays ${delays}`);
+      // Each second shown is the one after the last: none skipped.
+      const seconds = [...new Set(context.shown.map((epochMs) => Math.floor(epochMs / 1000)))];
+      assert.equal(seconds.length, 5, `${where}: shown ${seconds}`);
+      for (let index = 1; index < seconds.length; index += 1) assert.equal(seconds[index], seconds[index - 1] + 1, `${where}: shown ${seconds}`);
+      // And it changes just after the second turns: at most 40 ms plus the
+      // timer's own lateness past it.
+      for (const epochMs of context.shown.slice(1)) assert.ok(epochMs % 1000 <= 40 + Math.max(lateness, 0), `${where}: tick ${epochMs % 1000} ms past the second`);
+    }
+  }
 });
 
 function isolatedNative() {

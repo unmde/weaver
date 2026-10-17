@@ -14,6 +14,10 @@ export interface WidgetStatus {
   uptimeSeconds: number;
   state: "disabled" | "starting" | "running" | "backoff" | "stopped" | "source missing";
   reason: string;
+  /** Runs inside the shared host process; its memory and CPU are the host row's. */
+  hosted?: boolean;
+  /** This row is the shared widget host process itself. */
+  host?: boolean;
 }
 export interface ProviderStatus {
   systemSubscribers: number;
@@ -165,14 +169,99 @@ export function formatStatus(document: StatusDocument): string {
     widget.name,
     widget.pid === 0 ? "-" : String(widget.pid),
     widget.backend ?? "-",
-    `${widget.privateMb.toFixed(1)} MB`,
-    `${widget.cpuPercent.toFixed(1)}%`,
+    widget.hosted ? "in host" : `${widget.privateMb.toFixed(1)} MB`,
+    widget.hosted ? "in host" : `${widget.cpuPercent.toFixed(1)}%`,
     String(widget.threads ?? 0),
     formatUptime(widget.uptimeSeconds),
     widget.reason ? `${widget.state}: ${widget.reason}` : widget.state,
   ]);
   const widths = headings.map((heading, column) => Math.max(heading.length, ...rows.map((row) => row[column].length)));
   return [headings, ...rows].map((row) => row.map((cell, column) => column === row.length - 1 ? cell : cell.padEnd(widths[column])).join("  ")).join("\n");
+}
+
+/** What `weaver-widget --status` prints when no host runs (host_lifecycle.zig `describeDown`). Times are Unix milliseconds. */
+export interface HostDown {
+  stopped: { at: number } | null;
+  now: number;
+  recordPath: string;
+  restartCap: number;
+  restartWindowMs: number;
+  minRunMs: number;
+  restartWaitMs: number;
+  /** The slowest restart measured (host_contract.os_restart_measured_max_ms). */
+  restartMeasuredMs: number;
+  /** The Win32 error a starting host gets opening its record, when no live host holds it; such a host exits (host_contract.exit_record_unavailable). */
+  recordHeld: null | { error: number; sharing: boolean };
+  record: null | {
+    generation: number;
+    pid: number;
+    state: "running" | "stopped" | "none";
+    process: "gone" | "alive" | "unknown";
+    startedAt: number;
+    stopReason: string;
+    crash: null | { kind: "widget" | "ui" | "other"; cause: "panic" | "wedged" | "exception"; code: number; at: number; widget: string | null };
+    restart: "none" | "registered" | "capped" | "failed";
+    restartError: number;
+    /** The restart command line's length in UTF-16 units, and Windows' limit with its terminator. */
+    restartLineLength: number;
+    restartLineLimit: number;
+    automaticRestarts: number[];
+  };
+}
+
+/** Why no widget host runs, and what to run, from its record and the stop marker. */
+export function describeHostDown(down: HostDown): string[] {
+  const clock = (ms: number): string => new Date(ms).toLocaleTimeString();
+  const seconds = (ms: number): string => `${Math.max(0, Math.round(ms / 1000))} s`;
+  const up = 'Run "weaver up" to start it.';
+  if (down.stopped) return [`The widget host is not running: "weaver down" stopped it at ${clock(down.stopped.at)}.`, up];
+  if (down.recordHeld) {
+    const why = down.recordHeld.sharing ? "another program holds it open" : `Windows answers Win32 error ${down.recordHeld.error}`;
+    return [`The widget host is not running: it cannot open its record at ${down.recordPath} (${why}), and a host exits without it, because it could not quarantine the widget a crash blames.`, 'Close whatever holds that file, then run "weaver up".'];
+  }
+  const record = down.record;
+  if (!record) return [`The widget host is not running, and ${down.recordPath} holds no record of an earlier run.`, up];
+  // A host whose record holds a crash and whose process is alive is dying:
+  // Windows is reporting the crash. It is worded as the crash below.
+  if (record.process === "alive" && !record.crash) return [`The widget host (pid ${record.pid}) is running but has not published its control objects, so it is starting or stopping.`, 'Run "weaver status" again in a few seconds; if this stays, run "weaver down", then "weaver up".'];
+  if (record.process === "unknown" && !record.crash) return [`The widget host's state is unknown: its record names pid ${record.pid}, which Weaver could not open.`, 'Run "weaver down", then "weaver up".'];
+  if (record.state === "stopped") {
+    if (record.stopReason) return [`The widget host is not running: it stopped as it started, with error.${record.stopReason}.`, 'Run "weaver up" to try again.'];
+    return ["The widget host is not running: it exited cleanly on its own.", up];
+  }
+  const crash = record.crash;
+  if (!crash) return ["The widget host is not running: it ended without recording a crash, so it was killed or failed where its crash handler could not see. No widget is blamed, and Windows does not restart it.", up];
+  const code = `0x${crash.code.toString(16).toUpperCase().padStart(8, "0")}`;
+  const what = crash.cause === "panic" ? `a panic (${code})` : crash.cause === "wedged" ? `its UI thread stuck past the apply deadline (${code})` : `exception ${code}`;
+  const where = crash.kind === "widget" ? `in the turn of ${crash.widget ? `"${crash.widget}"` : "a widget"}` : crash.kind === "ui" ? "on its UI thread, outside any widget's turn" : "on a provider or management thread";
+  const lines = [`The widget host is not running: it crashed at ${clock(crash.at)} with ${what} ${where}, ${seconds(crash.at - record.startedAt)} after it started.`];
+  if (record.process === "alive") lines.push(`Its process (pid ${record.pid}) is still exiting while Windows reports the crash.`);
+  if (crash.kind === "widget") lines.push(`${crash.widget ? `"${crash.widget}"` : "That widget"} is quarantined when the host next starts; reinstall or update it to run it again.`);
+  else lines.push("No widget is blamed.");
+  const window = `${Math.round(down.restartWindowMs / 60_000)} minutes`;
+  if (record.restart === "capped") {
+    lines.push(`Windows restarted it ${record.automaticRestarts.length} times within ${window}, the cap (restart_cap=${down.restartCap}), so it was not asked to again and the host stays down.`);
+    lines.push('Run "weaver up" to start it with a fresh restart count.');
+    return lines;
+  }
+  if (record.restart === "failed") {
+    if (record.restartLineLength >= record.restartLineLimit) {
+      lines.push(`Windows could not be asked to restart it: its restart command line carries the profile path and is ${record.restartLineLength} UTF-16 units, past RegisterApplicationRestart's limit of ${record.restartLineLimit} with its terminator. Set LOCALAPPDATA to a path at least ${record.restartLineLength - record.restartLineLimit + 1} characters shorter.`);
+    } else {
+      lines.push(`Windows could not be asked to restart it (RegisterApplicationRestart returned 0x${record.restartError.toString(16).toUpperCase().padStart(8, "0")}).`);
+    }
+  } else if (record.restart === "none") {
+    lines.push("It had not asked Windows to restart it.");
+  } else if (crash.at - record.startedAt < down.minRunMs) {
+    lines.push(`Windows restarts only a process that ran ${seconds(down.minRunMs)}, so this one stays down.`);
+  } else if (down.now - crash.at < down.restartWaitMs) {
+    lines.push(`Windows restarts it shortly; restarts have come up to ${seconds(down.restartMeasuredMs)} after a crash. Run "weaver status" again then, or "weaver up" to start it now.`);
+    return lines;
+  } else {
+    lines.push(`Windows was asked to restart it, but nothing came back ${seconds(down.now - crash.at)} after the crash.`);
+  }
+  lines.push(up);
+  return lines;
 }
 
 function formatUptime(seconds: number): string {

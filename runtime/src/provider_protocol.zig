@@ -154,19 +154,40 @@ pub const Queues = struct {
                 self.ack_protocol_failed.store(1, .release);
                 return;
             }
-            for (&self.acks) |*slot| {
-                if (slot.id != parsed.value.ack) continue;
-                if (slot.value != null or slot.delivered) {
-                    _ = self.unknown_ack_count.fetchAdd(1, .monotonic);
-                    return;
-                }
-                slot.value = .{ .id = parsed.value.ack, .ok = parsed.value.ok };
-                return;
-            }
-            _ = self.unknown_ack_count.fetchAdd(1, .monotonic);
+            _ = self.storeAckLocked(parsed.value.ack, parsed.value.ok);
             return;
         }
         self.pushFrameLocked(line);
+    }
+
+    /// A frame from a provider in this process (the anchored host's
+    /// `provider_service`): what `routeLine` does with a frame line, minus
+    /// the parse.
+    pub fn pushFrame(self: *Queues, line: []const u8) void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        self.pushFrameLocked(line);
+    }
+
+    /// An acknowledgement from a provider in this process: what `routeLine`
+    /// does with an ack line, minus the parse. False when no command waits
+    /// for `id`; that is counted in `unknown_ack_count`, as from a pipe.
+    pub fn deliverAck(self: *Queues, id: u64, ok: bool) bool {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        _ = self.wake_generation.fetchAdd(1, .release);
+        return self.storeAckLocked(id, ok);
+    }
+
+    fn storeAckLocked(self: *Queues, id: u64, ok: bool) bool {
+        for (&self.acks) |*slot| {
+            if (slot.id != id) continue;
+            if (slot.value != null or slot.delivered) break;
+            slot.value = .{ .id = id, .ok = ok };
+            return true;
+        }
+        _ = self.unknown_ack_count.fetchAdd(1, .monotonic);
+        return false;
     }
 
     /// Free the frame slots; the queue is empty afterwards.
@@ -412,6 +433,23 @@ test "reader wake generation advances for acknowledgements but not provider fram
     try std.testing.expect(queues.registerAck(1));
     queues.routeLine("{\"ack\":1,\"ok\":true}");
     try std.testing.expectEqual(initial + 1, queues.wakeGeneration());
+}
+
+test "in-process frames and acknowledgements land as piped lines do" {
+    var queues: Queues = .{};
+    try std.testing.expect(queues.registerAck(3));
+    const initial = queues.wakeGeneration();
+    queues.pushFrame("{\"provider\":\"cpu\",\"value\":{\"percent\":1}}");
+    try std.testing.expectEqual(initial, queues.wakeGeneration());
+    try std.testing.expect(queues.deliverAck(3, false));
+    try std.testing.expectEqual(initial + 1, queues.wakeGeneration());
+    // A second ack for the same command, or one nobody waits for, is counted.
+    try std.testing.expect(!queues.deliverAck(3, true));
+    try std.testing.expect(!queues.deliverAck(9, true));
+    try std.testing.expectEqual(@as(u64, 2), queues.unknown_ack_count.load(.acquire));
+    var output: [frame_line_capacity]u8 = undefined;
+    try std.testing.expectEqualStrings("{\"provider\":\"cpu\",\"value\":{\"percent\":1}}", queues.takeFrame(&output).?);
+    try std.testing.expectEqualDeep(Ack{ .id = 3, .ok = false }, queues.takeAck().?);
 }
 
 test "late acknowledgements cannot crowd out replacement command IDs" {

@@ -132,9 +132,6 @@ On Windows PowerShell:
 Push-Location runtime
 zig build -Doptimize=ReleaseFast -Dweb-layer=exclude -Dtrace=off
 Pop-Location
-Push-Location host
-zig build -Doptimize=ReleaseFast
-Pop-Location
 
 node cli\bin\weaver.js init myclock
 node cli\bin\weaver.js check myclock

@@ -40,6 +40,11 @@ export default widget({
 });
 ```
 
+The runtime keeps no source text for the bundle's functions: `String(fn)`
+and `fn.toString()` read like a built-in function's, with `[native code]`
+for a body. Functions made at run time by `eval` or `new Function` keep
+theirs. Error stacks keep their `bundle.js:line:column` positions.
+
 ## `widget(config, component)`
 
 ```ts
@@ -454,6 +459,15 @@ registers a developer workspace by reference (ADR 0011).
 weaverd supervises widget processes (crash → restart with backoff, 3 strikes
 → stopped + noted in status), fans out providers over local IPC, and samples
 per-widget cost. Registrations persist across host restarts.
+
+Amendment (ADR 0022), where the operating system restarts the host: there
+is no weaverd. One widget host process runs every widget and is the daemon.
+After a crash, the operating system restarts it (seconds to tens of seconds
+later), at most three times in ten minutes; a
+widget whose own turn crashed the host is quarantined until it is reinstalled
+or updated. A host that crashes within a minute of starting, or past the cap,
+stays down until `weaver up`. While no host runs, `weaver status` says why
+(stopped, crashed and where, restarting, or capped) and what to run.
 
 ---
 

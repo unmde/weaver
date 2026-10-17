@@ -285,6 +285,14 @@ struct JSRuntime {
     JSClass *class_array;
 
     struct list_head context_list; /* list of JSContext.link */
+    /* Weaver: charges a job's allocation to its context (JS_SetChargeJobFunc). */
+    JSChargeJobFunc *charge_job;
+    /* Weaver: tags each job with who queued it (JS_SetJobTagFunc). */
+    JSJobTagFunc *job_tag;
+    /* Weaver: charges runtime-wide tables to no context (JS_SetChargeSharedFunc). */
+    JSChargeSharedFunc *charge_shared;
+    /* Weaver: a per-context collection trigger (JS_SetGCTriggerFunc). */
+    JSGCTriggerFunc *gc_trigger;
     /* list of JSGCObjectHeader.link. List of allocated GC objects (used
        by the garbage collector) */
     struct list_head gc_obj_list;
@@ -482,6 +490,12 @@ struct JSContext {
     JSGCObjectHeader header; /* must come first */
     JSRuntime *rt;
     struct list_head link;
+    /* Weaver: this realm's pending jobs (JSJobEntry.link), owned like its
+       other fields: marked by JS_MarkContext, freed with the context. */
+    struct list_head job_list;
+    /* Weaver: JS_FreezeRealm froze this realm's built-ins; a built-in
+       property created later (autoinit) is frozen as it is created. */
+    bool weaver_frozen;
 
     uint16_t binary_object_count;
     uint32_t binary_object_size : 31;
@@ -991,6 +1005,8 @@ struct JSModuleDef {
 typedef struct JSJobEntry {
     struct list_head link;
     JSContext *ctx;
+    /* Weaver: who queued it (JS_SetJobTagFunc); 0 without a tag function. */
+    uintptr_t tag;
     JSJobFunc *job_func;
     int argc;
     JSValue argv[];
@@ -1587,7 +1603,8 @@ static void js_trigger_gc(JSRuntime *rt, size_t size)
     force_gc = true;
 #else
     force_gc = ((rt->malloc_state.malloc_size + size) >
-                rt->malloc_gc_threshold);
+                rt->malloc_gc_threshold) ||
+               (rt->gc_trigger && rt->gc_trigger(rt, size));
 #endif
     if (force_gc) {
 #ifdef ENABLE_DUMPS // JS_DUMP_GC
@@ -2135,8 +2152,23 @@ void JS_SetSharedArrayBufferFunctions(JSRuntime *rt,
 }
 
 /* return 0 if OK, < 0 if exception */
+static int js_enqueue_job(JSContext *ctx, JSJobFunc *job_func,
+                          int argc, JSValueConst *argv,
+                          bool tagged, uintptr_t tag);
+static double js__now_ms(void);
+
 int JS_EnqueueJob(JSContext *ctx, JSJobFunc *job_func,
                   int argc, JSValueConst *argv)
+{
+    return js_enqueue_job(ctx, job_func, argc, argv, false, 0);
+}
+
+/* Weaver: queue a job under an explicit tag (JS_SetJobTagFunc), e.g. a
+   FinalizationRegistry cleanup under the program that made the registry,
+   whichever program's turn the collection ran in. */
+static int js_enqueue_job(JSContext *ctx, JSJobFunc *job_func,
+                          int argc, JSValueConst *argv,
+                          bool tagged, uintptr_t tag)
 {
     JSRuntime *rt = ctx->rt;
     JSJobEntry *e;
@@ -2144,50 +2176,362 @@ int JS_EnqueueJob(JSContext *ctx, JSJobFunc *job_func,
 
     assert(!rt->in_free);
 
-    e = js_malloc(ctx, sizeof(*e) + argc * sizeof(JSValue));
-    if (!e)
-        return -1;
+    /* Weaver: a collection in one context can queue another context's
+       job; the embedder charges the entry to the job's context, or, for a
+       job queued under an explicit tag (a FinalizationRegistry cleanup), to
+       the program that tag names, and says so by returning non-NULL. When that context is full the job is
+       dropped without throwing: the running context's pending exception
+       is not this job's to replace. */
+    if (!tagged)
+        tag = rt->job_tag ? rt->job_tag(ctx) : 0;
+    {
+        void *restore = rt->charge_job ? rt->charge_job(ctx, tagged ? tag : 0, NULL) : NULL;
+        e = js_malloc_rt(rt, sizeof(*e) + argc * sizeof(JSValue));
+        if (restore)
+            rt->charge_job(NULL, 0, restore);
+        if (!e) {
+            if (!restore)
+                JS_ThrowOutOfMemory(ctx);
+            return -1;
+        }
+    }
     e->ctx = ctx;
+    e->tag = tag;
     e->job_func = job_func;
     e->argc = argc;
     for(i = 0; i < argc; i++) {
         e->argv[i] = js_dup(argv[i]);
     }
-    list_add_tail(&e->link, &rt->job_list);
+    /* Weaver: each realm queues its own jobs (see JSContext.job_list). */
+    list_add_tail(&e->link, &ctx->job_list);
     return 0;
 }
 
-bool JS_IsJobPending(JSRuntime *rt)
+void JS_SetChargeJobFunc(JSRuntime *rt, JSChargeJobFunc *func)
 {
-    return !list_empty(&rt->job_list);
+    rt->charge_job = func;
 }
 
-JSContext *JS_GetPendingJobContext(JSRuntime *rt)
+/* Weaver: exchange the context's per-program state with '*state'; each
+   reference moves to the other side. Several programs can then share one
+   realm's built-ins, each running with globals, Error stack settings
+   (prepareStackTrace, stackTraceLimit), Math.random state and performance
+   time origin of its own while its state is in the context. The last error's backtrace is the
+   outgoing program's: it goes, so it is neither kept in that program's
+   memory nor seen by the next. */
+void JS_SwapProgramState(JSContext *ctx, JSProgramState *state)
 {
-    if (JS_IsJobPending(rt)) {
-        return list_entry(rt->job_list.next, JSJobEntry, link)->ctx;
+    JSValue held;
+    uint64_t random_state;
+    double time_origin;
+
+    JS_FreeValue(ctx, ctx->error_back_trace);
+    ctx->error_back_trace = JS_UNDEFINED;
+
+    held = ctx->global_obj;
+    ctx->global_obj = state->global;
+    state->global = held;
+    held = ctx->global_var_obj;
+    ctx->global_var_obj = state->lexical;
+    state->lexical = held;
+    held = ctx->error_prepare_stack;
+    ctx->error_prepare_stack = state->prepare_stack;
+    state->prepare_stack = held;
+    held = ctx->error_stack_trace_limit;
+    ctx->error_stack_trace_limit = state->stack_trace_limit;
+    state->stack_trace_limit = held;
+    random_state = ctx->random_state;
+    ctx->random_state = state->random_state;
+    state->random_state = random_state;
+    time_origin = ctx->time_origin;
+    ctx->time_origin = state->time_origin;
+    state->time_origin = time_origin;
+}
+
+/* Weaver: a new program's state as a new realm would start it: no stack
+   formatter, a stack trace limit of 10, and performance time from now.
+   The caller sets the global object, lexical scope and random seed. */
+void JS_InitProgramState(JSContext *ctx, JSProgramState *state)
+{
+    state->prepare_stack = JS_UNDEFINED;
+    state->stack_trace_limit = js_int32(10);
+    state->time_origin = js__now_ms();
+}
+
+static int js_update_property_flags(JSContext *ctx, JSObject *p,
+                                    JSShapeProperty **pprs, int flags);
+static int convert_fast_array_to_array(JSContext *ctx, JSObject *p);
+static int JS_AutoInitProperty(JSContext *ctx, JSObject *p, JSAtom prop,
+                               JSProperty *pr, JSShapeProperty *prs);
+static JSAutoInitIDEnum js_autoinit_get_id(JSProperty *pr);
+
+/* Every JS object alive in the runtime, each with a reference the caller
+   frees (js_free_live_objects). Walking a collected list, not the
+   runtime's, lets the caller allocate and free as it goes. */
+static JSObject **js_collect_live_objects(JSContext *ctx, uint32_t *pcount)
+{
+    JSRuntime *rt = ctx->rt;
+    struct list_head *el;
+    JSGCObjectHeader *gp;
+    JSObject **objects;
+    uint32_t count = 0;
+
+    list_for_each(el, &rt->gc_obj_list) {
+        gp = list_entry(el, JSGCObjectHeader, link);
+        if (gp->gc_obj_type == JS_GC_OBJ_TYPE_JS_OBJECT)
+            count++;
+    }
+    objects = js_malloc(ctx, sizeof(*objects) * max_int(count, 1));
+    if (!objects)
+        return NULL;
+    count = 0;
+    list_for_each(el, &rt->gc_obj_list) {
+        gp = list_entry(el, JSGCObjectHeader, link);
+        if (gp->gc_obj_type == JS_GC_OBJ_TYPE_JS_OBJECT) {
+            objects[count++] = (JSObject *)gp;
+            js_dup(JS_MKPTR(JS_TAG_OBJECT, gp));
+        }
+    }
+    *pcount = count;
+    return objects;
+}
+
+static void js_free_live_objects(JSContext *ctx, JSObject **objects, uint32_t count)
+{
+    uint32_t i;
+    for (i = 0; i < count; i++)
+        JS_FreeValue(ctx, JS_MKPTR(JS_TAG_OBJECT, objects[i]));
+    js_free(ctx, objects);
+}
+
+/* Make now, rather than on first use, the built-ins a frozen realm cannot
+   leave for later:
+   - those written in JavaScript (autoinit bytecode: Array.fromAsync,
+     Iterator.zip, Iterator.zipKeyed): they hold functions in closures no
+     property reaches, so they are frozen with the rest;
+   - namespace objects (JS_DEF_OBJECT: Math, JSON, Reflect, ...): their
+     property names are atoms, and a program that wrote one of those names
+     first would otherwise own the atom the shared built-in then holds.
+   Their methods stay lazy. Returns how many it made, or -1. */
+static int js_make_early_builtins(JSContext *ctx, JSObject *p)
+{
+    uint32_t i;
+    int made = 0;
+
+    for (i = 0; i < p->shape->prop_count; i++) {
+        JSShapeProperty *prs = &p->shape->prop[i];
+        JSProperty *pr = &p->prop[i];
+        bool early;
+        if (prs->atom == JS_ATOM_NULL ||
+            (prs->flags & JS_PROP_TMASK) != JS_PROP_AUTOINIT)
+            continue;
+        switch (js_autoinit_get_id(pr)) {
+        case JS_AUTOINIT_ID_BYTECODE:
+            early = true;
+            break;
+        case JS_AUTOINIT_ID_PROP:
+            early = ((const JSCFunctionListEntry *)pr->u.init.opaque)->def_type == JS_DEF_OBJECT;
+            break;
+        default:
+            early = false;
+            break;
+        }
+        if (!early)
+            continue;
+        if (JS_AutoInitProperty(ctx, p, prs->atom, pr, prs))
+            return -1;
+        made++;
+    }
+    return made;
+}
+
+/* Weaver: freeze one object as Object.freeze would, without creating the
+   values of its autoinit properties (built-in methods QuickJS makes on
+   first use): their flags are set now, their values are frozen when they
+   are made (JS_AutoInitProperty). */
+static int js_freeze_object_lazily(JSContext *ctx, JSObject *p)
+{
+    uint32_t i;
+
+    if (p->class_id == JS_CLASS_PROXY || p->class_id == JS_CLASS_MODULE_NS)
+        return -1;
+    if (p->fast_array) {
+        if (p->class_id != JS_CLASS_ARRAY && p->u.array.count > 0)
+            return -1;
+        if (p->class_id == JS_CLASS_ARRAY && convert_fast_array_to_array(ctx, p))
+            return -1;
+    }
+    p->extensible = false;
+    for (i = 0; i < p->shape->prop_count; i++) {
+        /* An update can clone the shape: index it afresh each time. */
+        JSShapeProperty *prs = &p->shape->prop[i];
+        int flags;
+        if (prs->atom == JS_ATOM_NULL)
+            continue;
+        flags = prs->flags & ~JS_PROP_CONFIGURABLE;
+        if ((prs->flags & JS_PROP_TMASK) != JS_PROP_GETSET)
+            flags &= ~JS_PROP_WRITABLE;
+        if (js_update_property_flags(ctx, p, &prs, flags))
+            return -1;
+    }
+    return 0;
+}
+
+/* Weaver: freeze a value just made for a frozen built-in, and every object
+   it reaches that is not frozen yet: all of them are new, made with it. */
+static int js_freeze_new_lazily(JSContext *ctx, JSValueConst val, int depth)
+{
+    JSObject *p;
+    uint32_t i;
+
+    if (JS_VALUE_GET_TAG(val) != JS_TAG_OBJECT)
+        return 0;
+    p = JS_VALUE_GET_OBJ(val);
+    if (!p->extensible)
+        return 0;
+    if (depth > 64 || js_freeze_object_lazily(ctx, p))
+        return -1;
+    for (i = 0; i < p->shape->prop_count; i++) {
+        JSShapeProperty *prs = &p->shape->prop[i];
+        JSProperty *pr = &p->prop[i];
+        if (prs->atom == JS_ATOM_NULL)
+            continue;
+        switch (prs->flags & JS_PROP_TMASK) {
+        case JS_PROP_NORMAL:
+            if (js_freeze_new_lazily(ctx, pr->u.value, depth + 1))
+                return -1;
+            break;
+        case JS_PROP_GETSET:
+            if (pr->u.getset.getter &&
+                js_freeze_new_lazily(ctx, JS_MKPTR(JS_TAG_OBJECT, pr->u.getset.getter), depth + 1))
+                return -1;
+            if (pr->u.getset.setter &&
+                js_freeze_new_lazily(ctx, JS_MKPTR(JS_TAG_OBJECT, pr->u.getset.setter), depth + 1))
+                return -1;
+            break;
+        default:
+            break;
+        }
+    }
+    if (p->shape->proto &&
+        js_freeze_new_lazily(ctx, JS_MKPTR(JS_TAG_OBJECT, p->shape->proto), depth + 1))
+        return -1;
+    return 0;
+}
+
+/* Weaver: freeze every object alive in the runtime (a realm's built-ins,
+   before any program has made an object), without creating the built-in
+   methods QuickJS makes on first use; those are frozen when made, charged
+   to the runtime rather than the program that first touched them. */
+int JS_FreezeRealm(JSContext *ctx)
+{
+    JSObject **objects;
+    uint32_t count = 0, i;
+    int ret = 0;
+
+    /* Making one can add more (a namespace object's own namespaces). */
+    for (;;) {
+        int made = 0, n = 0;
+        objects = js_collect_live_objects(ctx, &count);
+        if (!objects)
+            return -1;
+        for (i = 0; i < count && n >= 0; i++) {
+            n = js_make_early_builtins(ctx, objects[i]);
+            made += n;
+        }
+        js_free_live_objects(ctx, objects, count);
+        if (n < 0)
+            return -1;
+        if (made == 0)
+            break;
+    }
+    /* Everything alive now, the closures those made included. */
+    objects = js_collect_live_objects(ctx, &count);
+    if (!objects)
+        return -1;
+    for (i = 0; i < count && ret == 0; i++)
+        ret = js_freeze_object_lazily(ctx, objects[i]);
+    js_free_live_objects(ctx, objects, count);
+    if (ret == 0)
+        ctx->weaver_frozen = true;
+    return ret;
+}
+
+void JS_SetJobTagFunc(JSRuntime *rt, JSJobTagFunc *func)
+{
+    rt->job_tag = func;
+}
+
+void JS_SetChargeSharedFunc(JSRuntime *rt, JSChargeSharedFunc *func)
+{
+    rt->charge_shared = func;
+}
+
+void JS_SetGCTriggerFunc(JSRuntime *rt, JSGCTriggerFunc *func)
+{
+    rt->gc_trigger = func;
+}
+
+/* Weaver: allocate a runtime-wide table outside the running context's
+   charge, so it does not stay in that context's memory after it is gone. */
+static void *js_mallocz_shared(JSRuntime *rt, size_t size)
+{
+    void *restore = rt->charge_shared ? rt->charge_shared(rt, NULL) : NULL;
+    void *ptr = js_mallocz_rt(rt, size);
+    if (restore)
+        rt->charge_shared(rt, restore);
+    return ptr;
+}
+
+static void *js_realloc_shared(JSRuntime *rt, void *ptr, size_t size)
+{
+    void *restore = rt->charge_shared ? rt->charge_shared(rt, NULL) : NULL;
+    void *moved = js_realloc_rt(rt, ptr, size);
+    if (restore)
+        rt->charge_shared(rt, restore);
+    return moved;
+}
+
+/* Weaver: the first context with a pending job, in creation order. */
+static JSContext *js_first_context_with_jobs(JSRuntime *rt)
+{
+    struct list_head *el;
+
+    list_for_each(el, &rt->context_list) {
+        JSContext *ctx = list_entry(el, JSContext, link);
+        if (!list_empty(&ctx->job_list))
+            return ctx;
     }
     return NULL;
 }
 
-/* return < 0 if exception, 0 if no job pending, 1 if a job was
-   executed successfully. the context of the job is stored in '*pctx' */
-int JS_ExecutePendingJob(JSRuntime *rt, JSContext **pctx)
+bool JS_IsJobPending(JSRuntime *rt)
 {
-    JSContext *ctx;
+    return js_first_context_with_jobs(rt) != NULL;
+}
+
+JSContext *JS_GetPendingJobContext(JSRuntime *rt)
+{
+    return js_first_context_with_jobs(rt);
+}
+
+bool JS_IsContextJobPending(JSContext *ctx)
+{
+    return !list_empty(&ctx->job_list);
+}
+
+/* Weaver: run the first pending job of 'ctx'. Return < 0 if exception, 0 if
+   no job is pending, 1 if a job was executed successfully. */
+int JS_ExecuteContextJob(JSContext *ctx)
+{
     JSJobEntry *e;
     JSValue res;
     int i, ret;
 
-    if (list_empty(&rt->job_list)) {
-        *pctx = NULL;
+    if (list_empty(&ctx->job_list))
         return 0;
-    }
-
-    /* get the first pending job and execute it */
-    e = list_entry(rt->job_list.next, JSJobEntry, link);
+    e = list_entry(ctx->job_list.next, JSJobEntry, link);
     list_del(&e->link);
-    ctx = e->ctx;
     res = e->job_func(e->ctx, e->argc, vc(e->argv));
     for(i = 0; i < e->argc; i++)
         JS_FreeValue(ctx, e->argv[i]);
@@ -2197,8 +2541,94 @@ int JS_ExecutePendingJob(JSRuntime *rt, JSContext **pctx)
         ret = 1;
     JS_FreeValue(ctx, res);
     js_free(ctx, e);
-    *pctx = ctx;
     return ret;
+}
+
+/* Weaver: the first pending job of 'ctx' tagged 'tag', or NULL. */
+static JSJobEntry *js_first_tagged_job(JSContext *ctx, uintptr_t tag)
+{
+    struct list_head *el;
+
+    list_for_each(el, &ctx->job_list) {
+        JSJobEntry *e = list_entry(el, JSJobEntry, link);
+        if (e->tag == tag)
+            return e;
+    }
+    return NULL;
+}
+
+bool JS_IsTaggedJobPending(JSContext *ctx, uintptr_t tag)
+{
+    return js_first_tagged_job(ctx, tag) != NULL;
+}
+
+/* Weaver: run the first pending job of 'ctx' tagged 'tag', leaving every
+   other tag's jobs queued: several programs sharing one context each run
+   only their own. Return < 0 if exception, 0 if none is pending, 1 if a
+   job was executed successfully. */
+int JS_ExecuteTaggedJob(JSContext *ctx, uintptr_t tag)
+{
+    JSJobEntry *e;
+    JSValue res;
+    int i, ret;
+
+    e = js_first_tagged_job(ctx, tag);
+    if (!e)
+        return 0;
+    list_del(&e->link);
+    res = e->job_func(e->ctx, e->argc, vc(e->argv));
+    for(i = 0; i < e->argc; i++)
+        JS_FreeValue(ctx, e->argv[i]);
+    if (JS_IsException(res))
+        ret = -1;
+    else
+        ret = 1;
+    JS_FreeValue(ctx, res);
+    js_free(ctx, e);
+    return ret;
+}
+
+/* Weaver: free the pending jobs of 'ctx' tagged 'tag' without running them.
+   Freeing their arguments can queue more with the same tag; those go too. */
+void JS_FreeTaggedJobs(JSContext *ctx, uintptr_t tag)
+{
+    JSJobEntry *e;
+    int i;
+
+    while ((e = js_first_tagged_job(ctx, tag)) != NULL) {
+        list_del(&e->link);
+        for(i = 0; i < e->argc; i++)
+            JS_FreeValue(ctx, e->argv[i]);
+        js_free(ctx, e);
+    }
+}
+
+/* return < 0 if exception, 0 if no job pending, 1 if a job was
+   executed successfully. the context of the job is stored in '*pctx' */
+int JS_ExecutePendingJob(JSRuntime *rt, JSContext **pctx)
+{
+    JSContext *ctx = js_first_context_with_jobs(rt);
+
+    *pctx = ctx;
+    if (!ctx)
+        return 0;
+    return JS_ExecuteContextJob(ctx);
+}
+
+/* Weaver: free a context's pending jobs. Freeing their arguments can queue
+   more (finalization callbacks); those go too. */
+static void js_free_jobs(JSContext *ctx)
+{
+    JSJobEntry *e;
+    int i;
+
+    while (!list_empty(&ctx->job_list)) {
+        e = list_entry(ctx->job_list.next, JSJobEntry, link);
+        list_del(&e->link);
+        for(i = 0; i < e->argc; i++)
+            JS_FreeValue(ctx, e->argv[i]);
+        js_free(ctx, e);
+    }
 }
 
 static inline uint32_t atom_get_free(const JSAtomStruct *p)
@@ -2505,10 +2935,14 @@ JSContext *JS_NewContextRaw(JSRuntime *rt)
     ctx->class_proto = js_malloc_rt(rt, sizeof(ctx->class_proto[0]) *
                                     rt->class_count);
     if (!ctx->class_proto) {
+        /* Weaver: unlink it from the GC list before freeing it; the next
+           collection otherwise walks into freed memory. */
+        remove_gc_object(&ctx->header);
         js_free_rt(rt, ctx);
         return NULL;
     }
     ctx->rt = rt;
+    init_list_head(&ctx->job_list);
     list_add_tail(&ctx->link, &rt->context_list);
     for(i = 0; i < rt->class_count; i++)
         ctx->class_proto[i] = JS_NULL;
@@ -2634,6 +3068,12 @@ static void JS_MarkContext(JSRuntime *rt, JSContext *ctx,
     JS_MarkValue(rt, ctx->global_obj, mark_func);
     JS_MarkValue(rt, ctx->global_var_obj, mark_func);
 
+    list_for_each(el, &ctx->job_list) {
+        JSJobEntry *e = list_entry(el, JSJobEntry, link);
+        for(i = 0; i < e->argc; i++)
+            JS_MarkValue(rt, e->argv[i], mark_func);
+    }
+
     JS_MarkValue(rt, ctx->throw_type_error, mark_func);
     JS_MarkValue(rt, ctx->eval_obj, mark_func);
 
@@ -2711,6 +3151,7 @@ void JS_FreeContext(JSContext *ctx)
     }
 #endif
 
+    js_free_jobs(ctx);
     js_free_modules(ctx, JS_FREE_MODULE_ALL);
 
     JS_FreeValue(ctx, ctx->global_obj);
@@ -2969,7 +3410,7 @@ static int JS_ResizeAtomHash(JSRuntime *rt, int new_hash_size)
 
     assert((new_hash_size & (new_hash_size - 1)) == 0); /* power of two */
     new_hash_mask = new_hash_size - 1;
-    new_hash = js_mallocz_rt(rt, sizeof(rt->atom_hash[0]) * new_hash_size);
+    new_hash = js_mallocz_shared(rt, sizeof(rt->atom_hash[0]) * new_hash_size);
     if (!new_hash)
         return -1;
     for(i = 0; i < rt->atom_hash_size; i++) {
@@ -3150,14 +3591,14 @@ static JSAtom __JS_NewAtom(JSRuntime *rt, JSString *str, int atom_type)
         if (new_size > JS_ATOM_MAX)
             goto fail;
         /* XXX: should use realloc2 to use slack space */
-        new_array = js_realloc_rt(rt, rt->atom_array, sizeof(*new_array) * new_size);
+        new_array = js_realloc_shared(rt, rt->atom_array, sizeof(*new_array) * new_size);
         if (!new_array)
             goto fail;
         /* Note: the atom 0 is not used */
         start = rt->atom_size;
         if (start == 0) {
             /* JS_ATOM_NULL entry */
-            p = js_mallocz_rt(rt, sizeof(JSAtomStruct));
+            p = js_mallocz_shared(rt, sizeof(JSAtomStruct));
             if (!p) {
                 js_free_rt(rt, new_array);
                 goto fail;
@@ -5262,8 +5703,8 @@ static int resize_shape_hash(JSRuntime *rt, int new_shape_hash_bits)
     JSShape **new_shape_hash, *sh, *sh_next;
 
     new_shape_hash_size = 1 << new_shape_hash_bits;
-    new_shape_hash = js_mallocz_rt(rt, sizeof(rt->shape_hash[0]) *
-                                   new_shape_hash_size);
+    new_shape_hash = js_mallocz_shared(rt, sizeof(rt->shape_hash[0]) *
+                                       new_shape_hash_size);
     if (!new_shape_hash)
         return -1;
     for(i = 0; i < rt->shape_hash_size; i++) {
@@ -7614,6 +8055,14 @@ bool JS_HasException(JSContext *ctx)
     return !JS_IsUninitialized(ctx->rt->current_exception);
 }
 
+/* Weaver: drop the runtime's pending exception when no context is left to
+   take it from, as after a context that failed to build. */
+void JS_DropRuntimeException(JSRuntime *rt)
+{
+    JS_FreeValueRT(rt, rt->current_exception);
+    rt->current_exception = JS_UNINITIALIZED;
+}
+
 static void dbuf_put_leb128(DynBuf *s, uint32_t v)
 {
     uint32_t a;
@@ -8657,14 +9106,31 @@ static int JS_AutoInitProperty(JSContext *ctx, JSObject *p, JSAtom prop,
     JSValue val;
     JSContext *realm;
     JSAutoInitFunc *func;
-
-    if (js_shape_prepare_update(ctx, p, &prs))
-        return -1;
+    bool frozen;
+    void *restore;
 
     realm = js_autoinit_get_realm(pr);
     func = js_autoinit_func_table[js_autoinit_get_id(pr)];
+    /* Weaver: a frozen built-in's property (JS_FreezeRealm cleared its
+       writable and configurable flags) is shared by every program in the
+       realm: it is made, its object's shape copied included, outside the
+       running program's charge, and frozen. */
+    frozen = realm->weaver_frozen && !p->extensible &&
+        !(prs->flags & (JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE));
+    restore = frozen && ctx->rt->charge_shared ? ctx->rt->charge_shared(ctx->rt, NULL) : NULL;
+    if (js_shape_prepare_update(ctx, p, &prs)) {
+        if (restore)
+            ctx->rt->charge_shared(ctx->rt, restore);
+        return -1;
+    }
     /* 'func' shall not modify the object properties 'pr' */
     val = func(realm, p, prop, pr->u.init.opaque);
+    if (frozen && !JS_IsException(val) && js_freeze_new_lazily(realm, val, 0)) {
+        JS_FreeValue(ctx, val);
+        val = JS_ThrowInternalError(ctx, "a built-in could not be frozen");
+    }
+    if (restore)
+        ctx->rt->charge_shared(ctx->rt, restore);
     js_autoinit_free(ctx->rt, pr);
     prs->flags &= ~JS_PROP_TMASK;
     pr->u.value = JS_UNDEFINED;
@@ -61524,8 +61990,16 @@ static JSValue js_perf_now(JSContext *ctx, JSValueConst this_val, int argc, JSVa
     return js_float64(js__now_ms() - ctx->time_origin);
 }
 
+static JSValue js_perf_get_timeOrigin(JSContext *ctx, JSValueConst this_val)
+{
+    return js_float64(ctx->time_origin);
+}
+
+/* Weaver: timeOrigin is an accessor so that programs sharing one realm
+   (JS_SwapProgramState) each read their own. */
 static const JSCFunctionListEntry js_perf_proto_funcs[] = {
     JS_CFUNC_DEF2("now", 0, js_perf_now, JS_PROP_ENUMERABLE),
+    JS_CGETSET_DEF2("timeOrigin", js_perf_get_timeOrigin, NULL, JS_PROP_ENUMERABLE),
 };
 
 int JS_AddPerformance(JSContext *ctx)
@@ -61534,9 +62008,6 @@ int JS_AddPerformance(JSContext *ctx)
 
     JSValue performance = JS_NewObject(ctx);
     JS_SetPropertyFunctionList(ctx, performance, js_perf_proto_funcs, countof(js_perf_proto_funcs));
-    JS_DefinePropertyValueStr(ctx, performance, "timeOrigin",
-                           js_float64(ctx->time_origin),
-                           JS_PROP_ENUMERABLE);
     JS_DefinePropertyValueStr(ctx, ctx->global_obj, "performance",
                            js_dup(performance),
                            JS_PROP_WRITABLE | JS_PROP_ENUMERABLE | JS_PROP_CONFIGURABLE);
@@ -61658,12 +62129,16 @@ typedef struct JSFinRecEntry {
     JSValue token;
     JSValue cb;
     JSContext *ctx;
+    /* Weaver: the job tag of the program that made the registry. */
+    uintptr_t tag;
 } JSFinRecEntry;
 
 typedef struct JSFinalizationRegistryData {
     struct list_head entries;
     JSContext *ctx;
     JSValue cb;
+    /* Weaver: the job tag of the program that made it (JS_SetJobTagFunc). */
+    uintptr_t tag;
 } JSFinalizationRegistryData;
 
 static void delete_finrec_weakref(JSRuntime *rt, JSFinRecEntry *fre)
@@ -61749,6 +62224,7 @@ static JSValue js_finrec_constructor(JSContext *ctx, JSValueConst new_target,
     init_list_head(&frd->entries);
     frd->ctx = ctx;
     frd->cb = js_dup(cb);
+    frd->tag = ctx->rt->job_tag ? ctx->rt->job_tag(ctx) : 0;
     JS_SetOpaqueInternal(obj, frd);
     return obj;
 }
@@ -61784,6 +62260,7 @@ static JSValue js_finrec_register(JSContext *ctx, JSValueConst this_val,
     }
     fre->cb = js_dup(frd->cb);
     fre->ctx = JS_DupContext(frd->ctx);
+    fre->tag = frd->tag;
     fre->target = target;
     fre->held_val = js_dup(held_val);
     fre->token = js_dup(token);
@@ -61947,7 +62424,7 @@ static void reset_weak_ref(JSRuntime *rt, JSWeakRefRecord **first_weak_ref)
                 JSValueConst args[2];
                 args[0] = fre->cb;
                 args[1] = fre->held_val;
-                JS_EnqueueJob(fre->ctx, js_finrec_job, 2, args);
+                js_enqueue_job(fre->ctx, js_finrec_job, 2, args, true, fre->tag);
             }
             js_finrec_free(rt, fre);
             break;
@@ -62179,6 +62656,18 @@ static const JSDOMExceptionNameDef js_dom_exception_names_table[] = {
     { "InvalidNodeTypeError", "INVALID_NODE_TYPE_ERR" },
     { "DataCloneError", "DATA_CLONE_ERR" }
 };
+
+/* Weaver: a DOMException's name and message, read from its own fields
+   without calling the prototype's getters. False when val is not one. */
+bool JS_GetDOMExceptionFields(JSContext *ctx, JSValueConst val, JSValue *name, JSValue *message)
+{
+    JSDOMExceptionData *s = JS_GetOpaque(val, JS_CLASS_DOM_EXCEPTION);
+    if (!s)
+        return false;
+    *name = js_dup(s->name);
+    *message = js_dup(s->message);
+    return true;
+}
 
 static void js_domexception_finalizer(JSRuntime *rt, JSValueConst val)
 {
@@ -63342,10 +63831,11 @@ static int js_uint8array_funcs_init(JSContext *ctx)
 
 int JS_AddIntrinsicAToB(JSContext *ctx)
 {
-    if (!JS_IsRegisteredClass(ctx->rt, JS_CLASS_DOM_EXCEPTION)) {
-        if (JS_AddIntrinsicDOMException(ctx))
-            return -1;
-    }
+    /* Weaver: every context needs its own DOMException global and
+       prototype; the class registration is the runtime's, and
+       JS_AddIntrinsicDOMException registers it only once. */
+    if (JS_AddIntrinsicDOMException(ctx))
+        return -1;
     JS_SetPropertyFunctionList(ctx, ctx->global_obj,
                                js_base64_funcs, countof(js_base64_funcs));
     return 0;

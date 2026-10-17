@@ -1,4 +1,5 @@
 const std = @import("std");
+const small_fs = @import("small_fs.zig");
 const platform = @import("platform/root.zig");
 
 // Log receipt (2026-07-29): one runtime diagnostic is capped at 6,000 detail
@@ -6,32 +7,63 @@ const platform = @import("platform/root.zig");
 // 128 maximum-size diagnostics; current + rotated files cost at most 2 MiB on
 // disk, while resident memory holds only the line being written.
 const rotate_bytes: u64 = 1024 * 1024;
-var io: ?std.Io = null;
-var log_path: []u8 = &.{};
-var old_log_path: []u8 = &.{};
 var mutex: std.atomic.Mutex = .unlocked;
-var write_failed = std.atomic.Value(bool).init(false);
-var fallback_reported = std.atomic.Value(bool).init(false);
 
-pub fn init(runtime_io: std.Io, path: []const u8) !void {
+/// One widget's log file. A host process keeps one per widget and points
+/// `current` at the widget whose code is running, so every `std.log` line
+/// lands in the log of the widget that wrote it.
+pub const Sink = struct {
+    io: ?std.Io = null,
+    path: []u8 = &.{},
+    old_path: []u8 = &.{},
+    write_failed: std.atomic.Value(bool) = .init(false),
+    fallback_reported: std.atomic.Value(bool) = .init(false),
+};
+
+/// The log `std.log` writes to. Lines logged before any widget is current
+/// (or after the last one is gone) are dropped, as before `init`.
+var current: ?*Sink = null;
+
+/// Set on a thread that runs no widget's code (the host's provider
+/// threads): `current` belongs to the UI thread, which may switch or free
+/// it at any moment, so this thread's lines are dropped instead.
+threadlocal var detached = false;
+
+/// The calling thread runs no widget's code; see `detached`.
+pub fn detachThread() void {
+    detached = true;
+}
+
+pub fn init(sink: *Sink, runtime_io: std.Io, path: []const u8) !void {
     // Two short paths: the C heap packs them; `page_allocator` rounded each
     // to its own 4 KiB page.
     const allocator = std.heap.c_allocator;
     const next_path = try allocator.dupe(u8, path);
     errdefer allocator.free(next_path);
     const next_old_path = try std.fmt.allocPrint(allocator, "{s}.old", .{path});
-    if (log_path.len > 0) allocator.free(log_path);
-    if (old_log_path.len > 0) allocator.free(old_log_path);
-    log_path = next_path;
-    old_log_path = next_old_path;
-    io = runtime_io;
-    write_failed.store(false, .release);
-    fallback_reported.store(false, .release);
-    var file = std.Io.Dir.cwd().createFile(runtime_io, path, .{ .read = true, .truncate = false }) catch |err| {
-        noteFailure(err);
-        return;
-    };
-    file.close(runtime_io);
+    if (sink.path.len > 0) allocator.free(sink.path);
+    if (sink.old_path.len > 0) allocator.free(sink.old_path);
+    sink.path = next_path;
+    sink.old_path = next_old_path;
+    sink.io = runtime_io;
+    sink.write_failed.store(false, .release);
+    sink.fallback_reported.store(false, .release);
+    small_fs.append(runtime_io, path, "") catch |err| noteFailure(sink, err);
+}
+
+/// Route `std.log` to `sink` until the next call.
+pub fn use(sink: *Sink) void {
+    current = sink;
+}
+
+/// Release a widget's sink when it unloads; logging goes nowhere until the
+/// next `use` if it was current.
+pub fn deinit(sink: *Sink) void {
+    if (current == sink) current = null;
+    if (sink.path.len > 0) std.heap.c_allocator.free(sink.path);
+    if (sink.old_path.len > 0) std.heap.c_allocator.free(sink.old_path);
+    sink.path = &.{};
+    sink.old_path = &.{};
 }
 
 pub fn logFn(
@@ -40,12 +72,29 @@ pub fn logFn(
     comptime format: []const u8,
     args: anytype,
 ) void {
+    // Never inlined, so the 8 KiB line buffer lives only while a line is
+    // written. Inlined, it sat in the frames of every function that logs,
+    // the host's per-tick ones included (Native's frame and rebuild
+    // handlers, `view`, `update`), and the Windows stack probe touches every
+    // page of a frame on entry whether or not the log line runs. (Marking
+    // `logFn` itself `noinline` did not stop the inlining in a ReleaseFast
+    // build; this call does.)
+    @call(.never_inline, writeLogLine, .{ level, scope, format, args });
+}
+
+fn writeLogLine(
+    comptime level: std.log.Level,
+    comptime scope: @EnumLiteral(),
+    comptime format: []const u8,
+    args: anytype,
+) void {
     // reportError forwards at most 6,000 detail bytes; 8 KiB leaves >2 KiB
-    // for timestamp/level/scope and formatting. The stack cost exists only
-    // during one log call.
+    // for timestamp/level/scope and formatting.
+    if (detached) return;
+    const sink = current orelse return;
     var buffer: [8192]u8 = undefined;
-    const line = formatLogLine(level, scope, format, args, &buffer) catch |err| return noteFailure(err);
-    writeLine(line);
+    const line = formatLogLine(level, scope, format, args, &buffer) catch |err| return noteFailure(sink, err);
+    writeLine(sink, line);
 }
 
 fn formatLogLine(
@@ -82,8 +131,10 @@ fn formatLogLine(
     return buffer[0 .. prefix_len + message_len + 1];
 }
 
-pub fn failed() bool {
-    return write_failed.load(.acquire);
+/// Whether `sink`'s log is failing to write (its widget shows an error
+/// surface instead of a silent blank).
+pub fn failed(sink: *const Sink) bool {
+    return sink.write_failed.load(.acquire);
 }
 
 fn writeTimestamp(writer: *std.Io.Writer) !void {
@@ -103,43 +154,37 @@ fn writeTimestamp(writer: *std.Io.Writer) !void {
     });
 }
 
-fn writeLine(line: []const u8) void {
-    writeLineFallible(line) catch |err| return noteFailure(err);
-    if (write_failed.swap(false, .acq_rel)) {
-        fallback_reported.store(false, .release);
-        std.debug.print("weaver widget log recovered; path={s}\n", .{log_path});
+fn writeLine(sink: *Sink, line: []const u8) void {
+    writeLineFallible(sink, line) catch |err| return noteFailure(sink, err);
+    if (sink.write_failed.swap(false, .acq_rel)) {
+        sink.fallback_reported.store(false, .release);
+        std.debug.print("weaver widget log recovered; path={s}\n", .{sink.path});
     }
 }
 
-fn writeLineFallible(line: []const u8) !void {
-    const runtime_io = io orelse return;
-    if (log_path.len == 0) return;
+fn writeLineFallible(sink: *Sink, line: []const u8) !void {
+    const runtime_io = sink.io orelse return;
+    if (sink.path.len == 0) return;
     while (!mutex.tryLock()) std.atomic.spinLoopHint();
     defer mutex.unlock();
 
-    var cwd = std.Io.Dir.cwd();
-    const path = log_path;
-    const old_path = old_log_path;
-    const size = if (cwd.statFile(runtime_io, path, .{})) |stat| stat.size else |_| 0;
-    if (shouldRotate(size, line.len)) {
-        cwd.deleteFile(runtime_io, old_path) catch |err| switch (err) {
-            error.FileNotFound => {},
-            else => return err,
-        };
-        try cwd.rename(path, cwd, old_path, runtime_io);
+    // Every log line runs this on the UI thread: small_fs keeps it to small
+    // stack frames.
+    const path = sink.path;
+    const old_path = sink.old_path;
+    if (shouldRotate(small_fs.size(runtime_io, path) orelse 0, line.len)) {
+        try small_fs.delete(runtime_io, old_path);
+        try small_fs.rename(runtime_io, path, old_path);
     }
-    var file = try cwd.createFile(runtime_io, path, .{ .read = true, .truncate = false });
-    defer file.close(runtime_io);
-    const stat = try file.stat(runtime_io);
-    try file.writePositionalAll(runtime_io, line, stat.size);
+    try small_fs.append(runtime_io, path, line);
 }
 
-fn noteFailure(err: anyerror) void {
-    write_failed.store(true, .release);
-    if (!fallback_reported.swap(true, .acq_rel)) {
+fn noteFailure(sink: *Sink, err: anyerror) void {
+    sink.write_failed.store(true, .release);
+    if (!sink.fallback_reported.swap(true, .acq_rel)) {
         std.debug.print(
             "weaver widget log unavailable: {s}; path={s}; the widget window will show an error surface\n",
-            .{ @errorName(err), log_path },
+            .{ @errorName(err), sink.path },
         );
     }
 }

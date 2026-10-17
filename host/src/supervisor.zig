@@ -1,6 +1,8 @@
 const std = @import("std");
-const backoff = @import("backoff.zig");
-const registry = @import("registry.zig");
+/// Re-exported for the Windows widget host, which compiles this file as a
+/// module of its own (runtime/build.zig `host_supervisor`).
+pub const backoff = @import("backoff.zig");
+pub const registry = @import("registry.zig");
 
 pub const max_widgets: usize = 32;
 pub const max_name_bytes: usize = 256;
@@ -198,15 +200,20 @@ pub fn recordCrash(slot: anytype, now_ms: u64, exit_code: ?u32) void {
 }
 
 pub fn recordLaunchFailure(slot: anytype, now_ms: u64, err: anyerror) void {
+    recordLaunchFailureNamed(slot, now_ms, @errorName(err));
+}
+
+/// A launch failure another process named: the widget host's answer.
+pub fn recordLaunchFailureNamed(slot: anytype, now_ms: u64, cause: []const u8) void {
     if (backoff.recordCrash(&slot.crash_times, &slot.crash_count, now_ms)) {
         slot.state = .stopped;
-        slot.setReason("launch failed after 3 restart attempts within 5 minutes: {s}", .{@errorName(err)});
+        slot.setReason("launch failed after 3 restart attempts within 5 minutes: {s}", .{cause});
         return;
     }
     slot.state = .backoff;
     slot.next_restart_ms = now_ms + backoff.delayMs(slot.crash_count);
     slot.setReason("launch failed: {s}; restart {d} in {d}s", .{
-        @errorName(err),
+        cause,
         slot.crash_count,
         backoff.delayMs(slot.crash_count) / 1000,
     });
@@ -308,6 +315,11 @@ pub const StatusEntry = struct {
     uptime_seconds: u64,
     state: RunState,
     reason: []const u8,
+    /// The widget runs inside the shared host process: its memory and CPU
+    /// are the host row's, not its own.
+    hosted: bool = false,
+    /// This row is the shared widget host process itself.
+    host_row: bool = false,
 };
 
 pub fn writeStatus(writer: *std.Io.Writer, host_pid: u32, provider_status: ProviderStatus, entries: []const StatusEntry) !void {
@@ -366,13 +378,21 @@ pub fn writeStatus(writer: *std.Io.Writer, host_pid: u32, provider_status: Provi
         try json.write(entry.uptime_seconds);
         try json.objectField("state");
         try json.write(runStateLabel(entry.state));
+        if (entry.hosted) {
+            try json.objectField("hosted");
+            try json.write(true);
+        }
+        if (entry.host_row) {
+            try json.objectField("host");
+            try json.write(true);
+        }
         try json.objectField("reason");
-        // A running process that has never reported a renderer backend is
+        // A running widget that has never reported a renderer backend is
         // presenting nothing — the window shows no frames. Saying so here
         // is the difference between "running" reading as healthy and the
         // one real tell (backend '-') going unnoticed. Ten seconds skips
         // ordinary startup latency.
-        if (entry.state == .running and entry.reason.len == 0 and entry.uptime_seconds >= 10 and std.mem.eql(u8, entry.backend, "-")) {
+        if (!entry.host_row and entry.state == .running and entry.reason.len == 0 and entry.uptime_seconds >= 10 and std.mem.eql(u8, entry.backend, "-")) {
             try json.write("no frames presented (renderer surface not created); check 'weaver logs <name>'");
         } else {
             try json.write(entry.reason);

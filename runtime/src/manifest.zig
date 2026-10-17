@@ -66,14 +66,22 @@ fn resolvedAnchor(value: Manifest) Anchor {
     };
 }
 
-/// Load the two-file widget contract into the process-lifetime arena. M0 is
-/// intentionally strict: unknown JSON fields and unsupported placement fail
-/// at launch instead of quietly changing the desktop behavior.
-pub fn load(io: std.Io, allocator: std.mem.Allocator, directory: []const u8) !Loaded {
+/// Largest manifest font id. The host carries each widget's slot in the
+/// top byte of its runtime font ids, so manifest ids stay well below it;
+/// the CLI numbers faces from 64.
+pub const max_font_id: u64 = std.math.maxInt(u32);
+
+/// Load the two-file widget contract: the manifest into the process-lifetime
+/// arena, the bundle source into `bundle_allocator`, which the caller frees
+/// once the engine has compiled it. M0 is intentionally strict: unknown JSON
+/// fields and unsupported placement fail at launch instead of quietly
+/// changing the desktop behavior.
+pub fn load(io: std.Io, allocator: std.mem.Allocator, bundle_allocator: std.mem.Allocator, directory: []const u8) !Loaded {
     const manifest_path = try std.fs.path.join(allocator, &.{ directory, "widget.json" });
     const bundle_path = try std.fs.path.join(allocator, &.{ directory, "bundle.js" });
     const manifest_bytes = try std.Io.Dir.cwd().readFileAlloc(io, manifest_path, allocator, .limited(max_manifest_bytes));
-    const bundle = try std.Io.Dir.cwd().readFileAlloc(io, bundle_path, allocator, .limited(max_bundle_bytes));
+    const bundle = try std.Io.Dir.cwd().readFileAlloc(io, bundle_path, bundle_allocator, .limited(max_bundle_bytes));
+    errdefer bundle_allocator.free(bundle);
     const parsed = try std.json.parseFromSliceLeaky(Manifest, allocator, manifest_bytes, .{ .ignore_unknown_fields = false });
     if (!std.math.isFinite(parsed.size[0]) or !std.math.isFinite(parsed.size[1]) or
         parsed.size[0] <= 0 or parsed.size[1] <= 0) return error.InvalidWidgetSize;
@@ -97,7 +105,7 @@ pub fn load(io: std.Io, allocator: std.mem.Allocator, directory: []const u8) !Lo
     }
     if (parsed.fonts.len > native_sdk.runtime.max_registered_canvas_fonts) return error.TooManyFonts;
     for (parsed.fonts) |font| {
-        if (font.id < native_sdk.canvas.min_registered_font_id or font.name.len == 0 or font.stem.len == 0 or font.family.len == 0 or !isLocalFontFile(font.file)) return error.InvalidFont;
+        if (font.id < native_sdk.canvas.min_registered_font_id or font.id > max_font_id or font.name.len == 0 or font.stem.len == 0 or font.family.len == 0 or !isLocalFontFile(font.file)) return error.InvalidFont;
     }
     return .{ .manifest = parsed, .bundle = bundle };
 }

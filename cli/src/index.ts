@@ -16,7 +16,7 @@ import { watchDevDirectory } from "./dev-watcher.js";
 import { lowerIconSource, resolveIconSpec } from "./icon-transform.js";
 import { originDeclared, originHost, originNotDeclaredMessage, validOriginHost } from "./origin.js";
 import { publishCaptureArtifacts } from "./capture-publish.js";
-import { formatStatus, pathInside, pathsEqual, readRegistry, readStatus, statusPath, weaverLogsPath, widgetsPath, withRegistryLock, writeRegistry, type RegistryDocument } from "./host-tools.js";
+import { describeHostDown, formatStatus, pathInside, pathsEqual, readRegistry, readStatus, statusPath, weaverLogsPath, widgetsPath, withRegistryLock, writeRegistry, type HostDown, type RegistryDocument } from "./host-tools.js";
 import { extractWeave, isWeaveSourceEntryIncluded, MAX_WEAVE_ARCHIVE_BYTES, openWeave, packWeave, type DeclaredSurface, type OpenedWeave, type WeaveManifest } from "./weave.js";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
@@ -26,9 +26,16 @@ const iconLicenseSource = join(sdkAssetsRoot, "LUCIDE-LICENSE.txt");
 const iconLicenseFile = "Lucide-LICENSE.txt";
 const executableSuffix = process.platform === "win32" ? ".exe" : "";
 const runtimeExecutable = join(repoRoot, "runtime", "zig-out", "bin", `weaver-widget${executableSuffix}`);
+// On Windows the widget host is the daemon, with nothing supervising it
+// (ADR 0022): the CLI starts, stops and asks after it through the runtime's
+// own client verbs (runtime/src/host_lifecycle.zig). macOS keeps weaverd.
 const hostExecutable = process.platform === "darwin"
   ? join(repoRoot, "host", "zig-out", "Weaverd.app", "Contents", "MacOS", "weaverd")
-  : join(repoRoot, "host", "zig-out", "bin", `weaverd${executableSuffix}`);
+  : process.platform === "win32"
+    ? runtimeExecutable
+    : join(repoRoot, "host", "zig-out", "bin", `weaverd${executableSuffix}`);
+/** What the CLI calls the process `weaver up` starts. */
+const hostLabel = process.platform === "win32" ? "widget host" : "weaverd";
 
 class WeaverFailure extends Error {
   constructor(readonly details: string[]) {
@@ -1552,10 +1559,10 @@ async function devWidget(directory: string): Promise<void> {
       name: project.config.name, sourcePath: directory, enabled: true, dev: true,
     }] };
     writeRegistry(nextRegistry);
-    try { signalHost("--signal-reload"); }
+    try { reloadHost(); }
     catch (error) {
       writeRegistry(before);
-      try { signalHost("--signal-reload"); }
+      try { reloadHost(); }
       catch { /* Preserve the reload failure after restoring the authoritative registry. */ }
       throw error;
     }
@@ -1580,7 +1587,7 @@ async function devWidget(directory: string): Promise<void> {
       const next = await bundleWidget(directory);
       const configChanged = JSON.stringify(next.manifest) !== JSON.stringify(activeManifest);
       if (configChanged) {
-        signalHost("--signal-reload");
+        reloadHost();
         activeManifest = next.manifest;
         process.stdout.write("weaver dev restarted widget: window config changed\n");
       } else {
@@ -1615,6 +1622,7 @@ async function devWidget(directory: string): Promise<void> {
   const presentationWatch = setInterval(() => {
     if (presentationFailureReported || Date.now() < presentationDeadline) return;
     try {
+      requestStatus();
       const status = readStatus().widgets.find((widget) => widget.name === project.config.name);
       if (status && status.backend !== "-") {
         clearInterval(presentationWatch);
@@ -1660,7 +1668,7 @@ async function devWidget(directory: string): Promise<void> {
               directory,
               existing,
               writeRegistry,
-              () => signalHost("--signal-reload"),
+              () => reloadHost(),
             );
             if (endedRegistry) {
               shutdownWarnings.push(...sweepUnregisteredInstallDirectories(endedRegistry));
@@ -1697,7 +1705,7 @@ function showLogs(name: string, follow: boolean): Promise<void> | void {
       : [];
     const knownLine = known.length > 0 ? `Widgets with logs: ${known.join(", ")}` : `No widget has written a log yet (widgets log to ${weaverLogsPath()} once they start).`;
     if (!follow) {
-      throw new WeaverFailure([`No log for "${name}" at ${path}`, knownLine, `The weaverd host process does not keep a log file; "weaver status" reports its widget states.`]);
+      throw new WeaverFailure([`No log for "${name}" at ${path}`, knownLine, `The ${hostLabel} process does not keep a log file; "weaver status" reports its widget states.`]);
     }
     process.stdout.write(`No log for "${name}" yet at ${path}; waiting for the widget to start.\n`);
   }
@@ -1771,7 +1779,7 @@ async function installWidget(input: string): Promise<void> {
     await bundleWidget(stage);
     await withRegistryLock(async () => {
       const originalRegistry = readRegistry();
-      if (hostLifecycleAvailable() && hostRunning()) assertHostReloadReady();
+      if (hostLifecycleAvailable()) runningHostReloadReady();
       const conflicting = originalRegistry.widgets.find((widget) => widget.name === project.config.name && !ownedInstallPath(widget.sourcePath));
       if (conflicting) {
         throw new WeaverFailure([`Widget name "${project.config.name}" is already registered from ${conflicting.sourcePath}`, `Run "weaver uninstall ${project.config.name}" before replacing a source-linked installation.`]);
@@ -1790,11 +1798,11 @@ async function installWidget(input: string): Promise<void> {
       writeRegistry(nextRegistry);
       if (hostLifecycleAvailable()) {
         try {
-          signalHost("--signal-reload");
+          reloadHost();
         } catch (error) {
           writeRegistry(originalRegistry);
           if (hostRunning()) {
-            try { signalHost("--signal-reload"); }
+            try { reloadHost(); }
             catch { /* Preserve the original failure; the registry is authoritative on the next reload. */ }
           }
           throw error;
@@ -1860,24 +1868,19 @@ async function uninstallWidget(name: string): Promise<void> {
     const document = readRegistry();
     const registration = document.widgets.find((widget) => widget.name === name);
     if (!registration) {
-      const running = hostLifecycleAvailable() && hostRunning();
-      if (running) {
-        assertHostReloadReady();
-        signalHost("--signal-reload");
-      }
+      if (hostLifecycleAvailable() && runningHostReloadReady()) reloadHost();
       warnings.push(...sweepUnregisteredInstallDirectories(document));
       return;
     }
     installed = true;
     const nextRegistry = { widgets: document.widgets.filter((widget) => widget.name !== name) };
-    const running = hostLifecycleAvailable() && hostRunning();
-    if (running) assertHostReloadReady();
+    const running = hostLifecycleAvailable() && runningHostReloadReady();
     writeRegistry(nextRegistry);
     if (running) {
-      try { signalHost("--signal-reload"); }
+      try { reloadHost(); }
       catch (error) {
         writeRegistry(document);
-        try { signalHost("--signal-reload"); }
+        try { reloadHost(); }
         catch { /* Preserve the reload failure after restoring the authoritative registry. */ }
         throw error;
       }
@@ -1937,11 +1940,7 @@ async function removeUnregisteredInstall(candidate: string): Promise<void> {
     await withRegistryLock(() => {
       const document = readRegistry();
       if (!document.widgets.some((widget) => pathsEqual(widget.sourcePath, candidate)) && existsSync(candidate)) {
-        const running = hostLifecycleAvailable() && hostRunning();
-        if (running) {
-          assertHostReloadReady();
-          signalHost("--signal-reload");
-        }
+        if (hostLifecycleAvailable() && runningHostReloadReady()) reloadHost();
         try { rmSync(candidate, { recursive: true, force: true }); }
         catch (error) { warnings.push(`Could not remove unregistered owned source at ${candidate}: ${errorMessage(error)}. A later registry mutation will retry cleanup.`); }
       }
@@ -1968,6 +1967,20 @@ function firstFailureLine(error: unknown): string {
 async function upHost(announce: boolean): Promise<void> {
   assertHostLifecycleAvailable("up");
   assertHostBuilt();
+  if (process.platform === "win32") {
+    const result = hostClient("--up");
+    if (result.status === HostClientExit.ok) {
+      if (announce) process.stdout.write("widget host started\n");
+      warnHostNote();
+      return;
+    }
+    if (result.status === HostClientExit.alreadyRunning) {
+      if (announce) process.stdout.write("widget host is already running\n");
+      return;
+    }
+    if (result.status === HostClientExit.timedOut) throw new WeaverFailure(["The widget host did not become reload-ready within 5 seconds.", 'Run "weaver status" to see what its record says.']);
+    throw hostClientFailure("up", result);
+  }
   if (hostRunning()) {
     assertHostReloadReady();
     if (announce) process.stdout.write("weaverd is already running\n");
@@ -1984,6 +1997,15 @@ async function upHost(announce: boolean): Promise<void> {
 async function downHost(): Promise<void> {
   assertHostLifecycleAvailable("down");
   assertHostBuilt();
+  if (process.platform === "win32") {
+    // The client writes the stop marker, signals the host and waits for it
+    // to exit; a restart Windows has pending finds the marker and exits.
+    const result = hostClient("--down");
+    if (result.status === HostClientExit.ok) process.stdout.write("widget host stopped\n");
+    else if (result.status === HostClientExit.notRunning) process.stdout.write("widget host is not running\n");
+    else throw hostClientFailure("down", result);
+    return;
+  }
   if (!hostRunning()) {
     process.stdout.write("weaverd is not running\n");
     return;
@@ -1997,37 +2019,120 @@ async function downHost(): Promise<void> {
 
 function showStatus(json: boolean): void {
   assertHostLifecycleAvailable("status");
-  if (!hostRunning()) throw new WeaverFailure(['weaverd is not running; run "weaver up"']);
+  if (process.platform === "win32") {
+    // One spawn: it asks a running host to write status, or says why none runs.
+    const result = hostClient("--status");
+    if (result.status === HostClientExit.notRunning) throw new WeaverFailure(describeHostDown(JSON.parse(result.stdout) as HostDown));
+    if (result.status === HostClientExit.legacy) assertHostReloadReady();
+    // A host that did not answer in time (and has not crashed: the client
+    // checks) leaves its last status, shown with a warning.
+    if (result.status === HostClientExit.timedOut) process.stderr.write("weaver status warning: the widget host did not answer the status request within 5 seconds; this is the last status it wrote\n");
+    else if (result.status !== HostClientExit.ok) throw hostClientFailure("status", result);
+  } else {
+    if (!hostRunning()) throw new WeaverFailure(['weaverd is not running; run "weaver up"']);
+    requestStatus();
+  }
   try {
     const document = readStatus();
     process.stdout.write(`${json ? JSON.stringify(document, null, 2) : formatStatus(document)}\n`);
     for (const warning of statusDivergenceWarnings(document)) process.stderr.write(`weaver status warning: ${warning}\n`);
   } catch (error) {
-    throw new WeaverFailure([`weaverd status is unavailable at ${statusPath()}: ${errorMessage(error)}`]);
+    throw new WeaverFailure([`${hostLabel} status is unavailable at ${statusPath()}: ${errorMessage(error)}`]);
   }
+}
+
+/**
+ * After `weaver up` starts a host: anything its status row says about how it
+ * runs (Windows refusing its restart request, an unreadable registry) means
+ * a crash would leave Weaver down. Say so now.
+ */
+function warnHostNote(): void {
+  if (hostClient("--status").status !== HostClientExit.ok) return;
+  try {
+    const host = readStatus().widgets.find((widget) => widget.host);
+    if (host?.reason) process.stderr.write(`weaver warning: ${host.reason}\n`);
+  } catch { /* "weaver status" reports an unreadable status file. */ }
 }
 
 function hostRunning(): boolean {
   if (!hostLifecycleAvailable()) return false;
   if (!existsSync(hostExecutable)) return false;
+  if (process.platform === "win32") return hostClient("--probe").status !== HostClientExit.notRunning;
   return spawnSync(hostExecutable, ["--probe"], { stdio: "ignore", windowsHide: true, env: hostEnvironment() }).status === 0;
 }
 
 function hostReloadReady(): boolean {
   if (!hostLifecycleAvailable()) return false;
   if (!existsSync(hostExecutable)) return false;
+  if (process.platform === "win32") return hostClient("--probe").status === HostClientExit.ok;
   return spawnSync(hostExecutable, ["--probe-reload-ready"], { stdio: "ignore", windowsHide: true, env: hostEnvironment() }).status === 0;
+}
+
+/** Whether a host runs; throws if one runs that cannot acknowledge reloads. One client spawn on Windows. */
+function runningHostReloadReady(): boolean {
+  if (process.platform !== "win32") {
+    if (!hostRunning()) return false;
+    assertHostReloadReady();
+    return true;
+  }
+  if (!existsSync(hostExecutable)) return false;
+  const status = hostClient("--probe").status;
+  if (status === HostClientExit.notRunning) return false;
+  if (status === HostClientExit.ok) return true;
+  throw new WeaverFailure([`The running ${hostLabel} predates acknowledged registry reloads.`, 'Run "weaver down", then retry; Weaver will start the current host automatically.']);
 }
 
 function assertHostReloadReady(): void {
   if (!hostReloadReady()) {
-    throw new WeaverFailure(["The running weaverd predates acknowledged registry reloads.", 'Run "weaver down", then retry; Weaver will start the current host automatically.']);
+    throw new WeaverFailure([`The running ${hostLabel} predates acknowledged registry reloads.`, 'Run "weaver down", then retry; Weaver will start the current host automatically.']);
   }
+}
+
+// The Windows host writes status.json when something changes and when asked,
+// and otherwise sleeps (runtime/src/daemon.zig). Asking is best effort: a host
+// that cannot answer leaves the last status, which the freshness warning in
+// statusDivergenceWarnings reports. macOS weaverd writes status on a timer.
+function requestStatus(): void {
+  if (process.platform !== "win32") return;
+  hostClient("--status");
+}
+
+/** Tell the host the registry changed, and wait until it has applied it. */
+function reloadHost(): void {
+  if (process.platform !== "win32") return signalHost("--signal-reload");
+  const result = hostClient("--reload");
+  if (result.status === HostClientExit.ok) return;
+  if (result.status === HostClientExit.hostCrashed || result.status === HostClientExit.notRunning) {
+    // The registry is what the next host reads, so the change stands.
+    const what = result.status === HostClientExit.hostCrashed ? "crashed while it applied this change" : "is not running";
+    process.stderr.write(`weaver warning: the widget host ${what}; the change takes effect when the host next starts (Windows restarting it, or "weaver up"). "weaver status" says which.\n`);
+    return;
+  }
+  if (result.status === HostClientExit.reloadFailed) throw new WeaverFailure(["The widget host could not read the registry; nothing changed.", 'The reason is on the host row of "weaver status".']);
+  if (result.status === HostClientExit.timedOut) throw new WeaverFailure(["The widget host did not acknowledge the registry reload within 10 seconds."]);
+  throw hostClientFailure("reload", result);
 }
 
 function signalHost(signal: "--signal-down" | "--signal-reload"): void {
   const result = spawnSync(hostExecutable, [signal], { stdio: "ignore", windowsHide: true, env: hostEnvironment() });
   if (result.status !== 0) throw new WeaverFailure([`weaverd rejected ${signal}`]);
+}
+
+/** weaver-widget's client verbs end with these codes (runtime/src/host_lifecycle.zig `Exit`, which this must match). */
+const HostClientExit = { ok: 0, failed: 1, alreadyRunning: 2, notRunning: 3, reloadFailed: 4, timedOut: 5, hostCrashed: 6, busy: 7, legacy: 8 } as const;
+
+interface HostClientResult { status: number; stdout: string; stderr: string }
+
+function hostClient(verb: "--up" | "--down" | "--status" | "--reload" | "--probe"): HostClientResult {
+  const result = spawnSync(hostExecutable, [verb], { cwd: repoRoot, encoding: "utf8", windowsHide: true, env: hostEnvironment() });
+  if (result.error) throw new WeaverFailure([`Could not run ${hostExecutable} ${verb}: ${result.error.message}`]);
+  return { status: result.status ?? HostClientExit.failed, stdout: result.stdout ?? "", stderr: (result.stderr ?? "").trim() };
+}
+
+function hostClientFailure(command: string, result: HostClientResult): WeaverFailure {
+  if (result.status === HostClientExit.busy) return new WeaverFailure([`weaver ${command}: another "weaver up" or "weaver down" held the widget host's lifecycle lock for 10 seconds.`, "Retry when it has finished."]);
+  if (result.status === HostClientExit.legacy) return new WeaverFailure([`The running ${hostLabel} predates acknowledged registry reloads.`, 'Run "weaver down", then retry; Weaver will start the current host automatically.']);
+  return new WeaverFailure([`weaver ${command} failed: ${result.stderr || `the widget host's client exited with code ${result.status}`}`]);
 }
 
 function authorizeAudio(): void {
@@ -2039,7 +2144,7 @@ function authorizeAudio(): void {
     stdio: "inherit",
   });
   if (result.status !== 0) throw new WeaverFailure(["Weaver could not authorize macOS system audio.", "Check System Settings > Privacy & Security > Screen & System Audio Recording, then retry."]);
-  if (hostRunning()) signalHost("--signal-reload");
+  if (hostRunning()) reloadHost();
 }
 
 function hostEnvironment(): NodeJS.ProcessEnv {
@@ -2047,7 +2152,9 @@ function hostEnvironment(): NodeJS.ProcessEnv {
 }
 
 function assertHostBuilt(): void {
-  if (!existsSync(hostExecutable)) throw new WeaverFailure([`Host not found at ${hostExecutable}`, "Build host/ with zig build -Doptimize=ReleaseFast."]);
+  if (existsSync(hostExecutable)) return;
+  if (process.platform === "win32") throw new WeaverFailure([`Widget host not found at ${hostExecutable}`, "Build runtime/ with the platform command in the README Quickstart."]);
+  throw new WeaverFailure([`Host not found at ${hostExecutable}`, "Build host/ with zig build -Doptimize=ReleaseFast."]);
 }
 
 function hostLifecycleAvailable(): boolean {
@@ -2247,7 +2354,8 @@ function statusDivergenceWarnings(document: ReturnType<typeof readStatus>): stri
   try {
     const registry = readRegistry();
     const registered = new Set(registry.widgets.map((widget) => widget.name));
-    const reported = new Set(document.widgets.map((widget) => widget.name));
+    // The shared host's own row is a process, not a registered widget.
+    const reported = new Set(document.widgets.filter((widget) => !widget.host).map((widget) => widget.name));
     const missing = [...registered].filter((name) => !reported.has(name));
     const extra = [...reported].filter((name) => !registered.has(name));
     if (missing.length > 0) warnings.push(`registry widgets absent from host status: ${missing.join(", ")}; reload did not converge`);
@@ -2262,7 +2370,7 @@ function statusDivergenceWarnings(document: ReturnType<typeof readStatus>): stri
       .filter((entry) => entry.isFile() && entry.name.startsWith(prefix));
     const liveBackends = document.widgets.filter((widget) => widget.backend !== "-").length;
     if (sidecars.length > liveBackends) {
-      warnings.push(`${sidecars.length - liveBackends} orphan renderer status sidecar(s) remain next to ${path}; restart weaverd to reconcile them`);
+      warnings.push(`${sidecars.length - liveBackends} orphan renderer status sidecar(s) remain next to ${path}; run "weaver down", then "weaver up", to reconcile them`);
     }
   } catch (error) {
     warnings.push(`renderer status sidecars could not be reconciled: ${errorMessage(error)}`);

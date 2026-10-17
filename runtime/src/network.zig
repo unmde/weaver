@@ -5,6 +5,32 @@ const win = if (builtin.os.tag == .windows) @cImport({
     @cInclude("windows.h");
     @cInclude("winhttp.h");
 }) else struct {};
+const lazy_dll = @import("lazy_dll.zig");
+
+/// WinHTTP's exports as `wfetch` calls them. WINHTTP.dll loads on a host's
+/// first fetch, not at process start (lazy_dll.zig): most widgets never
+/// fetch.
+const WinHttp = if (builtin.os.tag == .windows) struct {
+    WinHttpOpen: *const @TypeOf(win.WinHttpOpen),
+    WinHttpConnect: *const @TypeOf(win.WinHttpConnect),
+    WinHttpOpenRequest: *const @TypeOf(win.WinHttpOpenRequest),
+    WinHttpSetOption: *const @TypeOf(win.WinHttpSetOption),
+    WinHttpAddRequestHeaders: *const @TypeOf(win.WinHttpAddRequestHeaders),
+    WinHttpSendRequest: *const @TypeOf(win.WinHttpSendRequest),
+    WinHttpReceiveResponse: *const @TypeOf(win.WinHttpReceiveResponse),
+    WinHttpQueryHeaders: *const @TypeOf(win.WinHttpQueryHeaders),
+    WinHttpQueryDataAvailable: *const @TypeOf(win.WinHttpQueryDataAvailable),
+    WinHttpReadData: *const @TypeOf(win.WinHttpReadData),
+    WinHttpSetTimeouts: *const @TypeOf(win.WinHttpSetTimeouts),
+    WinHttpCloseHandle: *const @TypeOf(win.WinHttpCloseHandle),
+} else struct {};
+const winhttp = lazy_dll.Library(WinHttp, "WINHTTP.dll");
+
+/// Why `wfetch` cannot run on this machine (WINHTTP.dll would not load),
+/// for a request that failed with `.unavailable`.
+pub fn unavailableReason() []const u8 {
+    return winhttp.reason();
+}
 
 // Network receipt (2026-07-29): shipped widgets currently issue no fetches.
 // A modeled slow-but-good API exchange is 5 s, so 15 s leaves 3x latency
@@ -19,7 +45,7 @@ pub const request_cap_bytes: usize = 5 * 1024 * 1024;
 pub const response_cap_bytes: usize = 5 * 1024 * 1024;
 
 pub const Method = enum { get, post };
-pub const Failure = enum { none, invalid_url, request_failed, timed_out, request_too_large, response_too_large, cancelled };
+pub const Failure = enum { none, invalid_url, request_failed, timed_out, request_too_large, response_too_large, cancelled, unavailable };
 
 extern fn weaver_macos_https_perform(url: [*]const u8, url_len: usize, method: c_int, headers: [*]const u8, headers_len: usize, body: [*]const u8, body_len: usize, timeout_milliseconds: c_int, response_cap: usize, cancelled: ?*const std.atomic.Value(u8), out_status: *u16, out_body: *?[*]u8, out_body_len: *usize) c_int;
 extern fn weaver_macos_https_perform_test(url: [*]const u8, url_len: usize, method: c_int, headers: [*]const u8, headers_len: usize, body: [*]const u8, body_len: usize, timeout_milliseconds: c_int, response_cap: usize, cancelled: ?*const std.atomic.Value(u8), test_certificate_path: [*:0]const u8, out_status: *u16, out_body: *?[*]u8, out_body_len: *usize) c_int;
@@ -37,9 +63,9 @@ pub const Request = struct {
     url: []const u8 = &.{},
     headers: []const u8 = &.{},
     body: []const u8 = &.{},
-    /// Set only by the bridge slot that owns this request. macOS polls it
-    /// while NSURLSession is in flight so engine teardown can cancel before
-    /// joining the worker.
+    /// Set when the widget that made this request is gone. macOS polls it
+    /// while NSURLSession is in flight, and Windows checks it between WinHTTP
+    /// calls, so an orphaned request stops early; nobody waits for it.
     cancelled: ?*const std.atomic.Value(u8) = null,
     /// Test-only leaf certificate path. Production builds never call the
     /// alternate trust entry point; NSURLSession uses the system trust store.
@@ -114,6 +140,11 @@ pub fn perform(request: *const Request, allocator: std.mem.Allocator) Result {
     return performWithTimeout(request, allocator, timeout_ms);
 }
 
+fn isCancelled(request: *const Request) bool {
+    const flag = request.cancelled orelse return false;
+    return flag.load(.acquire) != 0;
+}
+
 fn performWithTimeout(request: *const Request, allocator: std.mem.Allocator, exchange_timeout_ms: c_int) Result {
     if (!requestWithinCap(request.url.len, request.headers.len, request.body.len)) return .{ .failure = .request_too_large };
     // The Linux null-backend lane verifies parsing, bounds, and ownership;
@@ -123,7 +154,7 @@ fn performWithTimeout(request: *const Request, allocator: std.mem.Allocator, exc
         performWindowsFallible(request, allocator, exchange_timeout_ms)
     else
         performMacFallible(request, allocator, exchange_timeout_ms);
-    return result catch |err| .{ .failure = failureFromError(err) };
+    return result catch |err| .{ .failure = if (isCancelled(request)) .cancelled else failureFromError(err) };
 }
 
 fn failureFromError(err: anyerror) Failure {
@@ -132,6 +163,7 @@ fn failureFromError(err: anyerror) Failure {
         error.ResponseTooLarge => .response_too_large,
         error.TimedOut => .timed_out,
         error.Cancelled => .cancelled,
+        error.LibraryUnavailable => .unavailable,
         else => .request_failed,
     };
 }
@@ -139,6 +171,7 @@ fn failureFromError(err: anyerror) Failure {
 fn performWindowsFallible(request: *const Request, allocator: std.mem.Allocator, exchange_timeout_ms: c_int) !Result {
     const deadline_ms = win.GetTickCount64() + @as(u64, @intCast(exchange_timeout_ms));
     const parsed = try parseHttpsUrl(request.url);
+    const http = try winhttp.load();
     const agent = std.unicode.utf8ToUtf16LeAllocZ(allocator, "weaver-widget/0.2") catch return error.OutOfMemory;
     defer allocator.free(agent);
     const host = std.unicode.utf8ToUtf16LeAllocZ(allocator, parsed.connection_host) catch return error.OutOfMemory;
@@ -155,42 +188,46 @@ fn performWindowsFallible(request: *const Request, allocator: std.mem.Allocator,
     const method = std.unicode.utf8ToUtf16LeAllocZ(allocator, if (request.method == .post) "POST" else "GET") catch return error.OutOfMemory;
     defer allocator.free(method);
 
-    const session = win.WinHttpOpen(agent.ptr, win.WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, null, null, 0) orelse return mapLastError();
-    defer _ = win.WinHttpCloseHandle(session);
-    try applyRemainingTimeout(session, deadline_ms);
-    const connection = win.WinHttpConnect(session, host.ptr, parsed.port, 0) orelse return mapLastError();
-    defer _ = win.WinHttpCloseHandle(connection);
-    const handle = win.WinHttpOpenRequest(connection, method.ptr, path.ptr, null, null, null, win.WINHTTP_FLAG_SECURE) orelse return mapLastError();
-    defer _ = win.WinHttpCloseHandle(handle);
+    const session = http.WinHttpOpen(agent.ptr, win.WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, null, null, 0) orelse return mapLastError();
+    defer _ = http.WinHttpCloseHandle(session);
+    try applyRemainingTimeout(http, session, deadline_ms);
+    const connection = http.WinHttpConnect(session, host.ptr, parsed.port, 0) orelse return mapLastError();
+    defer _ = http.WinHttpCloseHandle(connection);
+    const handle = http.WinHttpOpenRequest(connection, method.ptr, path.ptr, null, null, null, win.WINHTTP_FLAG_SECURE) orelse return mapLastError();
+    defer _ = http.WinHttpCloseHandle(handle);
+    if (isCancelled(request)) return error.Cancelled;
     var disabled: win.DWORD = win.WINHTTP_DISABLE_REDIRECTS;
-    if (win.WinHttpSetOption(handle, win.WINHTTP_OPTION_DISABLE_FEATURE, &disabled, @sizeOf(win.DWORD)) == 0) return mapLastError();
+    if (http.WinHttpSetOption(handle, win.WINHTTP_OPTION_DISABLE_FEATURE, &disabled, @sizeOf(win.DWORD)) == 0) return mapLastError();
     if (request.headers.len > 0) {
         const headers = std.unicode.utf8ToUtf16LeAllocZ(allocator, request.headers) catch return error.OutOfMemory;
         defer allocator.free(headers);
         const header_flags: win.DWORD = 0x20000000 | 0x80000000; // ADD | REPLACE; translate-c types the high-bit macro as signed.
-        if (win.WinHttpAddRequestHeaders(handle, headers.ptr, @intCast(headers.len), header_flags) == 0) return mapLastError();
+        if (http.WinHttpAddRequestHeaders(handle, headers.ptr, @intCast(headers.len), header_flags) == 0) return mapLastError();
     }
     const payload = request.body;
     const payload_pointer: win.LPVOID = if (payload.len == 0) win.WINHTTP_NO_REQUEST_DATA else @ptrCast(@constCast(payload.ptr));
-    try applyRemainingTimeout(handle, deadline_ms);
-    if (win.WinHttpSendRequest(handle, null, 0, payload_pointer, @intCast(payload.len), @intCast(payload.len), 0) == 0) return mapLastError();
-    try applyRemainingTimeout(handle, deadline_ms);
-    if (win.WinHttpReceiveResponse(handle, null) == 0) return mapLastError();
+    try applyRemainingTimeout(http, handle, deadline_ms);
+    if (isCancelled(request)) return error.Cancelled;
+    if (http.WinHttpSendRequest(handle, null, 0, payload_pointer, @intCast(payload.len), @intCast(payload.len), 0) == 0) return mapLastError();
+    try applyRemainingTimeout(http, handle, deadline_ms);
+    if (isCancelled(request)) return error.Cancelled;
+    if (http.WinHttpReceiveResponse(handle, null) == 0) return mapLastError();
     var status: win.DWORD = 0;
     var status_size: win.DWORD = @sizeOf(win.DWORD);
-    if (win.WinHttpQueryHeaders(handle, win.WINHTTP_QUERY_STATUS_CODE | win.WINHTTP_QUERY_FLAG_NUMBER, null, &status, &status_size, null) == 0) return mapLastError();
+    if (http.WinHttpQueryHeaders(handle, win.WINHTTP_QUERY_STATUS_CODE | win.WINHTTP_QUERY_FLAG_NUMBER, null, &status, &status_size, null) == 0) return mapLastError();
     var body: std.ArrayList(u8) = .empty;
     errdefer body.deinit(allocator);
     while (true) {
-        try applyRemainingTimeout(handle, deadline_ms);
+        try applyRemainingTimeout(http, handle, deadline_ms);
+        if (isCancelled(request)) return error.Cancelled;
         var available: win.DWORD = 0;
-        if (win.WinHttpQueryDataAvailable(handle, &available) == 0) return mapLastError();
+        if (http.WinHttpQueryDataAvailable(handle, &available) == 0) return mapLastError();
         if (available == 0) break;
         if (body.items.len + available > response_cap_bytes) return error.ResponseTooLarge;
         const start = body.items.len;
         try body.resize(allocator, start + available);
         var read: win.DWORD = 0;
-        if (win.WinHttpReadData(handle, body.items[start..].ptr, available, &read) == 0) return mapLastError();
+        if (http.WinHttpReadData(handle, body.items[start..].ptr, available, &read) == 0) return mapLastError();
         body.shrinkRetainingCapacity(start + read);
     }
     return .{ .status = @intCast(status), .body = try body.toOwnedSlice(allocator) };
@@ -249,11 +286,11 @@ fn performMacFallible(request: *const Request, allocator: std.mem.Allocator, exc
     };
 }
 
-fn applyRemainingTimeout(handle: win.HINTERNET, deadline_ms: u64) !void {
+fn applyRemainingTimeout(http: *const WinHttp, handle: win.HINTERNET, deadline_ms: u64) !void {
     const now = win.GetTickCount64();
     if (now >= deadline_ms) return error.TimedOut;
     const remaining: c_int = @intCast(@min(deadline_ms - now, @as(u64, @intCast(std.math.maxInt(c_int)))));
-    if (win.WinHttpSetTimeouts(handle, remaining, remaining, remaining, remaining) == 0) return mapLastError();
+    if (http.WinHttpSetTimeouts(handle, remaining, remaining, remaining, remaining) == 0) return mapLastError();
 }
 
 fn mapLastError() error{ TimedOut, RequestFailed } {

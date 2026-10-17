@@ -4,6 +4,8 @@ const win = @cImport({
     @cInclude("windows.h");
 });
 const protocol = @import("provider_protocol.zig");
+const provider_service = @import("provider_service.zig");
+const media_commands = @import("host_providers").media_commands;
 
 // Reader-stack receipt (2026-07-29): Framer is 25,016 bytes and the read chunk
 // is 4,096, so the worker's dominant live locals total 29,112 bytes. 256 KiB
@@ -27,6 +29,10 @@ const SpinMutex = struct {
 /// The pipe reader owns no QuickJS state. It only copies complete JSON lines
 /// into the provider/ack queues; the Native timer drain remains the sole place
 /// where callbacks enter JavaScript on the app loop thread.
+///
+/// In the anchored host there is no pipe: `initLocal` subscribes the widget
+/// to the host's own providers, which fill the same queues from their
+/// threads (provider_service.zig).
 pub const Client = struct {
     io: std.Io = undefined,
     handle: win.HANDLE = win.INVALID_HANDLE_VALUE,
@@ -43,6 +49,48 @@ pub const Client = struct {
     test_before_read: win.HANDLE = null,
     test_resume_read: win.HANDLE = null,
     capture_fixture: ?*protocol.CaptureCommandFixture = null,
+    /// The host's providers this widget subscribes to, in an anchored host.
+    local: ?*provider_service.Service = null,
+    subscriber: provider_service.Subscriber = undefined,
+
+    /// Subscribe to the host's own providers for what `wants` names: the
+    /// widget in host slot `slot`, as the daemon knows it.
+    pub fn initLocal(self: *Client, io: std.Io, service: *provider_service.Service, wants: provider_service.Wants, slot: u16) !void {
+        self.io = io;
+        self.subscriber = .{
+            .wants = wants,
+            .owner = .{ .hosted = slot },
+            .queues = &self.queues,
+            .context = self,
+            .store_ack = storeLocalAck,
+            .notify = notifyLocal,
+        };
+        self.connected.store(1, .release);
+        self.disconnected.store(0, .release);
+        errdefer self.connected.store(0, .release);
+        try service.subscribe(&self.subscriber);
+        self.local = service;
+    }
+
+    fn storeLocalAck(context: *anyopaque, id: u64, ok: bool) provider_service.AckStore {
+        const self: *Client = @ptrCast(@alignCast(context));
+        return provider_service.storeQueuedAck(&self.queues, id, ok);
+    }
+
+    /// As from a pipe: frames wait for the widget's provider timer, and an
+    /// acknowledgement or a failed channel wakes it.
+    fn notifyLocal(context: *anyopaque, delivery: provider_service.Delivery) void {
+        const self: *Client = @ptrCast(@alignCast(context));
+        switch (delivery) {
+            .frame => return,
+            .ack => {},
+            .failed => {
+                self.connected.store(0, .release);
+                self.disconnected.store(1, .release);
+            },
+        }
+        if (self.wake) |wake| wake();
+    }
 
     pub fn init(self: *Client, io: std.Io, pipe_name: ?[]const u8) !void {
         self.io = io;
@@ -92,6 +140,8 @@ pub const Client = struct {
     }
 
     pub fn deinit(self: *Client) void {
+        if (self.local) |service| service.unsubscribe(&self.subscriber);
+        self.local = null;
         self.stopping.store(1, .release);
         if (self.shutdown_event) |event| _ = win.SetEvent(event);
         if (self.handle != win.INVALID_HANDLE_VALUE) {
@@ -160,6 +210,12 @@ pub const Client = struct {
         if (self.capture_fixture) |fixture| {
             try fixture.send(&self.queues, line);
             if (self.wake) |wake| wake();
+            return;
+        }
+        if (self.local) |service| {
+            if (!self.isAvailable()) return error.ProviderChannelFailed;
+            const command = media_commands.parse(line) catch return error.InvalidCommandFrame;
+            service.submit(&self.subscriber, command);
             return;
         }
         if (!self.isAvailable() or self.handle == win.INVALID_HANDLE_VALUE) return error.HostPipeUnavailable;
@@ -272,6 +328,29 @@ pub const Client = struct {
         }
     }
 };
+
+test "a widget in the host is woken by acknowledgements and a failed channel, never by frames" {
+    const Wakes = struct {
+        var count: std.atomic.Value(u32) = .init(0);
+        fn wake() void {
+            _ = count.fetchAdd(1, .acq_rel);
+        }
+    };
+    var client: Client = .{};
+    client.setWake(Wakes.wake);
+    client.connected.store(1, .release);
+    Client.notifyLocal(&client, .frame);
+    try std.testing.expectEqual(@as(u32, 0), Wakes.count.load(.acquire));
+    Client.notifyLocal(&client, .ack);
+    try std.testing.expectEqual(@as(u32, 1), Wakes.count.load(.acquire));
+    try std.testing.expect(client.isAvailable());
+    Client.notifyLocal(&client, .failed);
+    try std.testing.expectEqual(@as(u32, 2), Wakes.count.load(.acquire));
+    // The bridge settles its pending commands as disconnected and refuses
+    // new ones.
+    try std.testing.expect(!client.isAvailable());
+    try std.testing.expect(client.isDisconnected());
+}
 
 test "Windows runtime reader closes the cancel-before-read shutdown race" {
     var client: Client = .{};
