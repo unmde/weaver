@@ -1,0 +1,31 @@
+# weaver-widget.exe sha256 CCBA514A6A633BACDE41299F28710475F93F7B0BA158DF48CE140793A50C57AA, built from e583ec8 + runtime.patch, Native 464ff65f + native-sdk.patch, ReleaseFast
+
+    kib function
+    --- --------
+3149.40 handleBridgeMessage
+1089.80 refreshCanvasWidgetDisplayList
+1071.00 rebuild
+1024.30 dispatchClipboardBridgeCommand
+ 665.60 runWithOptions
+ 512.20 dirRenameWindowsInner
+ 464.30 dirSymLinkWindows
+ 384.40 netConnectUnixWindows
+ 384.20 netListenUnixWindows
+ 267.30 initInPlace
+ 256.40 dirCreateDirWindows
+ 256.40 dirCreateFileWindows
+ 256.30 dirCreateDirPathOpenWindows
+ 256.30 dirCreateFileAtomic
+ 256.20 dirAccessWindows
+ 256.20 dirDeleteWindows
+ 256.20 dirRealPathFileWindows
+ 256.10 dirOpenDirPosix
+ 256.10 dirOpenFileWindows
+ 194.10 netLookup
+ 192.40 dirReadLink
+ 192.10 wToPrefixedFileW
+ 176.40 applyCanvasWidgetTextEdit
+ 162.60 loadDebugInfo
+ 142.20 dispatchPlatformEvent
+
+

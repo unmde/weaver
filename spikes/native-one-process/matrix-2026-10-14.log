@@ -1,0 +1,313 @@
+matrix 2026-10-14T17:42:37.2712121-04:00
+##### round 1 lazy=0 topology=processes
+=== processes, 10 widgets, layer normal, trial 1
+
+name              pid cpu_pct priv_ws_mb priv_mb threads
+----              --- ------- ---------- ------- -------
+weaver-renderer 41088   15.42      16.56   66.14      71
+weaver-widget   22104    1.25      11.23   50.41       6
+weaver-widget   31424    1.98      12.46   51.71       6
+weaver-widget    8696    3.33      11.25   50.47       6
+weaver-widget   26000    2.81      11.22   50.46       6
+weaver-widget   25644    3.85      12.41   51.64       6
+weaver-widget   19208    3.12      12.43   51.60       6
+weaver-widget   45524    9.17      11.23   50.41       6
+weaver-widget   30400    3.75      12.41   51.58       6
+weaver-widget   41080    2.08      11.23   50.40       6
+weaver-widget   20696    3.23      11.23   50.41       6
+
+
+TOTAL cpu=49.99% priv_ws=133.66MiB priv=575.23MiB threads=131
+=== processes, 10 widgets, layer normal, trial 2
+
+name              pid cpu_pct priv_ws_mb priv_mb threads
+----              --- ------- ---------- ------- -------
+weaver-renderer 41088   18.85      16.51   66.06      69
+weaver-widget   22104    3.23      11.21   50.37       5
+weaver-widget   31424    2.92      12.44   51.67       5
+weaver-widget    8696    3.12      11.23   50.43       5
+weaver-widget   26000    2.40      11.20   50.42       5
+weaver-widget   25644    2.81      12.39   51.60       5
+weaver-widget   19208    2.81      12.41   51.56       5
+weaver-widget   45524    6.04      11.21   50.38       5
+weaver-widget   30400    3.23      12.39   51.54       5
+weaver-widget   41080    2.29      11.21   50.36       5
+weaver-widget   20696    2.40      11.21   50.37       5
+
+
+TOTAL cpu=50.1% priv_ws=133.41MiB priv=574.76MiB threads=119
+Synth 0: 60.0 fps
+Synth 1: 60.0 fps
+Synth 2: 60.0 fps
+Synth 3: 60.0 fps
+Synth 4: 60.0 fps
+Synth 5: 60.0 fps
+Synth 6: 317.3 fps
+Synth 7: 60.0 fps
+Synth 8: 60.0 fps
+Synth 9: 60.0 fps
+
+##### round 1 lazy=0 topology=one
+=== one, 10 widgets, layer normal, trial 1
+
+name              pid cpu_pct priv_ws_mb priv_mb threads
+----              --- ------- ---------- ------- -------
+weaver-renderer  4196   16.15      16.83   66.51      71
+weaver-widget   17860   26.46     104.55  488.68      16
+
+
+TOTAL cpu=42.61% priv_ws=121.38MiB priv=555.19MiB threads=87
+=== one, 10 widgets, layer normal, trial 2
+
+name              pid cpu_pct priv_ws_mb priv_mb threads
+----              --- ------- ---------- ------- -------
+weaver-renderer  4196   17.60      16.84   66.54      72
+weaver-widget   17860   25.63     104.55  488.68      16
+
+
+TOTAL cpu=43.23% priv_ws=121.39MiB priv=555.22MiB threads=88
+Synth 0: 60.0 fps
+Synth 1: 60.0 fps
+Synth 2: 60.0 fps
+Synth 3: 60.0 fps
+Synth 4: 60.0 fps
+Synth 5: 60.0 fps
+Synth 6: 115.0 fps
+Synth 7: 60.0 fps
+Synth 8: 60.0 fps
+Synth 9: 60.0 fps
+
+##### round 1 lazy=1 topology=processes
+=== processes, 10 widgets, layer normal, trial 1
+
+name              pid cpu_pct priv_ws_mb priv_mb threads
+----              --- ------- ---------- ------- -------
+weaver-renderer 29048   17.29      16.62   66.96      71
+weaver-widget   29292    2.81       8.37   51.73       6
+weaver-widget   43968    3.02       8.29   51.63       6
+weaver-widget   41512    1.88       7.10   50.43       6
+weaver-widget   35948    2.29       8.33   51.61       6
+weaver-widget   45640    3.54       8.35   51.67       6
+weaver-widget    3424    2.71       7.12   50.43       6
+weaver-widget   20508    9.17       7.13   50.49       6
+weaver-widget   36980    1.98       7.11   50.42       6
+weaver-widget   42056    3.13       8.34   51.71       6
+weaver-widget   45860    3.54       8.39   51.77       6
+
+
+TOTAL cpu=51.36% priv_ws=95.15MiB priv=578.85MiB threads=131
+=== processes, 10 widgets, layer normal, trial 2
+
+name              pid cpu_pct priv_ws_mb priv_mb threads
+----              --- ------- ---------- ------- -------
+weaver-renderer 29048   16.15      16.56   66.84      68
+weaver-widget   29292    2.40       8.35   51.70       5
+weaver-widget   43968    2.50       8.27   51.59       5
+weaver-widget   41512    1.46       7.08   50.40       5
+weaver-widget   35948    3.65       8.31   51.57       5
+weaver-widget   45640    1.88       8.33   51.63       5
+weaver-widget    3424    2.08       7.10   50.39       5
+weaver-widget   20508    9.38       7.11   50.46       5
+weaver-widget   36980    2.71       7.09   50.39       5
+weaver-widget   42056    3.33       8.32   51.67       5
+weaver-widget   45860    3.13       8.37   51.73       5
+
+
+TOTAL cpu=48.67% priv_ws=94.89MiB priv=578.37MiB threads=118
+Synth 0: 60.0 fps
+Synth 1: 60.0 fps
+Synth 2: 60.0 fps
+Synth 3: 60.0 fps
+Synth 4: 60.0 fps
+Synth 5: 60.0 fps
+Synth 6: 401.6 fps
+Synth 7: 60.0 fps
+Synth 8: 60.0 fps
+Synth 9: 60.0 fps
+
+##### round 1 lazy=1 topology=one
+=== one, 10 widgets, layer normal, trial 1
+
+name              pid cpu_pct priv_ws_mb priv_mb threads
+----              --- ------- ---------- ------- -------
+weaver-renderer  6496   20.21      16.32   66.09      71
+weaver-widget   42884   36.04      66.93  492.36      16
+
+
+TOTAL cpu=56.25% priv_ws=83.25MiB priv=558.45MiB threads=87
+=== one, 10 widgets, layer normal, trial 2
+
+name              pid cpu_pct priv_ws_mb priv_mb threads
+----              --- ------- ---------- ------- -------
+weaver-renderer  6496   19.48      16.32   66.09      71
+weaver-widget   42884   35.73      66.93  492.36      16
+
+
+TOTAL cpu=55.21% priv_ws=83.25MiB priv=558.45MiB threads=87
+Synth 0: 59.1 fps
+Synth 1: 59.0 fps
+Synth 2: 59.1 fps
+Synth 3: 59.2 fps
+Synth 4: 59.1 fps
+Synth 5: 59.1 fps
+Synth 6: 316.5 fps
+Synth 7: 59.0 fps
+Synth 8: 59.1 fps
+Synth 9: 59.1 fps
+
+##### round 2 lazy=0 topology=processes
+=== processes, 10 widgets, layer normal, trial 1
+
+name              pid cpu_pct priv_ws_mb priv_mb threads
+----              --- ------- ---------- ------- -------
+weaver-renderer 41364   19.06      16.71   66.08      71
+weaver-widget   42360    4.27      12.45   51.70       6
+weaver-widget   43080    3.65      11.25   50.43       6
+weaver-widget   31700    3.85      12.45   51.67       6
+weaver-widget   41648    3.44      12.41   51.57       6
+weaver-widget   44992    3.23      12.41   51.60       6
+weaver-widget   41060    3.02      12.49   51.62       6
+weaver-widget   32480    4.48      12.52   51.77       6
+weaver-widget   42016    2.29      11.23   50.46       6
+weaver-widget   16248    2.40      11.29   50.50       6
+weaver-widget   39344    3.44      12.49   51.72       6
+
+
+TOTAL cpu=53.13% priv_ws=137.7MiB priv=579.12MiB threads=131
+=== processes, 10 widgets, layer normal, trial 2
+
+name              pid cpu_pct priv_ws_mb priv_mb threads
+----              --- ------- ---------- ------- -------
+weaver-renderer 41364   16.88      16.64   65.96      68
+weaver-widget   42360    2.81      12.43   51.67       5
+weaver-widget   43080    1.67      11.23   50.39       5
+weaver-widget   31700    2.92      12.43   51.64       5
+weaver-widget   41648    3.02      12.39   51.54       5
+weaver-widget   44992    3.54      12.39   51.57       5
+weaver-widget   41060    3.54      12.47   51.58       5
+weaver-widget   32480    3.96      12.50   51.73       5
+weaver-widget   42016    2.71      11.21   50.42       5
+weaver-widget   16248    1.88      11.27   50.47       5
+weaver-widget   39344    3.02      12.47   51.69       5
+
+
+TOTAL cpu=45.95% priv_ws=137.43MiB priv=578.66MiB threads=118
+Synth 0: 60.0 fps
+Synth 1: 60.0 fps
+Synth 2: 60.0 fps
+Synth 3: 60.0 fps
+Synth 4: 60.0 fps
+Synth 5: 60.0 fps
+Synth 6: 114.4 fps
+Synth 7: 60.0 fps
+Synth 8: 60.0 fps
+Synth 9: 60.0 fps
+
+##### round 2 lazy=0 topology=one
+=== one, 10 widgets, layer normal, trial 1
+
+name              pid cpu_pct priv_ws_mb priv_mb threads
+----              --- ------- ---------- ------- -------
+weaver-renderer 12140   20.31      16.52   66.89      71
+weaver-widget   25448   32.39     107.79  492.20      16
+
+
+TOTAL cpu=52.7% priv_ws=124.31MiB priv=559.09MiB threads=87
+=== one, 10 widgets, layer normal, trial 2
+
+name              pid cpu_pct priv_ws_mb priv_mb threads
+----              --- ------- ---------- ------- -------
+weaver-renderer 12140   19.27      16.52   66.89      71
+weaver-widget   25448   30.94     107.79  492.20      16
+
+
+TOTAL cpu=50.21% priv_ws=124.31MiB priv=559.09MiB threads=87
+Synth 0: 60.0 fps
+Synth 1: 60.0 fps
+Synth 2: 60.0 fps
+Synth 3: 60.0 fps
+Synth 4: 60.0 fps
+Synth 5: 60.0 fps
+Synth 6: 171.5 fps
+Synth 7: 60.0 fps
+Synth 8: 60.0 fps
+Synth 9: 60.0 fps
+
+##### round 2 lazy=1 topology=processes
+=== processes, 10 widgets, layer normal, trial 1
+
+name              pid cpu_pct priv_ws_mb priv_mb threads
+----              --- ------- ---------- ------- -------
+weaver-renderer 29612   18.13      16.41   65.62      72
+weaver-widget   44172    2.60       7.11   50.38       6
+weaver-widget   45988    2.60       7.17   50.43       6
+weaver-widget   29180    1.46       7.12   50.41       6
+weaver-widget   31268    2.92       8.29   51.58       6
+weaver-widget   30412    2.40       8.31   51.66       6
+weaver-widget    8016    3.65       8.30   51.67       6
+weaver-widget    4556    5.63       7.16   50.51       6
+weaver-widget   44940    3.65       8.31   51.64       6
+weaver-widget   18992    2.81       8.38   51.75       6
+weaver-widget   30288    2.19       7.11   50.41       6
+
+
+TOTAL cpu=48.04% priv_ws=93.67MiB priv=576.06MiB threads=132
+=== processes, 10 widgets, layer normal, trial 2
+
+name              pid cpu_pct priv_ws_mb priv_mb threads
+----              --- ------- ---------- ------- -------
+weaver-renderer 29612   16.87      16.35   65.51      69
+weaver-widget   44172    2.40       7.09   50.34       5
+weaver-widget   45988    2.81       7.16   50.39       5
+weaver-widget   29180    1.77       7.10   50.38       5
+weaver-widget   31268    3.54       8.27   51.55       5
+weaver-widget   30412    3.44       8.29   51.62       5
+weaver-widget    8016    3.96       8.29   51.64       5
+weaver-widget    4556    7.81       7.15   50.48       5
+weaver-widget   44940    3.54       8.29   51.61       5
+weaver-widget   18992    3.33       8.36   51.71       5
+weaver-widget   30288    2.92       7.09   50.38       5
+
+
+TOTAL cpu=52.39% priv_ws=93.44MiB priv=575.61MiB threads=119
+Synth 0: 60.0 fps
+Synth 1: 60.0 fps
+Synth 2: 60.0 fps
+Synth 3: 60.0 fps
+Synth 4: 60.0 fps
+Synth 5: 60.0 fps
+Synth 6: 230.6 fps
+Synth 7: 60.0 fps
+Synth 8: 60.0 fps
+Synth 9: 60.0 fps
+
+##### round 2 lazy=1 topology=one
+=== one, 10 widgets, layer normal, trial 1
+
+name              pid cpu_pct priv_ws_mb priv_mb threads
+----              --- ------- ---------- ------- -------
+weaver-renderer 41344   18.96      16.42   66.96      72
+weaver-widget    2124   29.37      60.88  487.15      16
+
+
+TOTAL cpu=48.33% priv_ws=77.3MiB priv=554.11MiB threads=88
+=== one, 10 widgets, layer normal, trial 2
+
+name              pid cpu_pct priv_ws_mb priv_mb threads
+----              --- ------- ---------- ------- -------
+weaver-renderer 41344   19.58      16.42   66.96      72
+weaver-widget    2124   26.77      60.88  487.15      16
+
+
+TOTAL cpu=46.35% priv_ws=77.3MiB priv=554.11MiB threads=88
+Synth 0: 60.0 fps
+Synth 1: 60.0 fps
+Synth 2: 60.0 fps
+Synth 3: 60.0 fps
+Synth 4: 60.0 fps
+Synth 5: 60.0 fps
+Synth 6: 210.1 fps
+Synth 7: 60.0 fps
+Synth 8: 60.0 fps
+Synth 9: 60.0 fps
+

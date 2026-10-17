@@ -1,0 +1,114 @@
+# weaver-widget.exe sha256 CCBA514A6A633BACDE41299F28710475F93F7B0BA158DF48CE140793A50C57AA, built from e583ec8 + runtime.patch, Native 464ff65f + native-sdk.patch, ReleaseFast
+# WEAVER_SPIKE_LAZY_MODEL=1, one Widget, 2026-10-14T18:31:40.3089463-04:00
+=== processes, 1 widgets, layer normal, trial 1
+
+name              pid cpu_pct priv_ws_mb priv_mb threads
+----              --- ------- ---------- ------- -------
+weaver-renderer 10284    1.56      13.92   58.92      62
+weaver-widget   43500    2.19       7.15   50.51       6
+
+
+TOTAL cpu=3.75% priv_ws=21.07MiB priv=109.43MiB threads=68
+--- regions weaver-renderer 10284
+private allocations: 87 committed 25.59 MiB, resident 11.27 MiB; image private-resident 2.88 MiB
+
+base          committed_kib resident_kib
+----          ------------- ------------
+0x1ebd09e0000       3752.00      3392.00
+0x1ebcc9e0000      13976.00      1896.00
+0x1ebcc5a0000       2044.00      1616.00
+0x1ebcc2b0000       1020.00      1016.00
+0x1ebca4a0000       1020.00      1000.00
+0x1eb80000000        704.00       704.00
+0xd37b000000         500.00       500.00
+0x1ebcc550000        272.00       272.00
+0xd37b200000         112.00       100.00
+0x1ebce9e0000        332.00        76.00
+0xd305230000          80.00        68.00
+0xd304100000          72.00        60.00
+
+
+private allocations by committed size:
+
+base          committed_kib resident_kib
+----          ------------- ------------
+0x1ebcc9e0000      13976.00      1896.00
+0x1ebd09e0000       3752.00      3392.00
+0x1ebcc5a0000       2044.00      1616.00
+0x1ebcc2b0000       1020.00      1016.00
+0x1ebca4a0000       1020.00      1000.00
+0x1eb80000000        704.00       704.00
+0x1ebd0f90000        640.00         0.00
+0xd37b000000         500.00       500.00
+0x1ebce9e0000        332.00        76.00
+0x1ebcc550000        272.00       272.00
+0xd37b200000         112.00       100.00
+0x1ebcc7a0000         96.00         4.00
+
+
+resident runs in 0x1ebd09e0000 (offsets in KiB, gaps under 16 KiB merged): 0-3036, 3068-3084, 3116-3164, 3196-3228, 3292-3324, 3388-3484, 3548-3728, 3752-3760
+resident runs in 0x1ebcc9e0000 (offsets in KiB, gaps under 16 KiB merged): 0-172, 208-428, 4416-4416, 7020-7288, 8256-8444, 9232-9680, 9720-9724, 10244-10832
+resident runs in 0x1ebcc5a0000 (offsets in KiB, gaps under 16 KiB merged): 0-340, 596-1620, 1640-1704, 1848-2040
+resident runs in 0x1ebcc2b0000 (offsets in KiB, gaps under 16 KiB merged): 0-1016
+resident runs in 0x1ebca4a0000 (offsets in KiB, gaps under 16 KiB merged): 0-1016
+resident runs in 0x1eb80000000 (offsets in KiB, gaps under 16 KiB merged): 0-700
+resident runs in 0xd37b000000 (offsets in KiB, gaps under 16 KiB merged): 156-196, 384-836
+resident runs in 0x1ebcc550000 (offsets in KiB, gaps under 16 KiB merged): 0-268
+--- regions weaver-widget 43500
+private allocations: 43 committed 48.60 MiB, resident 6.07 MiB; image private-resident 1.05 MiB
+
+base          committed_kib resident_kib
+----          ------------- ------------
+0xb419400000        2448.00      2436.00
+0x2ae3a640000       7508.00      1028.00
+0x2ae38b20000        956.00       956.00
+0x2ae3d4c0000        600.00       600.00
+0x2ae3b310000      29480.00       400.00
+0x2ae3b1d0000        400.00       288.00
+0x2ae39020000        108.00        72.00
+0x2ae39000000         64.00        64.00
+0x2ae38f60000         64.00        64.00
+0xb419200000          52.00        52.00
+0x2ae3d4a0000         36.00        36.00
+0x2ae38f70000         32.00        32.00
+
+
+private allocations by committed size:
+
+base          committed_kib resident_kib
+----          ------------- ------------
+0x2ae3b310000      29480.00       400.00
+0x2ae3a640000       7508.00      1028.00
+0x2ae3ada0000       4252.00         8.00
+0x2ae3d600000       2664.00        20.00
+0xb419400000        2448.00      2436.00
+0x2ae38b20000        956.00       956.00
+0x2ae3d4c0000        600.00       600.00
+0x2ae3d560000        600.00         0.00
+0x2ae3b1d0000        400.00       288.00
+0x2ae3b2d0000        256.00         4.00
+0x2ae39020000        108.00        72.00
+0x2ae39000000         64.00        64.00
+
+
+resident runs in 0xb419400000 (offsets in KiB, gaps under 16 KiB merged): 13948-16380
+resident runs in 0x2ae3a640000 (offsets in KiB, gaps under 16 KiB merged): 0-12, 1944-1948, 2168-2168, 4252-5192, 5940-5964, 6976-6996, 7504-7504
+resident runs in 0x2ae38b20000 (offsets in KiB, gaps under 16 KiB merged): 0-952
+resident runs in 0x2ae3d4c0000 (offsets in KiB, gaps under 16 KiB merged): 0-596
+resident runs in 0x2ae3b310000 (offsets in KiB, gaps under 16 KiB merged): 0-0, 240-244, 992-1016, 1064-1104, 1136-1152, 1464-1472, 1788-1788, 2052-2052, 2372-2372, 2452-2452, 2724-2732, 2828-2828, 2924-2924, 2972-2972, 3052-3052, 3180-3180, 3276-3276, 3532-3532, 3756-3756, 3820-3820, 3880-3880, 3912-3928, 3960-3960, 4024-4048, 4072-4088, 4184-4264, 4360-4360, 4648-4648, 5672-5672, 5928-5928, 6248-6256, 6652-6656, 7404-7408, 8124-8124, 8252-8256, 8996-9004, 9556-9556, 9716-9716, 10836-10840, 11220-11220, 11300-11300, 11588-11592, 11796-11800, 11924-11928, 11992-11992, 12068-12068, 28452-28452, 29476-29476
+resident runs in 0x2ae3b1d0000 (offsets in KiB, gaps under 16 KiB merged): 0-264, 324-328, 388-396
+Synth 0: 60.0 fps over sampling, 59.7 fps since first frame
+[2026-10-14T22:31:42.525Z] info: spike layout app_state=0x2ae3a640000 model_offset=0 tree_offset_in_model=3856
+[2026-10-14T22:31:42.525Z] info: spike layout runtime.ui_app.UiAppWithFeatures(main.Model,main.Msg,.{ .runtime_markup = false }).model offset=0 size=4409312
+[2026-10-14T22:31:42.526Z] info: spike layout runtime.ui_app.UiAppWithFeatures(main.Model,main.Msg,.{ .runtime_markup = false }).layout_nodes offset=5315992 size=770048
+[2026-10-14T22:31:42.526Z] info: spike layout runtime.ui_app.UiAppWithFeatures(main.Model,main.Msg,.{ .runtime_markup = false }).gpu_commands offset=6096448 size=1048576
+[2026-10-14T22:31:42.526Z] info: spike layout runtime.ui_app.UiAppWithFeatures(main.Model,main.Msg,.{ .runtime_markup = false }).packet_bytes offset=7162661 size=524288
+[2026-10-14T22:31:42.526Z] info: spike layout runtime.ui_app.UiAppWithFeatures(main.Model,main.Msg,.{ .runtime_markup = false }).effects offset=4810544 size=505032
+[2026-10-14T22:31:42.526Z] info: spike layout runtime.ui_app.UiAppWithFeatures(main.Model,main.Msg,.{ .runtime_markup = false }).web_pane_states offset=7145024 size=16736
+[2026-10-14T22:31:42.526Z] info: spike layout runtime.ui_app.UiAppWithFeatures(main.Model,main.Msg,.{ .runtime_markup = false }).virtual_extent_tables offset=4416280 size=394112
+[2026-10-14T22:31:42.527Z] info: spike layout main.Model.tree offset=3856 size=4350536
+[2026-10-14T22:31:42.527Z] info: spike layout main.Model.provider offset=4354392 size=50352
+[2026-10-14T22:31:42.527Z] info: spike layout tree.Tree.nodes offset=144 size=1990656
+[2026-10-14T22:31:42.527Z] info: spike layout tree.Tree.canvases offset=1990800 size=2359680
+[2026-10-14T22:31:42.527Z] info: widget memory receipt model_bytes=4409312 widget_app_bytes=7687088 tree_bytes=4350536 node_bytes=1944 canvas_state_bytes=294960 engine_bytes=2016 quickjs_malloc_bytes=602118 quickjs_memory_used_bytes=561665 quickjs_atoms_bytes=88786 quickjs_strings_bytes=14987 quickjs_objects_bytes=31040 quickjs_properties_bytes=33920 quickjs_shapes_bytes=30520 quickjs_functions_bytes=68687 quickjs_function_code_bytes=20822
+

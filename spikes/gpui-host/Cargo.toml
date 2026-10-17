@@ -1,0 +1,17 @@
+[package]
+name = "gpui-spike"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+gpui = { git = "https://github.com/zed-industries/zed", rev = "2dcc4cc04d742aa7f78b39d414fcc511cd5474b7" }
+gpui_platform = { git = "https://github.com/zed-industries/zed", rev = "2dcc4cc04d742aa7f78b39d414fcc511cd5474b7" }
+
+[target.'cfg(windows)'.dependencies]
+raw-window-handle = "0.6"
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_Graphics_Gdi"] }
+
+[profile.release]
+opt-level = 3
+debug = false
+strip = true

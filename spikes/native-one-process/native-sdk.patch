@@ -1,0 +1,15 @@
+diff --git a/src/platform/windows/shared_renderer_client.cpp b/src/platform/windows/shared_renderer_client.cpp
+index d322301b..58af1ceb 100644
+--- a/src/platform/windows/shared_renderer_client.cpp
++++ b/src/platform/windows/shared_renderer_client.cpp
+@@ -248,8 +248,8 @@ static bool ensureRetainedMapping(NativeSdkSharedRendererClient *client, size_t
+     client->retained_mapping = nullptr;
+     client->retained_capacity = 0;
+     wchar_t name[kWeaverRendererSectionNameChars] = {};
+-    swprintf_s(name, L"Local\\WeaverRetained-%lu-%llu", (unsigned long)GetCurrentProcessId(),
+-        (unsigned long long)GetTickCount64());
++    swprintf_s(name, L"Local\\WeaverRetained-%lu-%lu-%llu", (unsigned long)GetCurrentProcessId(),
++        (unsigned long)GetCurrentThreadId(), (unsigned long long)GetTickCount64());
+     HANDLE mapping = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE,
+         (DWORD)(bytes >> 32), (DWORD)bytes, name);
+     if (!mapping) return false;

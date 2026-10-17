@@ -1,0 +1,209 @@
+diff --git a/runtime/src/bridge.zig b/runtime/src/bridge.zig
+index 3386727..0bc870a 100644
+--- a/runtime/src/bridge.zig
++++ b/runtime/src/bridge.zig
+@@ -684,7 +684,16 @@ fn onTimer(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [*c]c.JSVal
+ /// local because the wire budget (32768 f64s = 256 KiB) is too large for a
+ /// QuickJS callback frame; the engine runs single-threaded per widget
+ /// process, so one buffer serves every call.
+-var canvas_wire_scratch: [tree_mod.max_canvas_wire_values]f64 = undefined;
++/// Spike: one buffer per Widget thread, allocated on first use (a
++/// threadlocal array would copy 256 KiB into every thread in the process).
++threadlocal var canvas_wire_scratch_buffer: ?*[tree_mod.max_canvas_wire_values]f64 = null;
++
++fn canvasWireScratch() ?*[tree_mod.max_canvas_wire_values]f64 {
++    if (canvas_wire_scratch_buffer == null) {
++        canvas_wire_scratch_buffer = std.heap.page_allocator.create([tree_mod.max_canvas_wire_values]f64) catch null;
++    }
++    return canvas_wire_scratch_buffer;
++}
+ 
+ /// Copy one Float64Array command batch at the QuickJS boundary. The wire is
+ /// intentionally numeric and bounded: JS performs color parsing and command
+@@ -715,6 +724,7 @@ fn setCanvasCommands(ctx: ?*c.JSContext, _: c.JSValueConst, argc: c_int, argv: [
+         return failFmt(js, "canvas command batch is {d} wire values; the limit (max_canvas_wire_values) is {d}", .{ length, tree_mod.max_canvas_wire_values });
+     }
+     const source: [*]const f64 = @ptrCast(@alignCast(buffer + byte_offset));
++    const canvas_wire_scratch = canvasWireScratch() orelse return fail(js, "canvas command scratch allocation failed");
+     @memcpy(canvas_wire_scratch[0..length], source[0..length]);
+     state(js).tree.setCanvasCommands(id, canvas_wire_scratch[0..length]) catch |err| return switch (err) {
+         error.CanvasCommandLimit => failFmt(js, "canvas command capacity exhausted: max_canvas_commands={d}, asked for at least {d}", .{ tree_mod.max_canvas_commands, tree_mod.max_canvas_commands + 1 }),
+diff --git a/runtime/src/main.zig b/runtime/src/main.zig
+index 132a001..fb2f599 100644
+--- a/runtime/src/main.zig
++++ b/runtime/src/main.zig
+@@ -132,20 +132,20 @@ pub const Msg = union(enum) {
+ const WidgetApp = native_sdk.UiAppWithFeatures(Model, Msg, .{ .runtime_markup = false });
+ const WidgetUi = WidgetApp.Ui;
+ const Effects = WidgetApp.Effects;
+-var rendered_presents: u64 = 0;
+-var first_render_ns: u64 = 0;
+-var logged_backend: bool = false;
+-var logged_present_path: bool = false;
+-var last_backend: native_sdk.platform.GpuSurfaceBackend = .none;
+-var requested_software_backend: bool = false;
+-var diagnostic_runtime: ?*native_sdk.Runtime = null;
+-var wake_runtime = std.atomic.Value(usize).init(0);
+-var dev_reload_pending = std.atomic.Value(bool).init(false);
+-var provider_wake_pending = std.atomic.Value(bool).init(false);
+-var backend_status_io: ?std.Io = null;
+-var backend_status_path: ?[]const u8 = null;
+-var projection_failed_this_view: bool = false;
+-var projection_failure_latched: bool = false;
++threadlocal var rendered_presents: u64 = 0;
++threadlocal var first_render_ns: u64 = 0;
++threadlocal var logged_backend: bool = false;
++threadlocal var logged_present_path: bool = false;
++threadlocal var last_backend: native_sdk.platform.GpuSurfaceBackend = .none;
++threadlocal var requested_software_backend: bool = false;
++threadlocal var diagnostic_runtime: ?*native_sdk.Runtime = null;
++threadlocal var wake_runtime = std.atomic.Value(usize).init(0);
++threadlocal var dev_reload_pending = std.atomic.Value(bool).init(false);
++threadlocal var provider_wake_pending = std.atomic.Value(bool).init(false);
++threadlocal var backend_status_io: ?std.Io = null;
++threadlocal var backend_status_path: ?[]const u8 = null;
++threadlocal var projection_failed_this_view: bool = false;
++threadlocal var projection_failure_latched: bool = false;
+ 
+ fn initEffects(model: *Model, effects: *Effects) void {
+     for (model.images[0..model.image_count]) |image| {
+@@ -1396,6 +1396,12 @@ pub fn main(init: std.process.Init) !void {
+             return;
+         }
+     }
++    // Spike (ADR 0019 open question 1): every listed Widget runs on its own
++    // thread inside this one process, each with its own Native host, window,
++    // message loop and QuickJS runtime.
++    if (builtin.os.tag == .windows and args.len >= 3 and std.mem.eql(u8, args[1], "--multi")) {
++        return multi_widget.run(init, args[2..]);
++    }
+     const capture_state_root = init.environ_map.get("WEAVER_CAPTURE_STATE_ROOT");
+     const dev = capture_state_root == null and args.len == 3 and std.mem.eql(u8, args[1], "--dev");
+     if ((!dev and args.len != 2) or (dev and args.len != 3)) {
+@@ -1407,7 +1413,50 @@ pub fn main(init: std.process.Init) !void {
+             "usage: weaver-widget [--dev] <widget-directory>\n", .{});
+         return error.InvalidArguments;
+     }
+-    const directory = args[if (dev) 2 else 1];
++    return runWidget(init, args[if (dev) 2 else 1], dev);
++}
++
++const multi_widget = struct {
++    const Job = struct { init: std.process.Init, directory: []const u8, failed: bool = false };
++    const STACK_SIZE_PARAM_IS_A_RESERVATION: u32 = 0x00010000;
++    extern "kernel32" fn CreateThread(
++        attributes: ?*anyopaque,
++        stack_size: usize,
++        start: *const fn (?*anyopaque) callconv(.winapi) u32,
++        parameter: ?*anyopaque,
++        flags: u32,
++        thread_id: ?*u32,
++    ) callconv(.winapi) ?std.os.windows.HANDLE;
++    extern "kernel32" fn WaitForSingleObject(handle: std.os.windows.HANDLE, milliseconds: u32) callconv(.winapi) u32;
++
++    fn run(init: std.process.Init, directories: []const []const u8) !void {
++        const jobs = try init.arena.allocator().alloc(Job, directories.len);
++        const threads = try init.arena.allocator().alloc(std.os.windows.HANDLE, directories.len);
++        for (directories, jobs, threads) |directory, *job, *thread| {
++            job.* = .{ .init = init, .directory = directory };
++            // Same 16 MiB reservation the process main thread gets from the
++            // linker, committed on demand like it. std.Thread commits the
++            // whole stack up front, which would inflate private bytes.
++            thread.* = CreateThread(null, 16 * 1024 * 1024, entry, job, STACK_SIZE_PARAM_IS_A_RESERVATION, null) orelse
++                return error.WidgetThreadStartFailed;
++        }
++        for (threads) |thread| _ = WaitForSingleObject(thread, 0xFFFFFFFF);
++        for (jobs) |job| if (job.failed) return error.WidgetThreadFailed;
++    }
++
++    fn entry(parameter: ?*anyopaque) callconv(.winapi) u32 {
++        const job: *Job = @ptrCast(@alignCast(parameter.?));
++        runWidget(job.init, job.directory, false) catch |err| {
++            std.log.err("widget thread for {s} stopped: {s}", .{ job.directory, @errorName(err) });
++            job.failed = true;
++        };
++        return 0;
++    }
++};
++
++fn runWidget(init: std.process.Init, directory: []const u8, dev: bool) !void {
++    const allocator = init.arena.allocator();
++    const capture_state_root = init.environ_map.get("WEAVER_CAPTURE_STATE_ROOT");
+     const loaded = try manifest_mod.load(init.io, allocator, directory);
+     const capture_provider_fixture = if (init.environ_map.get("WEAVER_CAPTURE_PROVIDER_FIXTURE")) |path|
+         try loadCaptureProviderFixture(init.io, allocator, path, loaded.manifest.subscribe, loaded.manifest.capabilities)
+@@ -1513,7 +1562,7 @@ pub fn main(init: std.process.Init) !void {
+ 
+     var tokens = native_sdk.canvas.DesignTokens.theme(.{ .pack = .geist, .color_scheme = .dark });
+     tokens.colors.background = native_sdk.canvas.Color.rgba8(0, 0, 0, 0);
+-    const app_state = try WidgetApp.create(std.heap.page_allocator, .{
++    const app_options: WidgetApp.Options = .{
+         .name = loaded.manifest.name,
+         .scene = scene,
+         .canvas_label = "widget-canvas",
+@@ -1528,7 +1577,27 @@ pub fn main(init: std.process.Init) !void {
+         .on_frame = onFrame,
+         .on_frame_requested = onFrameRequested,
+         .on_window_frame = onWindowFrame,
+-    });
++    };
++    // Spike: WEAVER_SPIKE_LAZY_MODEL=1 builds the Model field by field so the
++    // retained tree's node and canvas arrays stay untouched until used.
++    // WidgetApp.create assigns `.{}`, which copies the whole 4.3 MB default
++    // Model image and makes every page resident.
++    const lazy_model = if (init.environ_map.get("WEAVER_SPIKE_LAZY_MODEL")) |value| std.mem.eql(u8, value, "1") else false;
++    const app_state = if (lazy_model) lazy: {
++        const created = try std.heap.page_allocator.create(WidgetApp);
++        WidgetApp.initInPlace(created, std.heap.page_allocator, app_options);
++        inline for (std.meta.fields(Model)) |field| {
++            if (comptime std.mem.eql(u8, field.name, "tree")) {
++                inline for (std.meta.fields(tree_mod.Tree)) |tree_field| {
++                    if (comptime std.mem.eql(u8, tree_field.name, "nodes") or std.mem.eql(u8, tree_field.name, "canvases")) continue;
++                    @field(created.model.tree, tree_field.name) = tree_field.defaultValue().?;
++                }
++            } else {
++                @field(created.model, field.name) = field.defaultValue().?;
++            }
++        }
++        break :lazy created;
++    } else try WidgetApp.create(std.heap.page_allocator, app_options);
+     defer app_state.destroy();
+     defer app_state.model.tree.deinit();
+     defer deinitImageStates(&app_state.model);
+@@ -1597,6 +1666,14 @@ pub fn main(init: std.process.Init) !void {
+     }
+     if (init.environ_map.get("WEAVER_MEMORY_RECEIPT")) |value| {
+         if (value.len != 0 and !std.mem.eql(u8, value, "0")) {
++            // Spike: field layout of the big per-Widget structs, so resident
++            // page ranges can be attributed to fields.
++            std.log.info("spike layout app_state=0x{x} model_offset={d} tree_offset_in_model={d}", .{ @intFromPtr(app_state), @offsetOf(WidgetApp, "model"), @offsetOf(Model, "tree") });
++            inline for (.{ WidgetApp, Model, tree_mod.Tree }) |T| {
++                inline for (std.meta.fields(T)) |field| {
++                    if (@sizeOf(field.type) >= 16 * 1024) std.log.info("spike layout {s}.{s} offset={d} size={d}", .{ @typeName(T), field.name, @offsetOf(T, field.name), @sizeOf(field.type) });
++                }
++            }
+             const usage = engine.memoryUsage();
+             std.log.info(
+                 "widget memory receipt model_bytes={d} widget_app_bytes={d} tree_bytes={d} node_bytes={d} canvas_state_bytes={d} engine_bytes={d} quickjs_malloc_bytes={d} quickjs_memory_used_bytes={d} quickjs_atoms_bytes={d} quickjs_strings_bytes={d} quickjs_objects_bytes={d} quickjs_properties_bytes={d} quickjs_shapes_bytes={d} quickjs_functions_bytes={d} quickjs_function_code_bytes={d}",
+diff --git a/runtime/src/widget_log.zig b/runtime/src/widget_log.zig
+index 8fc8016..ff625ab 100644
+--- a/runtime/src/widget_log.zig
++++ b/runtime/src/widget_log.zig
+@@ -6,12 +6,12 @@ const platform = @import("platform/root.zig");
+ // 128 maximum-size diagnostics; current + rotated files cost at most 2 MiB on
+ // disk, while resident memory holds only the line being written.
+ const rotate_bytes: u64 = 1024 * 1024;
+-var io: ?std.Io = null;
+-var log_path: []u8 = &.{};
+-var old_log_path: []u8 = &.{};
++threadlocal var io: ?std.Io = null;
++threadlocal var log_path: []u8 = &.{};
++threadlocal var old_log_path: []u8 = &.{};
+ var mutex: std.atomic.Mutex = .unlocked;
+-var write_failed = std.atomic.Value(bool).init(false);
+-var fallback_reported = std.atomic.Value(bool).init(false);
++threadlocal var write_failed = std.atomic.Value(bool).init(false);
++threadlocal var fallback_reported = std.atomic.Value(bool).init(false);
+ 
+ pub fn init(runtime_io: std.Io, path: []const u8) !void {
+     const allocator = std.heap.page_allocator;
