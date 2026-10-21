@@ -115,10 +115,11 @@ pub const Model = struct {
     media_transport_enabled: bool = false,
     geometry: ?*const geometry_mod.Store = null,
     fonts: []const manifest_mod.Font = &.{},
-    /// Last origin we consider settled (launch placement or the last
-    /// persisted drag), in the platform's logical window space. Null
-    /// until the first platform frame report names the launch position.
-    frame_origin: ?[2]f32 = null,
+    /// Last placement we consider settled (launch placement or the last
+    /// persisted drag or resize): the origin in the platform's logical
+    /// window space and the content zoom. Null until the first platform
+    /// frame report names the launch placement.
+    settled_frame: ?geometry_mod.Saved = null,
     pending_frame: ?geometry_mod.Saved = null,
     /// This widget's place in the host: its window and canvas labels, the
     /// `HostMsg.widget` of its messages, and the namespace of its Native
@@ -148,8 +149,15 @@ pub const Model = struct {
 
 var unopened_log: widget_log.Sink = .{};
 
+/// A widget resizes by its edges and corners, and the resize scales it:
+/// the content keeps the manifest `size` as its logical size and renders
+/// at the device scale times the user's zoom (ADR 0023). Windows only for
+/// now — the macOS host has no content zoom yet, and a plain AppKit
+/// resize would reflow fixed-size widget layouts instead of scaling them.
+const resize_scales_widgets = builtin.os.tag == .windows;
+
 /// Where a widget's window opens and how it behaves, from its manifest and
-/// any persisted drag.
+/// any persisted drag or resize.
 const WindowSpec = struct {
     name: []const u8 = "",
     frame: native_sdk.geometry.RectF = native_sdk.geometry.RectF.init(0, 0, 1, 1),
@@ -158,6 +166,9 @@ const WindowSpec = struct {
     backend: native_sdk.app_manifest.GpuSurfaceBackend = .software,
     /// A persisted drag placed the window, not the manifest anchor.
     dragged: bool = false,
+    /// The persisted user resize: `frame` stays the manifest `size` (the
+    /// content's logical size) and the window opens this much larger.
+    zoom: f32 = 1,
     primary_display_anchor: ?native_sdk.PrimaryDisplayAnchor = null,
 };
 
@@ -465,18 +476,18 @@ fn update(model: *Model, msg: Msg, effects: WidgetEffects) void {
             syncTimers(model, effects);
         },
         .frame_moved => |moved| {
-            const known = model.frame_origin orelse {
+            const known = model.settled_frame orelse {
                 // The first platform report names the launch placement
                 // (creation/focus echo). The anchor — or the restored
-                // origin — stays authoritative until the user actually
-                // moves the window.
-                model.frame_origin = .{ moved.x, moved.y };
+                // placement — stays authoritative until the user actually
+                // moves or resizes the window.
+                model.settled_frame = moved;
                 return;
             };
-            if (@abs(known[0] - moved.x) < 0.5 and @abs(known[1] - moved.y) < 0.5) return;
-            model.frame_origin = .{ moved.x, moved.y };
+            if (!placementChanged(known, moved)) return;
+            model.settled_frame = moved;
             model.pending_frame = moved;
-            // OS drags report continuously. Re-starting the same key
+            // OS drags and resizes report continuously. Re-starting the same key
             // REPLACES the pending one-shot, so the disk write lands
             // once, after the gesture settles.
             effects.startTimer(geometry_save_key, 400, .one_shot);
@@ -559,25 +570,57 @@ test "interaction projection retains exact channels and press identity" {
     try std.testing.expectEqual(slider_id, retainedPressNodeId(&tree, slider_target_id).?);
 }
 
-/// A dragged position is user state, not widget source (ADR 0004/0011):
-/// it lands in its own per-widget geometry record, never in the
-/// installed manifest and never in the widget's JS-visible storage doc.
+/// A dragged position or resized zoom is user state, not widget source
+/// (ADR 0004/0011/0023): it lands in its own per-widget geometry record,
+/// never in the installed manifest and never in the widget's JS-visible
+/// storage doc.
 fn persistGeometry(model: *Model) void {
     const pending = model.pending_frame orelse return;
     model.pending_frame = null;
     const store = model.geometry orelse return;
     store.save(pending) catch |err| {
-        std.log.warn("widget could not persist dragged position: {s}", .{@errorName(err)});
+        std.log.warn("widget could not persist its placement: {s}; path={s}", .{ @errorName(err), store.path });
         return;
     };
-    std.log.info("widget position persisted x={d} y={d}", .{ pending.x, pending.y });
+    std.log.info("widget placement persisted x={d} y={d} zoom={d}; path={s}", .{ pending.x, pending.y, pending.zoom, store.path });
 }
 
+/// Half a logical pixel of origin or a thousandth of zoom: below that a
+/// report is the same placement (focus echoes, rounding), not a gesture.
+fn placementChanged(known: geometry_mod.Saved, moved: geometry_mod.Saved) bool {
+    const same_origin = @abs(known.x - moved.x) < 0.5 and @abs(known.y - moved.y) < 0.5;
+    return !same_origin or @abs(known.zoom - moved.zoom) >= 0.001;
+}
+
+test "placement changes on a move or a resize, not on an echo" {
+    const settled: geometry_mod.Saved = .{ .x = 100, .y = 200, .scale = 1.5, .zoom = 1 };
+    try std.testing.expect(!placementChanged(settled, settled));
+    try std.testing.expect(!placementChanged(settled, .{ .x = 100.3, .y = 199.8, .scale = 1.5, .zoom = 1.0004 }));
+    try std.testing.expect(placementChanged(settled, .{ .x = 160, .y = 200, .scale = 1.5, .zoom = 1 }));
+    try std.testing.expect(placementChanged(settled, .{ .x = 100, .y = 200, .scale = 1.5, .zoom = 1.5 }));
+}
+
+test "a window frame report becomes origin, device scale, and zoom" {
+    const zoomed = onWindowFrame(.{ .frame = native_sdk.geometry.RectF.init(640, 120, 300, 290), .scale_factor = 2.25, .content_zoom = 1.5 }).frame_moved;
+    try std.testing.expectEqual(@as(f32, 640), zoomed.x);
+    try std.testing.expectEqual(@as(f32, 120), zoomed.y);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.5), zoomed.scale, 0.0001);
+    try std.testing.expectEqual(@as(f32, 1.5), zoomed.zoom);
+    // A host that reports no zoom (0, or a window that never scales) is zoom 1.
+    const plain = onWindowFrame(.{ .frame = native_sdk.geometry.RectF.init(0, 0, 300, 290), .scale_factor = 1.25, .content_zoom = 0 }).frame_moved;
+    try std.testing.expectEqual(@as(f32, 1), plain.zoom);
+    try std.testing.expectEqual(@as(f32, 1.25), plain.scale);
+}
+
+/// A content-scaling window's reported scale carries the user zoom; the
+/// record keeps the plain device scale beside the zoom.
 fn onWindowFrame(event: native_sdk.runtime.WindowFrameEvent) Msg {
+    const zoom = if (std.math.isFinite(event.content_zoom) and event.content_zoom > 0) event.content_zoom else 1;
     return Msg{ .frame_moved = .{
         .x = event.frame.x,
         .y = event.frame.y,
-        .scale = event.scale_factor,
+        .scale = event.scale_factor / zoom,
+        .zoom = zoom,
     } };
 }
 
@@ -2035,6 +2078,8 @@ fn hostMain(init: std.process.Init, directories: []const []const u8, dev: bool, 
         .click_through = true,
     };
     const primary = if (anchored_host) anchor_window else widgets.items[0].window;
+    const primary_resizable = resize_scales_widgets and !anchored_host;
+    const primary_zoom: ?f32 = if (primary_resizable) primary.zoom else null;
     if (!anchored_host) widget_log.use(widgets.items[0].log);
     const shell_views = [_]native_sdk.ShellView{.{
         .label = main_canvas_label,
@@ -2056,7 +2101,8 @@ fn hostMain(init: std.process.Init, directories: []const []const u8, dev: bool, 
         .height = primary.frame.height,
         .x = primary.frame.x,
         .y = primary.frame.y,
-        .resizable = false,
+        .resizable = primary_resizable,
+        .content_zoom = primary_zoom,
         .restore_state = false,
         .titlebar = .chromeless,
         .transparent = true,
@@ -2137,6 +2183,8 @@ fn hostMain(init: std.process.Init, directories: []const []const u8, dev: bool, 
         .startup_window_layer = primary.layer.startup,
         .startup_click_through = primary.click_through,
         .startup_window_show = if (anchored_host) .hidden else null,
+        .startup_resizable = primary_resizable,
+        .startup_content_zoom = primary_zoom,
         .js_window_api = false,
     }, init) catch |err| {
         std.log.err("widget runtime stopped after platform callback failure: {s}", .{@errorName(err)});
@@ -2412,10 +2460,11 @@ fn loadWidget(environment: HostEnvironment, directory: []const u8, slot: u16, ch
     const bundle_stat = try std.Io.Dir.cwd().statFile(init.io, bundle_path, .{});
     const geometry_store = try allocator.create(geometry_mod.Store);
     geometry_store.* = try geometry_mod.Store.init(init.io, allocator, environment.data_root, loaded.manifest.name);
-    // A dragged position outranks the manifest anchor, but only while it
-    // still lands on an attached display; a stale record (monitor
-    // unplugged) falls back to the anchor. macOS validates in AppKit at
-    // creation (constrainFrame), so only Windows pre-checks here.
+    // A dragged position (and resized zoom) outranks the manifest anchor,
+    // but only while it still lands on an attached display; a stale record
+    // (monitor unplugged) falls back to the anchor at zoom 1. macOS
+    // validates in AppKit at creation (constrainFrame), so only Windows
+    // pre-checks here.
     const loaded_geometry = geometry_store.load(allocator) catch |err| geometry: {
         std.log.warn("widget geometry ignored: {s}; path={s}", .{ @errorName(err), geometry_store.path });
         break :geometry null;
@@ -2430,7 +2479,7 @@ fn loadWidget(environment: HostEnvironment, directory: []const u8, slot: u16, ch
     } else null;
     var frame = manifest_mod.desktopFrame(loaded.manifest);
     if (dragged) |saved| {
-        std.log.info("widget using persisted dragged position x={d} y={d}; manifest anchor is overridden until the geometry record is removed", .{ saved.x, saved.y });
+        std.log.info("widget using persisted placement x={d} y={d} zoom={d}; manifest anchor and size are overridden until the geometry record is removed: path={s}", .{ saved.x, saved.y, saved.zoom, geometry_store.path });
         frame.x = saved.x;
         frame.y = saved.y;
         // The Windows host reads a (0,0) origin as "let the system
@@ -2444,6 +2493,7 @@ fn loadWidget(environment: HostEnvironment, directory: []const u8, slot: u16, ch
         .click_through = loaded.manifest.clickThrough,
         .backend = declaredGpuBackend(loaded.manifest.renderBackend, environment.force_software),
         .dragged = dragged != null,
+        .zoom = if (dragged) |saved| saved.zoom else 1,
         .primary_display_anchor = manifest_mod.primaryDisplayAnchor(loaded.manifest),
     };
     const image_resolver = try allocator.create(image_paths.Resolver);
@@ -2460,7 +2510,7 @@ fn loadWidget(environment: HostEnvironment, directory: []const u8, slot: u16, ch
 
     model.geometry = geometry_store;
     model.fonts = loaded.manifest.fonts;
-    if (dragged) |saved| model.frame_origin = .{ saved.x, saved.y };
+    if (dragged) |saved| model.settled_frame = saved;
     if (capture_provider_fixture) |fixture| {
         const capture_command_fixture = try allocator.create(provider_mod.CaptureCommandFixture);
         capture_command_fixture.* = .{ .commands = fixture.commands };
@@ -2839,7 +2889,8 @@ fn hostWindows(host: *const Host, scratch: *HostApp.WindowsScratch) []const Host
             .height = model.window.frame.height,
             .x = model.window.frame.x,
             .y = model.window.frame.y,
-            .resizable = false,
+            .resizable = resize_scales_widgets,
+            .content_zoom = if (resize_scales_widgets) model.window.zoom else null,
             .titlebar = .chromeless,
             .transparent = true,
             .layer = model.window.layer.shell,
@@ -3140,8 +3191,8 @@ fn draggedOriginVisible(saved: geometry_mod.Saved, size: [2]f32) bool {
     const bounds = windows_monitor.virtualScreen() orelse return true;
     const left = saved.x * saved.scale;
     const top = saved.y * saved.scale;
-    const right = left + size[0] * saved.scale;
-    const bottom = top + size[1] * saved.scale;
+    const right = left + size[0] * saved.zoom * saved.scale;
+    const bottom = top + size[1] * saved.zoom * saved.scale;
     const overlap_x = @min(right, @as(f32, @floatFromInt(bounds.right_px))) - @max(left, @as(f32, @floatFromInt(bounds.left_px)));
     const overlap_y = @min(bottom, @as(f32, @floatFromInt(bounds.bottom_px))) - @max(top, @as(f32, @floatFromInt(bounds.top_px)));
     return overlap_x >= 24 and overlap_y >= 24;

@@ -1,0 +1,1 @@
+improvement: **The shared renderer names a refused frame**: when the Windows renderer cannot present a widget's frame it now logs `present-failed` with the frame's scale, extents, packet size and retained-layer parameters, so a widget that goes blank on the GPU path leaves a line saying which bound it crossed.

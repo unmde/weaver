@@ -1,22 +1,26 @@
 const std = @import("std");
 const storage = @import("storage.zig");
 
-/// A user-dragged window origin. This is user state, not widget source:
-/// the manifest anchor stays the authoritative placement until the first
-/// real drag writes a record here, and deleting the record restores the
-/// anchor. Coordinates are the platform's logical (DIP) top-level window
-/// space — exactly what the Native SDK's `window_frame_changed` reports
-/// and what window creation consumes — plus the scale the window had
-/// when it was dragged, so launch-time validation can reason in physical
-/// pixels.
+/// A user-dragged window origin and user-resized zoom. This is user
+/// state, not widget source: the manifest anchor and `size` stay the
+/// authoritative placement until the first real drag or resize writes a
+/// record here, and deleting the record restores both. Coordinates are
+/// the platform's logical (DIP) top-level window space — exactly what the
+/// Native SDK's `window_frame_changed` reports and what window creation
+/// consumes — plus the device scale the window had when it was placed,
+/// so launch-time validation can reason in physical pixels. `zoom`
+/// multiplies the manifest `size` (ADR 0023); records written before
+/// resizing existed carry none and read as 1.
 pub const Saved = struct {
     x: f32,
     y: f32,
     scale: f32,
+    zoom: f32 = 1,
 };
 
-// Geometry receipt (2026-07-29): the complete encoded record is bounded by
-// the 128-byte formatter below (the round-trip fixture is 33 bytes). A 512-byte
+// Geometry receipt (2026-07-29, zoom added 2026-10-21): the complete encoded
+// record is bounded by the 128-byte formatter below (the round-trip fixture is
+// 45 bytes). A 512-byte
 // read cap leaves 4x format/whitespace headroom. Reads allocate actual length,
 // so unused allowance costs no memory.
 const max_file_bytes: usize = 512;
@@ -50,8 +54,8 @@ pub const Store = struct {
     /// Write beside the destination, then rename over it — a killed
     /// widget process never leaves a truncated record behind.
     pub fn save(self: *const Store, value: Saved) !void {
-        // Three finite f32 values plus JSON punctuation fit in <128 bytes by
-        // construction; the measured round-trip record is 33. Undefined stack
+        // Four finite f32 values plus JSON punctuation fit in <128 bytes by
+        // construction; the measured round-trip record is 45. Undefined stack
         // storage costs 128 bytes only while saving.
         var buffer: [128]u8 = undefined;
         const bytes = try format(&buffer, value);
@@ -64,40 +68,74 @@ pub const Store = struct {
 
 pub fn format(buffer: []u8, value: Saved) ![]const u8 {
     var writer = std.Io.Writer.fixed(buffer);
-    try writer.print("{{\"x\":{d},\"y\":{d},\"scale\":{d}}}", .{ value.x, value.y, value.scale });
+    try writer.print("{{\"x\":{d},\"y\":{d},\"scale\":{d},\"zoom\":{d}}}", .{ value.x, value.y, value.scale, value.zoom });
     return writer.buffered();
 }
 
 pub fn parse(bytes: []const u8) ?Saved {
-    const Record = struct { x: f64, y: f64, scale: f64 };
+    const Record = struct { x: f64, y: f64, scale: f64, zoom: f64 = 1 };
     // The parser arena is 2x max_file_bytes, leaving one input-sized copy of
-    // headroom for this flat three-number object. It costs 1 KiB on load only.
+    // headroom for this flat four-number object. It costs 1 KiB on load only.
     var parse_buffer: [1024]u8 = undefined;
     var fixed = std.heap.FixedBufferAllocator.init(&parse_buffer);
     const record = std.json.parseFromSliceLeaky(Record, fixed.allocator(), bytes, .{}) catch return null;
     if (!std.math.isFinite(record.x) or !std.math.isFinite(record.y) or
-        !std.math.isFinite(record.scale) or record.scale <= 0) return null;
+        !std.math.isFinite(record.scale) or record.scale <= 0 or
+        !std.math.isFinite(record.zoom) or record.zoom <= 0) return null;
     return .{
         .x = @floatCast(record.x),
         .y = @floatCast(record.y),
         .scale = @floatCast(record.scale),
+        .zoom = @floatCast(record.zoom),
     };
 }
 
 test "geometry record round-trips through its wire format" {
     var buffer: [128]u8 = undefined;
-    const bytes = try format(&buffer, .{ .x = -1890.5, .y = 42, .scale = 1.25 });
+    const bytes = try format(&buffer, .{ .x = -1890.5, .y = 42, .scale = 1.25, .zoom = 1.75 });
+    try std.testing.expectEqual(@as(usize, 45), bytes.len);
     const parsed = parse(bytes).?;
     try std.testing.expectApproxEqAbs(@as(f32, -1890.5), parsed.x, 0.001);
     try std.testing.expectApproxEqAbs(@as(f32, 42), parsed.y, 0.001);
     try std.testing.expectApproxEqAbs(@as(f32, 1.25), parsed.scale, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.75), parsed.zoom, 0.001);
+}
+
+test "geometry records from before resizing read at zoom 1" {
+    const parsed = parse("{\"x\":10,\"y\":20,\"scale\":1.5}").?;
+    try std.testing.expectEqual(@as(f32, 1), parsed.zoom);
 }
 
 test "geometry parse rejects malformed and non-finite records" {
     try std.testing.expect(parse("") == null);
     try std.testing.expect(parse("{\"x\":1}") == null);
     try std.testing.expect(parse("{\"x\":1,\"y\":2,\"scale\":0}") == null);
+    try std.testing.expect(parse("{\"x\":1,\"y\":2,\"scale\":1,\"zoom\":0}") == null);
+    try std.testing.expect(parse("{\"x\":1,\"y\":2,\"scale\":1,\"zoom\":-2}") == null);
     try std.testing.expect(parse("not json") == null);
+}
+
+test "geometry store saves and reloads a resized placement" {
+    const directory = ".zig-cache/weaver-geometry-roundtrip-test";
+    const path = directory ++ "/record.json";
+    var cwd = std.Io.Dir.cwd();
+    cwd.deleteFile(std.testing.io, path) catch {};
+    defer cwd.deleteFile(std.testing.io, path) catch {};
+    const store: Store = .{
+        .io = std.testing.io,
+        .directory = directory,
+        .path = path,
+        .temporary_path = path ++ ".tmp",
+    };
+    try std.testing.expectEqual(@as(?Saved, null), try store.load(std.testing.allocator));
+    try store.save(.{ .x = 600, .y = 390, .scale = 1, .zoom = 1.6266667 });
+    // A second gesture replaces the first record (atomic rename over it).
+    try store.save(.{ .x = 400, .y = 340, .scale = 1.25, .zoom = 0.93666667 });
+    const loaded = (try store.load(std.testing.allocator)).?;
+    try std.testing.expectEqual(@as(f32, 400), loaded.x);
+    try std.testing.expectEqual(@as(f32, 340), loaded.y);
+    try std.testing.expectEqual(@as(f32, 1.25), loaded.scale);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.93666667), loaded.zoom, 0.000001);
 }
 
 test "geometry store surfaces a corrupt persisted record" {

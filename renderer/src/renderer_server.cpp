@@ -31,6 +31,32 @@ static void logEvent(const char *kind, DWORD widget_pid, uint64_t frames, uint64
     CloseHandle(file);
 }
 
+// A refused frame names everything the presenter checks, so the log alone
+// says which bound it crossed (the widget only sees a non-OK status).
+static void logPresentFailure(DWORD widget_pid, const WeaverRendererFrame &frame, size_t packet_len) {
+    if (rendererLogPath[0] == L'\0') return;
+    char line[512] = {};
+    const int length = snprintf(line, sizeof(line),
+        "%llu present-failed renderer=%lu widget=%lu scale=%.6f logical_surface_dip=%.3fx%.3f "
+        "texture_px=%ux%u generation=%llu packet_bytes=%zu retained_generation=%llu "
+        "retained_px=%ux%u retained_dirty_rects=%u retained_above_packet=%u\r\n",
+        (unsigned long long)GetTickCount64(), (unsigned long)GetCurrentProcessId(),
+        (unsigned long)widget_pid, frame.device_scale, frame.logical_surface_width_dip,
+        frame.logical_surface_height_dip, frame.source_texture_width_px,
+        frame.source_texture_height_px, (unsigned long long)frame.geometry_generation,
+        packet_len, (unsigned long long)frame.retained_generation, frame.retained_width,
+        frame.retained_height, (unsigned)frame.retained_dirty_rect_count,
+        (unsigned)frame.retained_above_packet);
+    if (length <= 0) return;
+    std::lock_guard<std::mutex> lock(rendererLogMutex);
+    HANDLE file = CreateFileW(rendererLogPath, FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE,
+        nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE) return;
+    DWORD written = 0;
+    WriteFile(file, line, (DWORD)length, &written, nullptr);
+    CloseHandle(file);
+}
+
 static void logDpiEvent(const WeaverRendererFrame &frame, const char *action) {
     if (dpiLogPath[0] == L'\0') return;
     char line[640] = {};
@@ -182,6 +208,8 @@ static void serveWidget(HANDLE pipe, NativeSdkD3DSharedRenderer *renderer) {
                 logEvent("fps", widget_pid, 300, now - interval_start_ms);
                 interval_start_ms = now;
             }
+        } else {
+            logPresentFailure(widget_pid, frame, packet.size());
         }
         if (!writeExact(pipe, &reply, sizeof(reply)) || reply.status == 0) break;
     }

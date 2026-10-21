@@ -1,0 +1,1 @@
+feature: **Resize widgets by their edges (Windows)**: every widget now resizes by its edges and corners; the resize scales the whole widget crisp (aspect locked, 0.5x-4x) while layout keeps seeing `config.size`, and the zoom persists per widget beside the dragged position (ADR 0023).

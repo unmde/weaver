@@ -192,6 +192,15 @@ The widget window is exactly `config.size`. Outset shadows do not enlarge it.
 exact transparent room required on every side. Put the shadow on an inset
 surface inside that room, or use `shadow-inner`/`shadow-none`.
 
+The user can resize a widget by its edges and corners (Windows today). A
+resize is a zoom, not more room: layout still sees exactly `config.size`,
+`<canvas>` `ctx.width`/`ctx.height` do not change, and the content renders
+crisp at the device scale times the zoom (0.5x-4x, aspect locked). Design for
+`config.size` only. The zoom is user state in
+`%LOCALAPPDATA%\weaver\geometry\<hash>.json` next to the dragged position;
+the widget's code cannot read it, and deleting the file restores the authored
+size and anchor (ADR 0023).
+
 Named text sizes use Tailwind's paired size/line-height defaults:
 `xs` 12/16, `sm` 14/20, `base` 16/24, `lg` 18/28, `xl` 20/28,
 `2xl` 24/32, `3xl` 30/36, and `4xl` 36/40 (logical pixels). An explicit

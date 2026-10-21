@@ -1,0 +1,1 @@
+fix: **Dragged positions persist on Windows**: the Windows host now reports a window's real origin after a move, so a dragged widget reopens where it was left instead of at its manifest anchor; until now the geometry record was never written on Windows.
